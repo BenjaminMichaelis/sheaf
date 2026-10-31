@@ -1,0 +1,72 @@
+{
+  "schema": "squad-agent-provenance/v1",
+  "schema_version": 1,
+  "revision": 2,
+  "generated_at": "2026-10-30T23:26:27-07:00",
+  "agents": {
+    "architect": {
+      "persistent_name": "Architect",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "backend": {
+      "persistent_name": "Backend",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "frontend": {
+      "persistent_name": "Frontend",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "ai-integrations": {
+      "persistent_name": "AI-Integrations",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "tester": {
+      "persistent_name": "Tester",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "scribe": {
+      "persistent_name": "Scribe",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "ralph": {
+      "persistent_name": "Ralph",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "rai": {
+      "persistent_name": "Rai",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "fact-checker": {
+      "persistent_name": "Fact Checker",
+      "universe": "descriptive",
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "legacy_named": false,
+      "status": "active"
+    }
+  },
+  "transaction_id": "aa9184e9-576c-411f-a444-80eca3f2193b"
+}
