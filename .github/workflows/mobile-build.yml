@@ -40,7 +40,7 @@ jobs:
         run: dotnet build Sheaf.Mobile.Android/Sheaf.Mobile.Android.csproj --configuration Release
 
   ios:
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
 
