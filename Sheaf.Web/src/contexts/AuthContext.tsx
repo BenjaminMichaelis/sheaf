@@ -29,7 +29,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    refreshUser()
+    let cancelled = false
+    apiClient
+      .get<UserInfo>('/api/auth/user')
+      .then(userData => {
+        if (!cancelled) setUser(userData)
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const login = async (credentials: LoginRequest) => {
