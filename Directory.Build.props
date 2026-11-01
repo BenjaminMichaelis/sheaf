@@ -15,6 +15,7 @@ See: https://learn.microsoft.com/visualstudio/msbuild/customize-your-build
     <AnalysisMode>Recommended</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- 
     If you you like to see source generated files saved to disk you can enable the following:

@@ -5,7 +5,7 @@ namespace Sheaf.Mobile.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
-    public string Greeting => "Welcome to Avalonia!";
+    public string Greeting { get; } = "Welcome to Avalonia!";
 
     [ObservableProperty]
     private int _counter;
