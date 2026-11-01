@@ -19,7 +19,7 @@
     "notistack": "^3.0.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^7.18.0",
+    "react-router-dom": "^7.18.5",
     "workbox-core": "^7.4.1",
     "workbox-expiration": "^7.4.1",
     "workbox-precaching": "^7.4.1",
