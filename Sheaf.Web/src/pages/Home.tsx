@@ -1,14 +1,14 @@
-import { Box } from '@mui/material'
-import JoinRoomForm from '@/components/JoinRoomForm'
+import { Box, Typography } from '@mui/material'
 
 export default function Home() {
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto', mt: 4 }}>
-      <JoinRoomForm 
-        title="Join a Q&A Room"
-        description="Enter a room name to join or create a new Q&A session."
-        autoFocus
-      />
+      <Typography variant="h4" component="h1" gutterBottom>
+        Sheaf
+      </Typography>
+      <Typography color="text.secondary">
+        Leader-first relational capture for churches.
+      </Typography>
     </Box>
   )
 }

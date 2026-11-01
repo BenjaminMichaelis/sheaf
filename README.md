@@ -7,8 +7,10 @@ Prerequisites: .NET SDK (see `global.json`), Docker, and the [Aspire CLI](https:
 
 ```pwsh
 aspire secret set Parameters:auth-signing-key "<at least 32 characters>"
-aspire run          # API, SQL Server and migrations; API at http://localhost:5285
+aspire run          # API, SQL Server, migrations and the React frontend; API at http://localhost:5285
 ```
+
+The React + Vite PWA lives in `Sheaf.Web` (requires Node and pnpm; Aspire runs `pnpm install` and `pnpm dev`, proxying `/api` to the backend).
 
 Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --project <test csproj>`.
 

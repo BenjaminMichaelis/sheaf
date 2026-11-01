@@ -19,7 +19,7 @@ export default function Login() {
     try {
       await login({ email, password })
       enqueueSnackbar('Login successful', { variant: 'success' })
-      navigate('/my-rooms')
+      navigate('/')
     } catch (error) {
       enqueueSnackbar(error instanceof Error ? error.message : 'Login failed', { variant: 'error' })
     } finally {

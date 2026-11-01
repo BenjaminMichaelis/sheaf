@@ -26,7 +26,7 @@ export default function Register() {
     try {
       await register({ email, password, confirmPassword })
       enqueueSnackbar('Registration successful', { variant: 'success' })
-      navigate('/my-rooms')
+      navigate('/')
     } catch (error) {
       enqueueSnackbar(error instanceof Error ? error.message : 'Registration failed', { variant: 'error' })
     } finally {

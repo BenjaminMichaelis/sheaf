@@ -25,7 +25,7 @@ export default function Layout() {
             sx={{ flexGrow: 1, cursor: 'pointer' }}
             onClick={() => navigate('/')}
           >
-            Q&A Rooms
+            Sheaf
           </Typography>
 
           <IconButton 
@@ -39,9 +39,6 @@ export default function Layout() {
 
           {user?.isAuthenticated ? (
             <>
-              <Button color="inherit" onClick={() => navigate('/my-rooms')}>
-                My Rooms
-              </Button>
               <Button color="inherit" onClick={handleLogout}>
                 Logout
               </Button>

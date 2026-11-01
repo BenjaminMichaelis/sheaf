@@ -116,5 +116,14 @@ if (sql is not null)
 
 backend.WaitForCompletion(backendMigrations);
 
+#pragma warning disable ASPIREBROWSERLOGS001
+builder.AddJavaScriptApp("Sheaf-frontend", "../Sheaf.Web", "dev")
+    .WithPnpm(install: true)
+    .WithHttpEndpoint(env: "PORT")
+    .WithExternalHttpEndpoints()
+    .WithDependency(backend)
+    .WithEnvironment("APP_BACKEND_HTTP", backend.GetEndpoint("http"));
+#pragma warning restore ASPIREBROWSERLOGS001
+
 
 builder.Build().Run();

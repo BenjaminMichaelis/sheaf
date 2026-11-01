@@ -35,5 +35,6 @@
   <Project Path="Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj" />
   <Project Path="Sheaf.Mobile/Sheaf.Mobile.csproj" />
   <Project Path="Sheaf.ServiceDefaults/Sheaf.ServiceDefaults.csproj" />
+  <Project Path="Sheaf.Web/Sheaf.Web.csproj" />
   <Project Path="Sheaf/Sheaf.csproj" />
 </Solution>

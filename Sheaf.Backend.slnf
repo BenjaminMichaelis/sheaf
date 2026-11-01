@@ -9,6 +9,7 @@
       "Sheaf.Core\\Sheaf.Core.csproj",
       "Sheaf.Data\\Sheaf.Data.csproj",
       "Sheaf.ServiceDefaults\\Sheaf.ServiceDefaults.csproj",
+      "Sheaf.Web\\Sheaf.Web.csproj",
       "Sheaf\\Sheaf.csproj"
     ]
   }
