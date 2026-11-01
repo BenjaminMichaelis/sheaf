@@ -1,0 +1,24 @@
+# EF migrations are generated artifacts; keep analyzer/style tooling from rewriting them.
+[*.cs]
+generated_code = true
+
+# Keep EF migration files in their generated block-scoped style.
+csharp_style_namespace_declarations = block_scoped:silent
+dotnet_diagnostic.IDE0161.severity = none
+
+# CS1591: Missing XML comment for publicly visible type or member
+dotnet_diagnostic.CS1591.severity = none
+
+# Default severity for all analyzer diagnostics
+dotnet_analyzer_diagnostic.severity = none
+# Default severity for analyzer diagnostics with category 'Style'
+dotnet_analyzer_diagnostic.category-Style.severity = none
+dotnet_diagnostic.severity = none
+
+dotnet_diagnostic.IDE0063.severity = silent
+dotnet_diagnostic.IDE0005.severity = none
+dotnet_diagnostic.CS8019.severity = none
+dotnet_diagnostic.CA1711.severity = none
+
+# CA1861: Avoid constant arrays as arguments
+dotnet_diagnostic.CA1861.severity = none

@@ -1,0 +1,47 @@
+## .dockerignore - keep the build context lean
+## Build context is the solution root (templates/Aspire/Sheaf/)
+
+# Build outputs
+**/bin/
+**/obj/
+
+# Test artifacts
+**/TestResults/
+**/*.trx
+**/coverage/
+
+# IDE and tooling
+.vs/
+.vscode/
+.idea/
+**/*.user
+**/*.suo
+**/*.userprefs
+**/*.DotSettings.user
+
+# Git
+.git/
+.gitattributes
+.gitignore
+.buildkit-cache/
+
+# Docs and CI (not needed in the image)
+.github/
+Infra/
+**/*.md
+!Sheaf/appsettings*.json
+
+# Secrets and local config (NEVER bake into image)
+**/secrets.json
+**/*.pfx
+**/*.pem
+**/*.key
+
+# Docker itself
+**/Dockerfile*
+**/.dockerignore
+
+# Test projects (not deployed)
+Sheaf.Core.Tests/
+Sheaf.Api.Tests/
+Sheaf.AppHost.Tests/

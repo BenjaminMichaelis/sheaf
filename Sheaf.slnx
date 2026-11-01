@@ -1,0 +1,39 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".config/dotnet-tools.json" />
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Build.targets" />
+    <File Path="Directory.Packages.props" />
+    <File Path="exclusions.dic" />
+    <File Path="global.json" />
+    <File Path="NuGet.config" />
+    <File Path="README.md" />
+    <File Path="Settings.XamlStyler" />
+  </Folder>
+  <Folder Name="/Solution Items/.config/">
+    <File Path=".config/dotnet-tools.json" />
+  </Folder>
+  <Folder Name="/Solution Items/.github/" />
+  <Folder Name="/Solution Items/.github/workflows/">
+    <File Path=".github/workflows/build-and-deploy.yml" />
+    <File Path=".github/workflows/deploy-infrastructure.yml" />
+  </Folder>
+  <Project Path="Sheaf.AppHost/Sheaf.AppHost.csproj" />
+  <Project Path="Sheaf.AppHost.Tests/Sheaf.AppHost.Tests.csproj" />
+  <Project Path="Sheaf.Api.Tests/Sheaf.Api.Tests.csproj" />
+  <Project Path="Sheaf.Core.Tests/Sheaf.Core.Tests.csproj" />
+  <Project Path="Sheaf.Core/Sheaf.Core.csproj" />
+  <Project Path="Sheaf.Data/Sheaf.Data.csproj" />
+  <Project Path="Sheaf.Mobile.Android/Sheaf.Mobile.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="Sheaf.Mobile.Browser/Sheaf.Mobile.Browser.csproj" />
+  <Project Path="Sheaf.Mobile.Desktop/Sheaf.Mobile.Desktop.csproj" />
+  <Project Path="Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj" />
+  <Project Path="Sheaf.Mobile/Sheaf.Mobile.csproj" />
+  <Project Path="Sheaf.ServiceDefaults/Sheaf.ServiceDefaults.csproj" />
+  <Project Path="Sheaf/Sheaf.csproj" />
+</Solution>

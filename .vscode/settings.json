@@ -1,3 +1,6 @@
 {
-  "chat.newSession.defaultMode": "Squad"
+  "chat.newSession.defaultMode": "Squad",
+  "cSpell.words": [
+    "ASPIREINTERACTION"
+  ]
 }

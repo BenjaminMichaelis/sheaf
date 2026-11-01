@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "Sheaf.slnx",
+    "projects": [
+      "Sheaf.Api.Tests\\Sheaf.Api.Tests.csproj",
+      "Sheaf.AppHost.Tests\\Sheaf.AppHost.Tests.csproj",
+      "Sheaf.AppHost\\Sheaf.AppHost.csproj",
+      "Sheaf.Core.Tests\\Sheaf.Core.Tests.csproj",
+      "Sheaf.Core\\Sheaf.Core.csproj",
+      "Sheaf.Data\\Sheaf.Data.csproj",
+      "Sheaf.ServiceDefaults\\Sheaf.ServiceDefaults.csproj",
+      "Sheaf\\Sheaf.csproj"
+    ]
+  }
+}

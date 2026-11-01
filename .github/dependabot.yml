@@ -1,0 +1,47 @@
+version: 2
+
+multi-ecosystem-groups:
+  dotnet-version:
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies"]
+
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      entity-framework-stack:
+        patterns:
+          - "Microsoft.EntityFrameworkCore.*"
+          - "dotnet-ef"
+
+  - package-ecosystem: "docker"
+    directory: "/Sheaf"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dotnet-version"
+
+  - package-ecosystem: "dotnet-sdk"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dotnet-version"
+
+  - package-ecosystem: "terraform"
+    directory: "/Infra"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
