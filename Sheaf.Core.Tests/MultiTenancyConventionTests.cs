@@ -52,7 +52,6 @@ public class MultiTenancyConventionTests
     { ChurchId = churchId };
 
     // ITenanted is the opt-in: shared entities (Church, LeaderToken, DataProtectionKeys) must stay unfiltered.
-    // Forgetting ITenanted on private data is guarded by the architecture test in issue #15.
     [Test]
     public async Task EntitiesNotMarkedTenantedAreNotFiltered()
     {
