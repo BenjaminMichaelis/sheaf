@@ -53,9 +53,9 @@ public class MultiTenancyConventionTests
 
     // ITenanted is the opt-in: shared entities (Church, LeaderToken, DataProtectionKeys) must stay unfiltered.
     [Test]
-    public async Task SaveChangesAsync_UntenantedEntityAcrossChurches_IsNotFiltered()
+    public async Task Query_UntenantedEntityAddedByOtherChurch_IsVisible()
     {
-        string database = nameof(SaveChangesAsync_UntenantedEntityAcrossChurches_IsNotFiltered);
+        string database = nameof(Query_UntenantedEntityAddedByOtherChurch_IsVisible);
         Guid a = Guid.NewGuid(), b = Guid.NewGuid();
         using (TestContext asA = Create(database, a))
         {

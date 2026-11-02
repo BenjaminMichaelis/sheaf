@@ -31,7 +31,7 @@ public class AppHostTests(AppHostFixture fixture)
     /// This validates that resource orchestration and connection string injection are configured correctly.
     /// </summary>
     [Test]
-    public async Task DatabaseResource_Startup_HasConnectionStringConfigured()
+    public async Task GetConnectionStringAsync_DatabaseResource_ReturnsNonEmptyValue()
     {
         var connectionString = await fixture.App.GetConnectionStringAsync("Sheaf-db");
         await Assert.That(connectionString).IsNotNull().And.IsNotEmpty();

@@ -35,7 +35,7 @@ public class TenancyTests
     }
 
     [Test]
-    public async Task Query_WithoutTenant_Throws()
+    public async Task ToListAsync_WithoutTenant_Throws()
     {
         using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
