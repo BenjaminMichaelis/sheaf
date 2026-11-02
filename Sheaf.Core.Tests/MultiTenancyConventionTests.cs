@@ -25,6 +25,11 @@ public class MultiTenancyConventionTests
         public Parent? Parent { get; set; }
     }
 
+    private sealed class Keyless : ITenanted
+    {
+        public Guid ChurchId { get; set; }
+    }
+
     private sealed class Untenanted
     {
         public int Id { get; set; }
@@ -38,6 +43,12 @@ public class MultiTenancyConventionTests
         public DbSet<Untenanted> Untenanteds => Set<Untenanted>();
     }
 
+    private sealed class KeylessContext(DbContextOptions<KeylessContext> options) : DbContext(options), ITenantContext
+    {
+        public Guid ChurchId { get; set; }
+        public DbSet<Keyless> Keylesses => Set<Keyless>();
+    }
+
     private static TestContext Create(string database, Guid churchId) => new(
         new DbContextOptionsBuilder<TestContext>()
             .UseInMemoryDatabase(database)
@@ -45,19 +56,25 @@ public class MultiTenancyConventionTests
             .Options)
     { ChurchId = churchId };
 
+    private static IEntityType EntityOf(DbContext db, Type type) =>
+        db.Model.FindEntityType(type) ?? throw new InvalidOperationException($"{type.Name} is not in the model.");
+
+    private static IKey PrimaryKeyOf(DbContext db, Type type) =>
+        EntityOf(db, type).FindPrimaryKey() ?? throw new InvalidOperationException($"{type.Name} has no primary key.");
+
     [Test]
     public async Task PrimaryKeyIsComposite_ChurchIdThenId()
     {
         using TestContext db = Create(nameof(PrimaryKeyIsComposite_ChurchIdThenId), Guid.NewGuid());
         foreach (Type type in new[] { typeof(Parent), typeof(Child) })
         {
-            IKey key = db.Model.FindEntityType(type)!.FindPrimaryKey()!;
+            IKey key = PrimaryKeyOf(db, type);
             await Assert.That(key.Properties.Select(p => p.Name).ToArray())
                 .IsEquivalentTo(PkNames);
             await Assert.That(key.Properties[0].Name).IsEqualTo("ChurchId");
         }
 
-        await Assert.That(db.Model.FindEntityType(typeof(Untenanted))!.FindPrimaryKey()!.Properties.Count).IsEqualTo(1);
+        await Assert.That(PrimaryKeyOf(db, typeof(Untenanted)).Properties.Count).IsEqualTo(1);
     }
 
     [Test]
@@ -66,19 +83,19 @@ public class MultiTenancyConventionTests
         using TestContext db = Create(nameof(NamedTenancyFilterIsPresentOnTenantedEntitiesOnly), Guid.NewGuid());
         foreach (Type type in new[] { typeof(Parent), typeof(Child) })
         {
-            IEntityType entityType = db.Model.FindEntityType(type)!;
-            await Assert.That(entityType.GetDeclaredQueryFilters().Select(f => f.Key!).ToArray())
+            IEntityType entityType = EntityOf(db, type);
+            await Assert.That(entityType.GetDeclaredQueryFilters().Select(f => f.Key).OfType<string>().ToArray())
                 .IsEquivalentTo(FilterNames);
         }
 
-        await Assert.That(db.Model.FindEntityType(typeof(Untenanted))!.GetDeclaredQueryFilters().Count).IsEqualTo(0);
+        await Assert.That(EntityOf(db, typeof(Untenanted)).GetDeclaredQueryFilters().Count).IsEqualTo(0);
     }
 
     [Test]
     public async Task ForeignKeyToTenantedPrincipalHasArityTwoOnChurchIdAndFk()
     {
         using TestContext db = Create(nameof(ForeignKeyToTenantedPrincipalHasArityTwoOnChurchIdAndFk), Guid.NewGuid());
-        IForeignKey fk = db.Model.FindEntityType(typeof(Child))!.GetForeignKeys().Single();
+        IForeignKey fk = EntityOf(db, typeof(Child)).GetForeignKeys().Single();
 
         await Assert.That(fk.Properties.Select(p => p.Name).ToArray()).IsEquivalentTo(FkNames);
         await Assert.That(fk.Properties[0].Name).IsEqualTo("ChurchId");
@@ -102,8 +119,22 @@ public class MultiTenancyConventionTests
         using TestContext asA = Create(database, a);
         using TestContext asB = Create(database, b);
         await Assert.That(await asA.Parents.CountAsync()).IsEqualTo(1);
-        await Assert.That(await asA.Parents.SingleAsync()).Satisfies(p => p!.ChurchId, c => c.IsEqualTo(a));
-        await Assert.That(await asB.Parents.SingleAsync()).Satisfies(p => p!.ChurchId, c => c.IsEqualTo(b));
+        Parent visibleToA = await asA.Parents.SingleAsync();
+        Parent visibleToB = await asB.Parents.SingleAsync();
+        await Assert.That(visibleToA.ChurchId).IsEqualTo(a);
+        await Assert.That(visibleToB.ChurchId).IsEqualTo(b);
         await Assert.That(await asA.Parents.IgnoreQueryFilters().CountAsync()).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task TenantedEntityThatCannotBeProtectedFailsModelBuilding()
+    {
+        using KeylessContext db = new(
+            new DbContextOptionsBuilder<KeylessContext>()
+                .UseInMemoryDatabase(nameof(TenantedEntityThatCannotBeProtectedFailsModelBuilding))
+                .UseMultiTenancy()
+                .Options);
+
+        await Assert.That(() => db.Model).Throws<InvalidOperationException>().WithMessageContaining("Tenancy cannot be enforced for").And.WithMessageContaining("Keyless");
     }
 }

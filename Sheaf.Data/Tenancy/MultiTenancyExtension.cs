@@ -8,7 +8,7 @@ namespace Sheaf.Data.Tenancy;
 
 public sealed class MultiTenancyExtension : IDbContextOptionsExtension
 {
-    public DbContextOptionsExtensionInfo Info { get; } = null!;
+    public DbContextOptionsExtensionInfo Info { get; }
 
     public MultiTenancyExtension() => Info = new ExtensionInfo(this);
 
