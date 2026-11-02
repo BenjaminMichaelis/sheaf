@@ -75,8 +75,10 @@ public class SqlServerTenancyTests
         await Assert.That((exception?.InnerException as SqlException)?.Number).IsEqualTo(547);
     }
 
+    // Tenant-scoped uniqueness allows the same value across churches, not within one.
+    // Email is only a test-model example, not production email policy.
     [Test]
-    public async Task UniqueIndex_AllowsSameValueInTwoChurches()
+    public async Task UniqueIndex_SharedEmail_AllowedAcrossChurchesButRejectedWithinChurch()
     {
         TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(Sql.CreateContext);
         const string email = "shared@example.com";
