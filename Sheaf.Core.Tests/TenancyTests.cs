@@ -11,7 +11,7 @@ namespace Sheaf.Core.Tests;
 public class TenancyTests
 {
     [Test]
-    public async Task Church_HasGeneratedIdAndUniqueSlug()
+    public async Task SaveChangesAsync_DuplicateChurchSlug_Throws()
     {
         using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
@@ -35,7 +35,7 @@ public class TenancyTests
     }
 
     [Test]
-    public async Task NoTenant_Query_Throws()
+    public async Task Query_WithoutTenant_Throws()
     {
         using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
@@ -52,7 +52,7 @@ public class TenancyTests
     }
 
     [Test]
-    public async Task TenantContext_IsIsolatedAcrossServiceScopes()
+    public async Task ChurchIdOrThrow_SeparateServiceScopes_ReturnsEachScopesChurchId()
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Configuration[$"ConnectionStrings:{ConnectionStrings.DatabaseKey}"] =
