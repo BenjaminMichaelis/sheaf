@@ -1,3 +1,5 @@
+@AGENTS.md
+
 <!-- squad:begin (managed by Squad; do not edit between markers) -->
 ## Squad
 
