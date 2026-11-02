@@ -2,27 +2,26 @@
   "universe_usage_history": [
     {
       "universe": "descriptive",
-      "assignment_id": "aa9184e9-576c-411f-a444-80eca3f2193b",
       "used_at": "2026-10-30T23:26:27-07:00"
     }
   ],
   "assignment_cast_snapshots": {
     "aa9184e9-576c-411f-a444-80eca3f2193b": {
       "universe": "descriptive",
-      "agents": {
-        "architect": "Architect",
-        "backend": "Backend",
-        "frontend": "Frontend",
-        "ai-integrations": "AI-Integrations",
-        "tester": "Tester",
-        "scribe": "Scribe",
-        "ralph": "Ralph",
-        "rai": "Rai",
-        "fact-checker": "Fact Checker"
-      },
-      "created_at": "2026-10-30T23:26:27-07:00"
+      "created_at": "2026-10-30T23:26:27-07:00",
+      "agents": [
+        "architect",
+        "backend",
+        "frontend",
+        "ai-integrations",
+        "tester",
+        "scribe",
+        "ralph",
+        "rai",
+        "fact-checker"
+      ]
     }
   },
-  "transaction_id": "aa9184e9-576c-411f-a444-80eca3f2193b",
-  "registry_revision": 2
+  "transaction_id": "bc87d008-aaec-447f-b00e-f8720e56cec6",
+  "registry_revision": 3
 }
