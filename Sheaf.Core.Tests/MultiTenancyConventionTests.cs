@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+
 using Sheaf.Data.Tenancy;
 
 namespace Sheaf.Core.Tests;
