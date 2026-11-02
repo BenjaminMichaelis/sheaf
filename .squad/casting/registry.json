@@ -1,72 +1,99 @@
 {
   "schema": "squad-agent-provenance/v1",
   "schema_version": 1,
-  "revision": 2,
-  "generated_at": "2026-10-30T23:26:27-07:00",
+  "revision": 3,
+  "generated_at": "2026-11-02T05:06:18.325Z",
   "agents": {
     "architect": {
       "persistent_name": "Architect",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Architect",
+      "role": "architect",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "backend": {
       "persistent_name": "Backend",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Backend",
+      "role": "backend",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "frontend": {
       "persistent_name": "Frontend",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Frontend",
+      "role": "frontend",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "ai-integrations": {
       "persistent_name": "AI-Integrations",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "AI-Integrations",
+      "role": "ai-integrations",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "tester": {
       "persistent_name": "Tester",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Tester",
+      "role": "tester",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "scribe": {
       "persistent_name": "Scribe",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Scribe",
+      "role": "scribe",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "ralph": {
       "persistent_name": "Ralph",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Ralph",
+      "role": "ralph",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "rai": {
       "persistent_name": "Rai",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Rai",
+      "role": "rai",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     },
     "fact-checker": {
       "persistent_name": "Fact Checker",
       "universe": "descriptive",
       "created_at": "2026-10-30T23:26:27-07:00",
       "legacy_named": false,
-      "status": "active"
+      "status": "active",
+      "display_name": "Fact Checker",
+      "role": "fact-checker",
+      "updated_at": "2026-11-02T05:06:18.325Z"
     }
   },
-  "transaction_id": "aa9184e9-576c-411f-a444-80eca3f2193b"
+  "transaction_id": "bc87d008-aaec-447f-b00e-f8720e56cec6"
 }

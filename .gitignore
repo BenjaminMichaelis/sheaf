@@ -492,3 +492,4 @@ $RECYCLE.BIN/
 .squad-workstream
 # squad:claude
 .claude/worktrees/
+.squad/backend/
