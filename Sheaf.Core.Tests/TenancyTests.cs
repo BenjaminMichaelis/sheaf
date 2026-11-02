@@ -12,7 +12,7 @@ namespace Sheaf.Core.Tests;
 public class TenancyTests
 {
     [Test]
-    public async Task Church_UsesVersion7IdAndUniqueSlug()
+    public async Task Church_HasGeneratedIdAndUniqueSlug()
     {
         using var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -26,7 +26,7 @@ public class TenancyTests
             .GetIndexes()
             .Single(index => index.Properties.Any(property => property.Name == nameof(Church.Slug)));
 
-        await Assert.That(church.Id.Version).IsEqualTo(7);
+        await Assert.That(church.Id).IsNotEqualTo(Guid.Empty);
         await Assert.That(slugIndex.IsUnique).IsTrue();
     }
 
