@@ -36,9 +36,12 @@ public sealed class TenancySaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
-        ITenantContext tenantContext = context as ITenantContext
-            ?? throw new InvalidOperationException(
+        if (context is not ITenantContext tenantContext)
+        {
+            throw new InvalidOperationException(
                 $"The {nameof(TenancySaveChangesInterceptor)} requires a DbContext that implements {nameof(ITenantContext)}.");
+        }
+
         Guid churchId = tenantContext.ChurchId;
         if (churchId == Guid.Empty)
         {
