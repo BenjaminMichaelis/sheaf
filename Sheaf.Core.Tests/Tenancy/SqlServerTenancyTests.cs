@@ -57,7 +57,7 @@ public class SqlServerTenancyTests
     }
 
     [Test]
-    public async Task CrossTenantFk_ThrowsOnSave()
+    public async Task SaveChanges_PersonReferencesAnotherChurchLeader_RejectsWithForeignKeyViolation()
     {
         TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(Sql.CreateContext);
 
