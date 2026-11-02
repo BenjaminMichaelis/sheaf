@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Sheaf.Data;
 
-public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext
 {
     private readonly ITenantContext _tenantContext;
 
@@ -28,6 +28,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     public Guid ChurchIdOrThrow => _tenantContext.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
+
+    Guid Tenancy.ITenantContext.ChurchId => ChurchIdOrThrow;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        optionsBuilder.AddInterceptors(new Tenancy.TenancySaveChangesInterceptor());
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

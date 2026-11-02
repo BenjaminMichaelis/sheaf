@@ -4,6 +4,7 @@ This repository is set up to use Aspire. Aspire is an orchestrator for the entir
 
 ## Testing and C# nullability
 
+- Name new or updated test methods `MethodUnderTest_Scenario_ExpectedResult`: identify the method being tested, the scenario, and the expected outcome. For example, `SaveChangesAsync_AddWithoutChurchId_StampsCurrentChurchId`.
 - Write tests for observable behavior and stated requirements, not incidental implementation details. Avoid pinning implementation choices such as UUID versions or dependency-injection/pooling mechanics unless they are explicit requirements.
 - Use the test framework's assertion APIs for exceptions instead of manually catching exceptions just to inspect them.
 - Avoid the null-forgiving operator (`!`) when the compiler cannot establish an invariant. Prefer flow-safe APIs, explicit guards, or assertions that prove a value is present. Use `!` only when a concrete invariant exists that the compiler cannot express.

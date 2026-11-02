@@ -93,11 +93,16 @@ public class MultiTenancyConventionTests
     {
         string database = nameof(FilterIsolatesRowsByCurrentChurch);
         Guid a = Guid.NewGuid(), b = Guid.NewGuid();
-        using (TestContext seed = Create(database, a))
+        using (TestContext seedA = Create(database, a))
         {
-            seed.Parents.Add(new Parent { Id = Guid.NewGuid(), ChurchId = a });
-            seed.Parents.Add(new Parent { Id = Guid.NewGuid(), ChurchId = b });
-            await seed.SaveChangesAsync();
+            seedA.Parents.Add(new Parent { Id = Guid.NewGuid(), ChurchId = a });
+            await seedA.SaveChangesAsync();
+        }
+
+        using (TestContext seedB = Create(database, b))
+        {
+            seedB.Parents.Add(new Parent { Id = Guid.NewGuid(), ChurchId = b });
+            await seedB.SaveChangesAsync();
         }
 
         using TestContext asA = Create(database, a);

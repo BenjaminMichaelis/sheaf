@@ -120,7 +120,7 @@ az boards work-item show --id {id} --output json
 **Trigger:** Agent accepts issue assignment and begins work.
 
 **Actions:**
-1. Ensure working on latest base branch (usually `main` or `dev`)
+1. Ensure working on latest base branch (this repository uses `main`; there is no `dev` branch)
 2. Create feature branch using Squad naming convention
 3. Transition issue to `inProgress` state
 

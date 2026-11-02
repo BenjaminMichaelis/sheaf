@@ -10,6 +10,7 @@ public static class MultiTenancyDbContextOptionsBuilderExtensions
         where TContext : DbContext, ITenantContext
     {
         ((IDbContextOptionsBuilderInfrastructure)builder).AddOrUpdateExtension(new MultiTenancyExtension());
+        builder.AddInterceptors(new TenancySaveChangesInterceptor());
         return builder;
     }
 }
