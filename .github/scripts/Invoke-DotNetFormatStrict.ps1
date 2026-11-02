@@ -24,12 +24,19 @@ if (-not $Targets -or $Targets.Count -eq 0) {
     throw 'No solution or project files found for format validation.'
 }
 
+function Invoke-Dotnet {
+    & dotnet @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet $($args -join ' ') failed with exit code $LASTEXITCODE."
+    }
+}
+
 foreach ($target in $Targets) {
     if ($RestoreTargets) {
-        dotnet restore $target
+        Invoke-Dotnet restore $target
     }
 
-    dotnet format whitespace $target --verify-no-changes --no-restore
-    dotnet format style $target --verify-no-changes --no-restore --severity warn
-    dotnet format analyzers $target --verify-no-changes --no-restore --severity warn
+    Invoke-Dotnet format whitespace $target --verify-no-changes --no-restore
+    Invoke-Dotnet format style $target --verify-no-changes --no-restore --severity warn
+    Invoke-Dotnet format analyzers $target --verify-no-changes --no-restore --severity warn
 }
