@@ -21,8 +21,12 @@ public static class DependencyInjection
             {
                 options.UseAzureSql(connectionString);
             }
-            builder.Services.AddDbContextFactory<ApplicationDbContext>(BuildDbOptions);
-            builder.Services.AddDbContextPool<ApplicationDbContext>(BuildDbOptions);
+
+            builder.Services.AddScoped<TenantContext>();
+            builder.Services.AddScoped<ITenantContext>(services => services.GetRequiredService<TenantContext>());
+            builder.Services.AddDbContext<ApplicationDbContext>(
+                BuildDbOptions,
+                contextLifetime: ServiceLifetime.Scoped);
 
             if (builder.Environment.IsDevelopment())
             {
