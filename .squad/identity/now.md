@@ -1,9 +1,10 @@
 ---
-updated_at: 2026-10-31T06:21:49.041Z
-focus_area: Initial setup
-active_issues: []
+updated_at: 2026-11-01T07:36:38.716Z
+focus_area: Tenancy core types
+active_issues:
+  - 11
 ---
 
 # What We're Focused On
 
-Getting started. Updated by coordinator at session start.
+Implementing tenancy boundaries for Church data isolation.
