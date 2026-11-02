@@ -41,18 +41,9 @@ public class TenancyTests
         await using var dbContext = new TenantTestDbContext(options, new TenantContext());
         await dbContext.Database.EnsureCreatedAsync();
 
-        string? exceptionMessage = null;
-        try
-        {
-            await dbContext.TenantRecords.ToListAsync();
-        }
-        catch (InvalidOperationException exception)
-        {
-            exceptionMessage = exception.Message;
-        }
-
-        await Assert.That(exceptionMessage)
-            .IsEqualTo("A church tenant is required for this query.");
+        await Assert.That(async () => await dbContext.TenantRecords.ToListAsync())
+            .Throws<InvalidOperationException>()
+            .WithMessage("A church tenant is required for this query.");
     }
 
     [Test]
