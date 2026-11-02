@@ -17,7 +17,7 @@ public class AppHostTests(AppHostFixture fixture)
     /// The liveness endpoint proves HTTP reachability without coupling the test to database readiness checks.
     /// </summary>
     [Test]
-    public async Task BackendAliveEndpointReturnsSuccess()
+    public async Task BackendAliveEndpoint_Get_ReturnsSuccess()
     {
         using var client = fixture.CreateHttpClient("Sheaf-backend", "http");
 
@@ -31,7 +31,7 @@ public class AppHostTests(AppHostFixture fixture)
     /// This validates that resource orchestration and connection string injection are configured correctly.
     /// </summary>
     [Test]
-    public async Task DatabaseConnectionStringIsConfigured()
+    public async Task DatabaseResource_Startup_HasConnectionStringConfigured()
     {
         var connectionString = await fixture.App.GetConnectionStringAsync("Sheaf-db");
         await Assert.That(connectionString).IsNotNull().And.IsNotEmpty();

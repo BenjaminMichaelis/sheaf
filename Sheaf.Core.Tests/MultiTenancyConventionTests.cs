@@ -53,9 +53,9 @@ public class MultiTenancyConventionTests
 
     // ITenanted is the opt-in: shared entities (Church, LeaderToken, DataProtectionKeys) must stay unfiltered.
     [Test]
-    public async Task EntitiesNotMarkedTenantedAreNotFiltered()
+    public async Task SaveChangesAsync_UntenantedEntityAcrossChurches_IsNotFiltered()
     {
-        string database = nameof(EntitiesNotMarkedTenantedAreNotFiltered);
+        string database = nameof(SaveChangesAsync_UntenantedEntityAcrossChurches_IsNotFiltered);
         Guid a = Guid.NewGuid(), b = Guid.NewGuid();
         using (TestContext asA = Create(database, a))
         {
@@ -68,9 +68,9 @@ public class MultiTenancyConventionTests
     }
 
     [Test]
-    public async Task CrossTenantLinkDoesNotResolveToOtherChurchsParent()
+    public async Task Include_ParentOwnedByOtherChurch_ReturnsNullParent()
     {
-        string database = nameof(CrossTenantLinkDoesNotResolveToOtherChurchsParent);
+        string database = nameof(Include_ParentOwnedByOtherChurch_ReturnsNullParent);
         Guid a = Guid.NewGuid(), b = Guid.NewGuid(), parentId = Guid.NewGuid();
         using (TestContext asB = Create(database, b))
         {
@@ -111,11 +111,11 @@ public class MultiTenancyConventionTests
     }
 
     [Test]
-    public async Task TenantedEntityThatCannotBeProtectedFailsModelBuilding()
+    public async Task Model_TenantedEntityThatCannotBeProtected_ThrowsInvalidOperationException()
     {
         using KeylessContext db = new(
             new DbContextOptionsBuilder<KeylessContext>()
-                .UseInMemoryDatabase(nameof(TenantedEntityThatCannotBeProtectedFailsModelBuilding))
+                .UseInMemoryDatabase(nameof(Model_TenantedEntityThatCannotBeProtected_ThrowsInvalidOperationException))
                 .UseMultiTenancy()
                 .Options);
 
