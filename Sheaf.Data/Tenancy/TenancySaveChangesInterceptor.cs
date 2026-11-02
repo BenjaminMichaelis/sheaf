@@ -47,6 +47,7 @@ public sealed class TenancySaveChangesInterceptor : SaveChangesInterceptor
 
         foreach (EntityEntry<ITenanted> entry in entries)
         {
+            Guid entityChurchId = entry.Entity.ChurchId;
             PropertyEntry<ITenanted, Guid> churchIdProperty = entry.Property(entity => entity.ChurchId);
             if ((entry.State is EntityState.Modified or EntityState.Deleted)
                 && (churchIdProperty.IsModified || churchIdProperty.CurrentValue != churchIdProperty.OriginalValue))
@@ -56,28 +57,13 @@ public sealed class TenancySaveChangesInterceptor : SaveChangesInterceptor
 
             switch (entry.State)
             {
-                case EntityState.Added:
-                    if (entry.Entity.ChurchId == Guid.Empty)
-                    {
-                        entry.Entity.ChurchId = churchId;
-                    }
-                    else if (entry.Entity.ChurchId != churchId)
-                    {
-                        throw ForeignChurch(entry.Entity.ChurchId, churchId);
-                    }
-
+                case EntityState.Added when entityChurchId == Guid.Empty:
+                    entry.Entity.ChurchId = churchId;
                     break;
 
-                case EntityState.Modified:
-                    if (entry.Entity.ChurchId != churchId)
-                    {
-                        throw ForeignChurch(entry.Entity.ChurchId, churchId);
-                    }
-
-                    break;
-
-                case EntityState.Deleted when entry.Entity.ChurchId != churchId:
-                    throw ForeignChurch(entry.Entity.ChurchId, churchId);
+                case EntityState.Added or EntityState.Modified or EntityState.Deleted
+                    when entityChurchId != churchId:
+                    throw ForeignChurch(entityChurchId, churchId);
             }
         }
     }
