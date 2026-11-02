@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -57,7 +56,7 @@ public class TenancyTests
     }
 
     [Test]
-    public async Task AddDatabase_RegistersScopedNonPooledContext()
+    public async Task TenantContext_IsIsolatedAcrossServiceScopes()
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration[$"ConnectionStrings:{ConnectionStrings.DatabaseKey}"] =
@@ -65,16 +64,20 @@ public class TenancyTests
 
         builder.AddDatabase();
 
-        var context = builder.Services.Single(
-            descriptor => descriptor.ServiceType == typeof(ApplicationDbContext));
-        var tenantContext = builder.Services.Single(
-            descriptor => descriptor.ServiceType == typeof(ITenantContext));
-        var contextFactory = builder.Services.Any(
-            descriptor => descriptor.ServiceType == typeof(IDbContextFactory<ApplicationDbContext>));
+        using var host = builder.Build();
+        using var scopeA = host.Services.CreateScope();
+        using var scopeB = host.Services.CreateScope();
 
-        await Assert.That(context.Lifetime).IsEqualTo(ServiceLifetime.Scoped);
-        await Assert.That(tenantContext.Lifetime).IsEqualTo(ServiceLifetime.Scoped);
-        await Assert.That(contextFactory).IsFalse();
+        var churchIdA = Guid.NewGuid();
+        var churchIdB = Guid.NewGuid();
+        scopeA.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdA;
+        scopeB.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdB;
+        var contextA = scopeA.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var contextB = scopeB.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        await Assert.That(contextA.ChurchIdOrThrow).IsEqualTo(churchIdA);
+        await Assert.That(contextB.ChurchIdOrThrow).IsEqualTo(churchIdB);
+        await Assert.That(ReferenceEquals(contextA, contextB)).IsFalse();
     }
 
     private sealed class TenantTestDbContext(
