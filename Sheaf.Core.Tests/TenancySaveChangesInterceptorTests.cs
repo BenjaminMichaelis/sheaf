@@ -40,10 +40,10 @@ public class TenancySaveChangesInterceptorTests
             churchId);
 
     [Test]
-    public async Task Add_StampsChurchId()
+    public async Task SaveChangesAsync_AddWithoutChurchId_StampsCurrentChurchId()
     {
         Guid churchId = Guid.NewGuid();
-        await using TestContext context = CreateContext(nameof(Add_StampsChurchId), churchId);
+        await using TestContext context = CreateContext(nameof(SaveChangesAsync_AddWithoutChurchId_StampsCurrentChurchId), churchId);
         TenantRecord record = new() { Id = Guid.NewGuid(), Name = "Record" };
         context.TenantRecords.Add(record);
 
@@ -53,11 +53,11 @@ public class TenancySaveChangesInterceptorTests
     }
 
     [Test]
-    public async Task Add_WithForeignChurchId_Throws()
+    public async Task SaveChangesAsync_AddWithForeignChurchId_Throws()
     {
         Guid churchId = Guid.NewGuid();
         Guid foreignChurchId = Guid.NewGuid();
-        await using TestContext context = CreateContext(nameof(Add_WithForeignChurchId_Throws), churchId);
+        await using TestContext context = CreateContext(nameof(SaveChangesAsync_AddWithForeignChurchId_Throws), churchId);
         TenantRecord record = new() { Id = Guid.NewGuid(), ChurchId = foreignChurchId, Name = "Record" };
         context.TenantRecords.Add(record);
 
@@ -67,10 +67,10 @@ public class TenancySaveChangesInterceptorTests
     }
 
     [Test]
-    public async Task Modify_ChurchId_Throws()
+    public async Task SaveChangesAsync_ModifyChurchId_Throws()
     {
         Guid churchId = Guid.NewGuid();
-        await using TestContext context = CreateInterceptorOnlyContext(nameof(Modify_ChurchId_Throws), churchId);
+        await using TestContext context = CreateInterceptorOnlyContext(nameof(SaveChangesAsync_ModifyChurchId_Throws), churchId);
         TenantRecord record = new() { Id = Guid.NewGuid(), Name = "Record" };
         context.TenantRecords.Add(record);
         await context.SaveChangesAsync();
@@ -82,11 +82,11 @@ public class TenancySaveChangesInterceptorTests
     }
 
     [Test]
-    public async Task AttachUpdate_ForeignEntity_Throws()
+    public async Task SaveChangesAsync_AttachUpdateForeignEntity_Throws()
     {
         Guid churchId = Guid.NewGuid();
         Guid foreignChurchId = Guid.NewGuid();
-        await using TestContext context = CreateContext(nameof(AttachUpdate_ForeignEntity_Throws), churchId);
+        await using TestContext context = CreateContext(nameof(SaveChangesAsync_AttachUpdateForeignEntity_Throws), churchId);
         TenantRecord record = new() { Id = Guid.NewGuid(), ChurchId = foreignChurchId, Name = "Record" };
         context.TenantRecords.Attach(record);
         context.Entry(record).Property(entity => entity.Name).IsModified = true;
@@ -97,11 +97,11 @@ public class TenancySaveChangesInterceptorTests
     }
 
     [Test]
-    public async Task Delete_ForeignEntity_Throws()
+    public async Task SaveChangesAsync_DeleteForeignEntity_Throws()
     {
         Guid churchId = Guid.NewGuid();
         Guid foreignChurchId = Guid.NewGuid();
-        await using TestContext context = CreateContext(nameof(Delete_ForeignEntity_Throws), churchId);
+        await using TestContext context = CreateContext(nameof(SaveChangesAsync_DeleteForeignEntity_Throws), churchId);
         TenantRecord record = new() { Id = Guid.NewGuid(), ChurchId = foreignChurchId, Name = "Record" };
         context.TenantRecords.Attach(record);
         context.TenantRecords.Remove(record);
