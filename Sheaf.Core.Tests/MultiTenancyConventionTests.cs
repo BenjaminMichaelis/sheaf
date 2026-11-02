@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 
 using Sheaf.Data.Tenancy;
 
@@ -7,10 +6,6 @@ namespace Sheaf.Core.Tests;
 
 public class MultiTenancyConventionTests
 {
-    private static readonly string[] PkNames = ["ChurchId", "Id"];
-    private static readonly string[] FkNames = ["ChurchId", "ParentId"];
-    private static readonly string[] FilterNames = ["TenancyFilter"];
-
     private sealed class Parent : ITenanted
     {
         public Guid Id { get; set; }
@@ -21,7 +16,7 @@ public class MultiTenancyConventionTests
     {
         public Guid Id { get; set; }
         public Guid ChurchId { get; set; }
-        public Guid ParentId { get; set; }
+        public Guid? ParentId { get; set; }
         public Parent? Parent { get; set; }
     }
 
@@ -56,54 +51,42 @@ public class MultiTenancyConventionTests
             .Options)
     { ChurchId = churchId };
 
-    private static IEntityType EntityOf(DbContext db, Type type) =>
-        db.Model.FindEntityType(type) ?? throw new InvalidOperationException($"{type.Name} is not in the model.");
-
-    private static IKey PrimaryKeyOf(DbContext db, Type type) =>
-        EntityOf(db, type).FindPrimaryKey() ?? throw new InvalidOperationException($"{type.Name} has no primary key.");
-
     [Test]
-    public async Task PrimaryKeyIsComposite_ChurchIdThenId()
+    public async Task UntenantedEntitiesAreVisibleToEveryChurch()
     {
-        using TestContext db = Create(nameof(PrimaryKeyIsComposite_ChurchIdThenId), Guid.NewGuid());
-        foreach (Type type in new[] { typeof(Parent), typeof(Child) })
+        string database = nameof(UntenantedEntitiesAreVisibleToEveryChurch);
+        Guid a = Guid.NewGuid(), b = Guid.NewGuid();
+        using (TestContext asA = Create(database, a))
         {
-            IKey key = PrimaryKeyOf(db, type);
-            await Assert.That(key.Properties.Select(p => p.Name).ToArray())
-                .IsEquivalentTo(PkNames);
-            await Assert.That(key.Properties[0].Name).IsEqualTo("ChurchId");
+            asA.Untenanteds.Add(new Untenanted());
+            await asA.SaveChangesAsync();
         }
 
-        await Assert.That(PrimaryKeyOf(db, typeof(Untenanted)).Properties.Count).IsEqualTo(1);
+        using TestContext asB = Create(database, b);
+        await Assert.That(await asB.Untenanteds.CountAsync()).IsEqualTo(1);
     }
 
     [Test]
-    public async Task NamedTenancyFilterIsPresentOnTenantedEntitiesOnly()
+    public async Task CrossTenantLinkDoesNotResolveToOtherChurchsParent()
     {
-        using TestContext db = Create(nameof(NamedTenancyFilterIsPresentOnTenantedEntitiesOnly), Guid.NewGuid());
-        foreach (Type type in new[] { typeof(Parent), typeof(Child) })
+        string database = nameof(CrossTenantLinkDoesNotResolveToOtherChurchsParent);
+        Guid a = Guid.NewGuid(), b = Guid.NewGuid(), parentId = Guid.NewGuid();
+        using (TestContext asB = Create(database, b))
         {
-            IEntityType entityType = EntityOf(db, type);
-            await Assert.That(entityType.GetDeclaredQueryFilters().Select(f => f.Key).OfType<string>().ToArray())
-                .IsEquivalentTo(FilterNames);
+            asB.Parents.Add(new Parent { Id = parentId, ChurchId = b });
+            await asB.SaveChangesAsync();
         }
 
-        await Assert.That(EntityOf(db, typeof(Untenanted)).GetDeclaredQueryFilters().Count).IsEqualTo(0);
+        using (TestContext asA = Create(database, a))
+        {
+            asA.Children.Add(new Child { Id = Guid.NewGuid(), ChurchId = a, ParentId = parentId });
+            await asA.SaveChangesAsync();
+        }
+
+        using TestContext reader = Create(database, a);
+        Child child = await reader.Children.Include(c => c.Parent).SingleAsync();
+        await Assert.That(child.Parent).IsNull();
     }
-
-    [Test]
-    public async Task ForeignKeyToTenantedPrincipalHasArityTwoOnChurchIdAndFk()
-    {
-        using TestContext db = Create(nameof(ForeignKeyToTenantedPrincipalHasArityTwoOnChurchIdAndFk), Guid.NewGuid());
-        IForeignKey fk = EntityOf(db, typeof(Child)).GetForeignKeys().Single();
-
-        await Assert.That(fk.Properties.Select(p => p.Name).ToArray()).IsEquivalentTo(FkNames);
-        await Assert.That(fk.Properties[0].Name).IsEqualTo("ChurchId");
-        await Assert.That(fk.PrincipalKey.Properties.Select(p => p.Name).ToArray())
-            .IsEquivalentTo(PkNames);
-        await Assert.That(fk.PrincipalEntityType.ClrType).IsEqualTo(typeof(Parent));
-    }
-
     [Test]
     public async Task FilterIsolatesRowsByCurrentChurch()
     {
