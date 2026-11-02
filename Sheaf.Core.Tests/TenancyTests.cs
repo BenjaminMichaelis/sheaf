@@ -20,13 +20,18 @@ public class TenancyTests
             .Options;
 
         await using var dbContext = new TenantTestDbContext(options, new TenantContext());
-        var church = new Church { Slug = "test-church", Name = "Test Church" };
-        var slugIndex = dbContext.Model.FindEntityType(typeof(Church))!
-            .GetIndexes()
-            .Single(index => index.Properties.Any(property => property.Name == nameof(Church.Slug)));
+        await dbContext.Database.EnsureCreatedAsync();
 
+        Church church = new() { Slug = "test-church", Name = "Test Church" };
+        dbContext.Churches.Add(church);
+        await dbContext.SaveChangesAsync();
         await Assert.That(church.Id).IsNotEqualTo(Guid.Empty);
-        await Assert.That(slugIndex.IsUnique).IsTrue();
+
+        Church duplicateChurch = new() { Slug = church.Slug, Name = "Duplicate Church" };
+        dbContext.Churches.Add(duplicateChurch);
+
+        await Assert.That(async () => await dbContext.SaveChangesAsync())
+            .Throws<DbUpdateException>();
     }
 
     [Test]
