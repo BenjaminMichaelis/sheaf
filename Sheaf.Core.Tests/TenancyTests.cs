@@ -13,13 +13,13 @@ public class TenancyTests
     [Test]
     public async Task Church_HasGeneratedIdAndUniqueSlug()
     {
-        using var connection = new SqliteConnection("DataSource=:memory:");
+        using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+        DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(connection)
             .Options;
 
-        await using var dbContext = new TenantTestDbContext(options, new TenantContext());
+        await using TenantTestDbContext dbContext = new(options, new TenantContext());
         await dbContext.Database.EnsureCreatedAsync();
 
         Church church = new() { Slug = "test-church", Name = "Test Church" };
@@ -37,13 +37,13 @@ public class TenancyTests
     [Test]
     public async Task NoTenant_Query_Throws()
     {
-        using var connection = new SqliteConnection("DataSource=:memory:");
+        using SqliteConnection connection = new("DataSource=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+        DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlite(connection)
             .Options;
 
-        await using var dbContext = new TenantTestDbContext(options, new TenantContext());
+        await using TenantTestDbContext dbContext = new(options, new TenantContext());
         await dbContext.Database.EnsureCreatedAsync();
 
         await Assert.That(async () => await dbContext.TenantRecords.ToListAsync())
@@ -54,22 +54,22 @@ public class TenancyTests
     [Test]
     public async Task TenantContext_IsIsolatedAcrossServiceScopes()
     {
-        var builder = Host.CreateApplicationBuilder();
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Configuration[$"ConnectionStrings:{ConnectionStrings.DatabaseKey}"] =
             "Server=localhost;Database=Sheaf;";
 
         builder.AddDatabase();
 
-        using var host = builder.Build();
-        using var scopeA = host.Services.CreateScope();
-        using var scopeB = host.Services.CreateScope();
+        using IHost host = builder.Build();
+        using IServiceScope scopeA = host.Services.CreateScope();
+        using IServiceScope scopeB = host.Services.CreateScope();
 
-        var churchIdA = Guid.NewGuid();
-        var churchIdB = Guid.NewGuid();
+        Guid churchIdA = Guid.NewGuid();
+        Guid churchIdB = Guid.NewGuid();
         scopeA.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdA;
         scopeB.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdB;
-        var contextA = scopeA.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var contextB = scopeB.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        ApplicationDbContext contextA = scopeA.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        ApplicationDbContext contextB = scopeB.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await Assert.That(contextA.ChurchIdOrThrow).IsEqualTo(churchIdA);
         await Assert.That(contextB.ChurchIdOrThrow).IsEqualTo(churchIdB);
