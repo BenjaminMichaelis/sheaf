@@ -33,12 +33,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     {
         base.OnModelCreating(builder);
 
-        builder.Entity<Church>(church =>
-        {
-            church.Property(entity => entity.Id).ValueGeneratedNever();
-            church.HasIndex(entity => entity.Slug).IsUnique();
-        });
-
         foreach (var entityType in builder.Model.GetEntityTypes()
                      .Where(entityType => typeof(ITenanted).IsAssignableFrom(entityType.ClrType)))
         {
