@@ -71,7 +71,7 @@ public class TenancyArchitectureTests
     }
 
     [Test]
-    public async Task ExecuteUpdateDelete_RespectTenantFilter()
+    public async Task ExecuteUpdateDelete_ForCurrentTenant_OnlyAffectsCurrentTenantRecords()
     {
         using SqliteFixture sqlite = new();
         Guid churchA = Guid.NewGuid();
