@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Moq.AutoMock.Resolvers;
 
 using Sheaf.Data;
+using Sheaf.Data.Tenancy;
 
 namespace Sheaf.Core.Tests;
 
@@ -95,6 +96,11 @@ file sealed class SqliteConnectionResolver<TContext> : IMockResolver, IDisposabl
                     .AddInterceptors(_interceptors)
                     .UseSqlite(_sqliteConnection.Value);
 
+            if (typeof(ITenantContext).IsAssignableFrom(typeof(TContext)))
+            {
+                ((DbContextOptionsBuilder)builder).UseMultiTenancy();
+            }
+
             //bit of a hack to see if a logging factory mock resolver was registered
             if (context.AutoMocker.Resolvers.OfType<ILoggerFactory>().Any())
             {
@@ -127,5 +133,4 @@ file sealed class SqliteConnectionResolver<TContext> : IMockResolver, IDisposabl
         GC.SuppressFinalize(this);
     }
 }
-
 
