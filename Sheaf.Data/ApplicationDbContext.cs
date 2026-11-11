@@ -26,30 +26,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<ChurchMembership> ChurchMemberships => Set<ChurchMembership>();
 
-    public DbSet<Context> Contexts => Set<Context>();
-
-    public DbSet<Person> People => Set<Person>();
-
-    public DbSet<Capture> Captures => Set<Capture>();
-
-    public DbSet<Touchpoint> Touchpoints => Set<Touchpoint>();
-
-    public DbSet<Proposal> Proposals => Set<Proposal>();
-
-    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
-
-    public DbSet<LeaderToken> LeaderTokens => Set<LeaderToken>();
-
-    public DbSet<Relationship> Relationships => Set<Relationship>();
-
-    public DbSet<ContextLeader> ContextLeaders => Set<ContextLeader>();
-
-    public DbSet<ContextMember> ContextMembers => Set<ContextMember>();
-
-    public DbSet<Attendance> Attendances => Set<Attendance>();
-
-    public DbSet<PersonExternalRef> PersonExternalRefs => Set<PersonExternalRef>();
-
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
 
@@ -67,7 +43,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-        DomainModelConfiguration.Configure(builder);
+
+        builder.Entity<ChurchMembership>(entity =>
+        {
+            entity.HasOne<Church>()
+                .WithMany()
+                .HasForeignKey(membership => membership.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired();
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(membership => membership.UserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired();
+        });
 
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {

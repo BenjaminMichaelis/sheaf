@@ -29,7 +29,7 @@ can build the model without a selected church, but queries against tenanted enti
 When authentication selection is wired, `LeaderId` denotes the church membership ID, not a global
 Identity user ID.
 
-`SaveChanges` protects tracked writes, including changes to owned (and JSON-mapped) entities, which
+`SaveChanges` protects tracked writes, including changes to owned entities, which
 are attributed to their root `ITenanted` owner even when the owner itself is unchanged. `ExecuteUpdate`/`ExecuteUpdateAsync` also reject explicit
 assignments to mapped `ITenanted.ChurchId`, including no-op assignments and queries matching no rows.
 The query interceptor checks setter targets, not values or projected member names: ordinary payload
@@ -42,28 +42,13 @@ This is an EF-layer ownership guard,
 not database row-level security: trusted raw SQL, external writers, and deliberately bypassed query
 filters still require their own authorization boundaries.
 
-The production domain sets are `ChurchMemberships`, `Contexts`, `People`, `Captures`,
-`Touchpoints`, `Proposals`, `AuditEntries`, `LeaderTokens`, `Relationships`, `ContextLeaders`,
-`ContextMembers`, `Attendances` and `PersonExternalRefs`. Their client-created Guid v7 IDs form
-`(ChurchId, Id)` primary keys. Every root has a required, `Restrict` Church FK; references between
-church-owned entities use the principal's composite primary key. Memberships uniquely pair
-`(ChurchId, UserId)` and reference the unchanged global Identity user with `Restrict`.
-All leader FKs use membership IDs, including touchpoint authors and hashed leader tokens.
-Context custom-field definitions (`Name`, plain-string `Type`) are an owned JSON schema, not
-tenant roots. Context leader/member rows retain `StartedOn`/`EndedOn` history. External IDs
-exist only in `PersonExternalRefs`, unique by `(ChurchId, System, ExternalId)`.
+This tenancy-foundation change adds only the minimal church-scoped `ChurchMembership` entity and
+production migration needed to prove tenant filtering and write guards on the migrated
+`ApplicationDbContext`. The broader #20 domain model and its migration remain follow-up work,
+stacked on this tenancy foundation.
 
-Optional guardian and touchpoint-context references leave only their target ID nullable,
-never `ChurchId`. All domain relationships use `Restrict` (SQL Server `NO ACTION`); deleting
-a principal requires explicitly handling its dependents. Identity-only cascades are unchanged.
-Capture status, relationship kind, proposal type and JSON payloads are storage fields, not
-workflow implementations. Membership provisioning/authentication, token issuance/validation,
-consent enforcement and connector execution remain separate work.
-
-`20261106075754_DomainModelV1` adds this schema without changing the earlier Identity/Church
-migrations. Scaffold migrations through the `Sheaf.AppHost` design-time factory, validate both
-startup paths below, and run `Sheaf.Core.Tests.SqlServerMigrationTests` to apply the production
-migration chain on the fixture's isolated SQL Server catalog (Docker/amd64 required).
+The existing production migration chain can be validated on the fixture's isolated SQL Server
+catalog with `Sheaf.Core.Tests.SqlServerMigrationTests` (Docker/amd64 required).
 
 Check model/snapshot parity through both configuration paths without creating a migration:
 
@@ -78,24 +63,21 @@ The runtime options probes are in `Sheaf.Core.Tests.TenancyTests`; factory probe
 `Sheaf.AppHost.Tests.DesignTimeAppDbContextFactoryTests`. These model-only tests do not connect
 to a database or start Aspire.
 
-The production SQL tests reuse the convention tests' assembly container but give every test
-its own catalog, so normal TUnit parallel execution cannot reset another test's seed.
-`ProductionTwoChurchSeed` migrates that catalog through `AddDatabase()` and seeds both churches,
-global users and all 13 tenant roots. Isolation tests query every production tenant `DbSet`,
-round-trip the owned context JSON, check SQL FK/uniqueness errors, and exercise bulk writes
-and interceptor stamping without bypassing tenant filters. Respawn preserves
-`__EFMigrationsHistory` and removes all other seed rows.
+The SQL Server tenancy tests use the migrated production `ApplicationDbContext` and its actual
+migrations to verify membership query isolation and cross-church write rejection. A separate
+test-only model remains for distinct convention/owned-JSON coverage; its migration test applies
+only that fixture's schema and does not stand in for the production migration path. Both use
+`UseAzureSql`, so the test-only owned-JSON migration test requires SQL Server 2025 or Azure SQL.
 
-Bulk compatibility cases cover `Union`, correlated `SelectMany`, scalar aliases, and warmed
-queries after a tenant change. Their dedicated provider-control contexts use the same migrated
-model without query interception and roll back every ownership change; guarded cases use normal
-production DI and tenant filters.
+SQL Server bulk-compatibility cases cover tenant-filtered updates and reject ownership changes
+through `Union` and correlated `SelectMany` sources. Additional provider and alias cases remain in
+the SQLite tenancy test suite.
 
 These container tests require Docker and an amd64-capable host (the SQL Server image is
 amd64-only), including CI on `ubuntu-latest`. Run the migration and isolation cases with:
 
 ```pwsh
-dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerMigrationIsolationTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
+dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerProductionTenancyTests)|(SqlServerTenancyMigrationTests)|(SqlServerTenancyTests)|(SqlServerTenancyWriteGuardTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
 ```
 
 For local Podman environments that need an explicit reachable container host, set

@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Sheaf.Data;
 using Sheaf.Data.Tenancy;
 
+using TUnit.Assertions.Enums;
+
 namespace Sheaf.Core.Tests;
 
 public class TenancyArchitectureTests
@@ -86,11 +88,27 @@ public class TenancyArchitectureTests
     }
 
     [Test]
-    public async Task GetEntityTypes_ProductionModel_ContainsTenantedEntities()
+    public async Task GetEntityTypes_ProductionModel_ContainsOnlyMinimalTenantedMembershipEntity()
     {
         using TenancyArchitectureFixture fixture = new();
+        IEntityType membership = fixture.RuntimeContext.Model.FindEntityType(typeof(ChurchMembership))
+            ?? throw new InvalidOperationException("ChurchMembership is missing from the production model.");
+        Type[] tenantedTypes = fixture.RuntimeContext.Model.GetEntityTypes()
+            .Where(IsTenanted)
+            .Select(entityType => entityType.ClrType)
+            .ToArray();
+        IKey primaryKeyMetadata = membership.FindPrimaryKey()
+            ?? throw new InvalidOperationException("ChurchMembership has no primary key.");
+        string[] primaryKey = primaryKeyMetadata.Properties.Select(property => property.Name).ToArray();
+        IIndex membershipIndex = membership.GetIndexes()
+            .Single(index => index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual([nameof(ChurchMembership.ChurchId), nameof(ChurchMembership.UserId)]));
 
-        await Assert.That(fixture.RuntimeContext.Model.GetEntityTypes().Any(IsTenanted)).IsTrue();
+        await Assert.That(tenantedTypes).IsEquivalentTo([typeof(ChurchMembership)]);
+        await Assert.That(primaryKey).IsEquivalentTo(
+            [nameof(ChurchMembership.ChurchId), nameof(ChurchMembership.Id)],
+            CollectionOrdering.Matching);
+        await Assert.That(membershipIndex.IsUnique).IsTrue();
     }
 
     [Test]
@@ -169,10 +187,18 @@ public class TenancyArchitectureTests
     public async Task ExecuteUpdateDelete_ForCurrentTenant_OnlyAffectsCurrentTenantRecords()
     {
         using SqliteFixture sqlite = new();
-        Guid churchA = Guid.NewGuid();
-        Guid churchB = Guid.NewGuid();
+        Church churchARecord = new() { Slug = "architecture-a", Name = "Church A" };
+        Church churchBRecord = new() { Slug = "architecture-b", Name = "Church B" };
+        Guid churchA = churchARecord.Id;
+        Guid churchB = churchBRecord.Id;
         Guid personAId = Guid.NewGuid();
         Guid personBId = Guid.NewGuid();
+
+        await using (TenancyTestDbContext churchSeed = sqlite.CreateContext(null))
+        {
+            churchSeed.Churches.AddRange(churchARecord, churchBRecord);
+            await churchSeed.SaveChangesAsync();
+        }
 
         await using (TenancyTestDbContext seedA = sqlite.CreateContext(churchA))
         {
