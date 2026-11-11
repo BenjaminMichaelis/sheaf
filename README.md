@@ -29,7 +29,8 @@ can build the model without a selected church, but queries against tenanted enti
 When authentication selection is wired, `LeaderId` denotes the church membership ID, not a global
 Identity user ID.
 
-`SaveChanges` protects tracked writes. `ExecuteUpdate`/`ExecuteUpdateAsync` also reject explicit
+`SaveChanges` protects tracked writes, including changes to owned (and JSON-mapped) entities, which
+are attributed to their root `ITenanted` owner even when the owner itself is unchanged. `ExecuteUpdate`/`ExecuteUpdateAsync` also reject explicit
 assignments to mapped `ITenanted.ChurchId`, including no-op assignments and queries matching no rows.
 The query interceptor checks setter targets, not values or projected member names: ordinary payload
 updates remain tenant-filtered. Direct mapped properties, `EF.Property`, runtime setter builders,
