@@ -5,6 +5,8 @@ namespace Sheaf.Data.Tenancy;
 
 public static class MultiTenancyDbContextOptionsBuilderExtensions
 {
+    private static readonly TenancyQueryExpressionInterceptor QueryInterceptor = new();
+
     /// <summary>Enables church multi-tenancy; the context must implement <see cref="ITenantContext"/>.</summary>
     public static DbContextOptionsBuilder<TContext> UseMultiTenancy<TContext>(this DbContextOptionsBuilder<TContext> builder)
         where TContext : DbContext, ITenantContext
@@ -31,6 +33,12 @@ public static class MultiTenancyDbContextOptionsBuilderExtensions
                 .OfType<TenancySaveChangesInterceptor>().Any() != true)
         {
             builder.AddInterceptors(new TenancySaveChangesInterceptor());
+        }
+
+        if (builder.Options.FindExtension<CoreOptionsExtension>()?.Interceptors?
+                .OfType<TenancyQueryExpressionInterceptor>().Any() != true)
+        {
+            builder.AddInterceptors(QueryInterceptor);
         }
 
         return builder;

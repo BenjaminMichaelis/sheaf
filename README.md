@@ -17,7 +17,7 @@ Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --
 ### Database tenancy
 
 Runtime `AddDatabase()` and `DesignTimeAppDbContextFactory` both use `Sheaf.Data`'s
-`AddSheafDatabase()` to configure Azure SQL, the tenancy convention/save interceptor, and
+`AddSheafDatabase()` to configure Azure SQL, the tenancy convention and write interceptors, and
 Identity schema version 3. `ApplicationDbContext` refuses to initialize without `UseMultiTenancy()`.
 SQLite tests keep their test provider and enable the same tenancy extension directly.
 
@@ -28,6 +28,18 @@ implementation. This is distinct from `Tenancy.ITenantContext`, which requires a
 can build the model without a selected church, but queries against tenanted entities fail closed.
 When authentication selection is wired, `LeaderId` denotes the church membership ID, not a global
 Identity user ID.
+
+`SaveChanges` protects tracked writes. `ExecuteUpdate`/`ExecuteUpdateAsync` also reject explicit
+assignments to mapped `ITenanted.ChurchId`, including no-op assignments and queries matching no rows.
+The query interceptor checks setter targets, not values or projected member names: ordinary payload
+updates remain tenant-filtered. Direct mapped properties, `EF.Property`, runtime setter builders,
+and mapped targets reached through `Select`, inner joins, set operations, and correlated
+`SelectMany` are supported when EF can translate the update. Set-operation branches must resolve to
+the same mapped property; projected scalar aliases do not change a column's ownership semantics.
+A setter whose mapped target cannot be resolved fails closed with `InvalidOperationException`.
+This is an EF-layer ownership guard,
+not database row-level security: trusted raw SQL, external writers, and deliberately bypassed query
+filters still require their own authorization boundaries.
 
 The production domain sets are `ChurchMemberships`, `Contexts`, `People`, `Captures`,
 `Touchpoints`, `Proposals`, `AuditEntries`, `LeaderTokens`, `Relationships`, `ContextLeaders`,
@@ -73,11 +85,16 @@ round-trip the owned context JSON, check SQL FK/uniqueness errors, and exercise 
 and interceptor stamping without bypassing tenant filters. Respawn preserves
 `__EFMigrationsHistory` and removes all other seed rows.
 
+Bulk compatibility cases cover `Union`, correlated `SelectMany`, scalar aliases, and warmed
+queries after a tenant change. Their dedicated provider-control contexts use the same migrated
+model without query interception and roll back every ownership change; guarded cases use normal
+production DI and tenant filters.
+
 These container tests require Docker and an amd64-capable host (the SQL Server image is
 amd64-only), including CI on `ubuntu-latest`. Run the migration and isolation cases with:
 
 ```pwsh
-dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerMigrationIsolationTests)/*"
+dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerMigrationIsolationTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
 ```
 
 For local Podman environments that need an explicit reachable container host, set

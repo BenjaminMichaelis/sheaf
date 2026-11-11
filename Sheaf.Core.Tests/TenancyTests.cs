@@ -141,6 +141,10 @@ public class TenancyTests
                 .OfType<TenancySaveChangesInterceptor>() ?? [];
 
         await Assert.That(interceptors).Count().IsEqualTo(1);
+        IEnumerable<TenancyQueryExpressionInterceptor> queryInterceptors =
+            configuredOptions.FindExtension<CoreOptionsExtension>()?.Interceptors?
+                .OfType<TenancyQueryExpressionInterceptor>() ?? [];
+        await Assert.That(queryInterceptors).Count().IsEqualTo(1);
     }
 
     [Test]

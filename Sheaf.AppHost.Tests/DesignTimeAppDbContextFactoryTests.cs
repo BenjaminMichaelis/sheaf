@@ -46,6 +46,10 @@ public class DesignTimeAppDbContextFactoryTests
                 .OfType<TenancySaveChangesInterceptor>() ?? [];
 
         await Assert.That(interceptors).Count().IsEqualTo(1);
+        IEnumerable<TenancyQueryExpressionInterceptor> queryInterceptors =
+            configuredOptions.FindExtension<CoreOptionsExtension>()?.Interceptors?
+                .OfType<TenancyQueryExpressionInterceptor>() ?? [];
+        await Assert.That(queryInterceptors).Count().IsEqualTo(1);
     }
 
     [Test]
@@ -57,6 +61,14 @@ public class DesignTimeAppDbContextFactoryTests
         await Assert.That(() => context.ChurchIdOrThrow)
             .Throws<InvalidOperationException>()
             .WithMessage("A church tenant is required for this query.");
+    }
+
+    [Test]
+    public async Task HasPendingModelChanges_FactoryProductionModel_ReturnsFalse()
+    {
+        await using ApplicationDbContext context = CreateContext();
+
+        await Assert.That(context.Database.HasPendingModelChanges()).IsFalse();
     }
 
     private static ApplicationDbContext CreateContext() =>

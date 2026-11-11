@@ -239,6 +239,93 @@ public class SqlServerMigrationIsolationTests
     }
 
     [Test]
+    public async Task ExecuteUpdateAsync_MigratedCaptureChurchIdChange_ThrowsBeforeMutation()
+    {
+        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        await using (AsyncServiceScope scope = Sql.CreateScope(seed.ChurchA.Church.Id))
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            await Assert.That(async () => await db.Captures
+                    .Where(capture => capture.Id == seed.ChurchA.Capture.Id)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(
+                        capture => capture.ChurchId, seed.ChurchB.Church.Id)))
+                .Throws<InvalidOperationException>()
+                .WithMessageContaining(nameof(DomainCapture.ChurchId))
+                .And.WithMessageContaining("immutable");
+        }
+
+        await AssertOriginalCapturesAsync(seed);
+    }
+
+    [Test]
+    public async Task ExecuteUpdate_MigratedCaptureChurchIdChange_ThrowsBeforeMutation()
+    {
+        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        await using (AsyncServiceScope scope = Sql.CreateScope(seed.ChurchA.Church.Id))
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            await Assert.That(() => db.Captures
+                    .Where(capture => capture.Id == seed.ChurchA.Capture.Id)
+                    .ExecuteUpdate(setters => setters.SetProperty(
+                        capture => capture.ChurchId, seed.ChurchB.Church.Id)))
+                .Throws<InvalidOperationException>()
+                .WithMessageContaining(nameof(DomainCapture.ChurchId))
+                .And.WithMessageContaining("immutable");
+        }
+
+        await AssertOriginalCapturesAsync(seed);
+    }
+
+    [Test]
+    public async Task ExecuteUpdateAsync_MigratedJoinOwnershipAlias_ThrowsBeforeMutation()
+    {
+        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        await using (AsyncServiceScope scope = Sql.CreateScope(seed.ChurchA.Church.Id))
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var query = db.Captures.Join(db.Captures, outer => outer.Id, inner => inner.Id,
+                (outer, inner) => new { Owner = inner.ChurchId, Payload = outer.Status });
+
+            await Assert.That(async () => await query.ExecuteUpdateAsync(
+                    setters => setters.SetProperty(row => row.Owner, seed.ChurchB.Church.Id)))
+                .Throws<InvalidOperationException>()
+                .WithMessage("ChurchId is immutable and cannot be assigned by ExecuteUpdate.");
+        }
+
+        await AssertOriginalCapturesAsync(seed);
+    }
+
+    [Test]
+    public async Task ExecuteUpdateAsync_MigratedJoinPayloadAlias_OnlyAffectsCurrentChurchRows()
+    {
+        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        const string updatedStatus = "ChurchId is ordinary payload";
+        await using (AsyncServiceScope scope = Sql.CreateScope(seed.ChurchA.Church.Id))
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var query = db.Captures.Join(db.Captures, outer => outer.Id, inner => inner.Id,
+                (outer, inner) => new { ChurchId = inner.Status });
+            int affected = await query.ExecuteUpdateAsync(
+                setters => setters.SetProperty(row => row.ChurchId, updatedStatus));
+            await Assert.That(affected).IsEqualTo(1);
+        }
+
+        foreach (ProductionChurchSeed church in new[] { seed.ChurchA, seed.ChurchB })
+        {
+            await using AsyncServiceScope scope = Sql.CreateScope(church.Church.Id);
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            DomainCapture persisted = await db.Captures.AsNoTracking().SingleAsync();
+            await Assert.That(persisted.Id).IsEqualTo(church.Capture.Id);
+            await Assert.That(persisted.ChurchId).IsEqualTo(church.Church.Id);
+            await Assert.That(persisted.Status).IsEqualTo(
+                church == seed.ChurchA ? updatedStatus : church.Capture.Status);
+            await Assert.That(persisted.RawText).IsEqualTo(church.Capture.RawText);
+        }
+    }
+
+    [Test]
     public async Task ExecuteDeleteAsync_MigratedSchema_OnlyAffectsCurrentChurchRows()
     {
         ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
@@ -288,6 +375,23 @@ public class SqlServerMigrationIsolationTests
         ApplicationDbContext dbB = scopeB.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await Assert.That(await dbB.Captures.AnyAsync(row => row.Id == originalId)).IsFalse();
         await Assert.That(await dbB.Captures.CountAsync()).IsEqualTo(1);
+    }
+
+    private async Task AssertOriginalCapturesAsync(ProductionTwoChurchSeed seed)
+    {
+        foreach (ProductionChurchSeed church in new[] { seed.ChurchA, seed.ChurchB })
+        {
+            await using AsyncServiceScope scope = Sql.CreateScope(church.Church.Id);
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            DomainCapture persisted = await db.Captures.AsNoTracking().SingleAsync();
+
+            await Assert.That(persisted.Id).IsEqualTo(church.Capture.Id);
+            await Assert.That(persisted.ChurchId).IsEqualTo(church.Church.Id);
+            await Assert.That(persisted.RawText).IsEqualTo(church.Capture.RawText);
+            await Assert.That(persisted.Transcript).IsEqualTo(church.Capture.Transcript);
+            await Assert.That(persisted.ExtractionJson).IsEqualTo(church.Capture.ExtractionJson);
+            await Assert.That(persisted.Status).IsEqualTo(church.Capture.Status);
+        }
     }
 
     private static async Task AssertTenantedSetAsync<TEntity>(

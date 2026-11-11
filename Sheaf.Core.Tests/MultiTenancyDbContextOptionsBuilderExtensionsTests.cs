@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
 using Sheaf.Data;
@@ -54,6 +55,10 @@ public class MultiTenancyDbContextOptionsBuilderExtensionsTests
             configuredOptions.FindExtension<CoreOptionsExtension>()?.Interceptors?
                 .OfType<TenancySaveChangesInterceptor>() ?? [];
         await Assert.That(interceptors).Count().IsEqualTo(1);
+        IEnumerable<IQueryExpressionInterceptor> queryInterceptors =
+            configuredOptions.FindExtension<CoreOptionsExtension>()?.Interceptors?
+                .OfType<IQueryExpressionInterceptor>() ?? [];
+        await Assert.That(queryInterceptors).Count().IsEqualTo(1);
     }
 
     private sealed class TenantedContext(DbContextOptions<TenantedContext> options)
