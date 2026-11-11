@@ -54,6 +54,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Install pinned workload set
+        run: dotnet workload update
+
       - name: Restore .NET dependencies
         run: dotnet restore Sheaf.Backend.slnf
 
