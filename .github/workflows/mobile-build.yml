@@ -41,16 +41,43 @@ jobs:
 
   ios:
     runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      IOS_DOTNET_VERSION: '10.0.404'
+      IOS_WORKLOAD_VERSION: '10.0.404'
     steps:
       - uses: actions/checkout@v7
+
+      - name: Select Xcode 27.2
+        shell: bash
+        run: |
+          test -d "$DEVELOPER_DIR"
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          xcode-select --print-path
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          global-json-file: global.json
+          dotnet-version: ${{ env.IOS_DOTNET_VERSION }}
+
+      - name: Pin iOS SDK resolution
+        shell: bash
+        run: |
+          jq --arg version "$IOS_DOTNET_VERSION" \
+            '.sdk.version = $version | .sdk.rollForward = "disable"' \
+            global.json > global.json.tmp
+          mv global.json.tmp global.json
+          dotnet --info
+          test "$(dotnet --version)" = "$IOS_DOTNET_VERSION"
 
       - name: Install iOS workload
-        run: dotnet workload install ios
+        shell: bash
+        run: |
+          dotnet workload install ios --version "$IOS_WORKLOAD_VERSION"
+          dotnet workload --info
+          test "$(dotnet workload --version)" = "$IOS_WORKLOAD_VERSION"
 
       - name: Build iOS
         run: dotnet build Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj --configuration Release
