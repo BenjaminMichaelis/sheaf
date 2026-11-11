@@ -12,7 +12,7 @@ aspire run          # API, SQL Server, migrations and the React frontend; API at
 
 The React + Vite PWA lives in `Sheaf.Web` (requires Node and pnpm; Aspire runs `pnpm install` and `pnpm dev`, proxying `/api` to the backend).
 
-Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --project <test csproj>`.
+Backend-only build/test: run `dotnet workload update` once to install the `global.json` workload set, then `dotnet build Sheaf.Backend.slnf`, then `dotnet test --project <test csproj>`.
 
 ### Mobile (Avalonia)
 
