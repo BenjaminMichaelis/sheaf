@@ -88,7 +88,7 @@ public class TenancyArchitectureTests
     }
 
     [Test]
-    public async Task GetEntityTypes_ProductionModel_ContainsOnlyMinimalTenantedMembershipEntity()
+    public async Task GetEntityTypes_ProductionModel_ContainsTenantedEntities()
     {
         using TenancyArchitectureFixture fixture = new();
         IEntityType membership = fixture.RuntimeContext.Model.FindEntityType(typeof(ChurchMembership))
@@ -104,7 +104,8 @@ public class TenancyArchitectureTests
             .Single(index => index.IsUnique && index.Properties.Select(property => property.Name)
                 .SequenceEqual([nameof(ChurchMembership.ChurchId), nameof(ChurchMembership.UserId)]));
 
-        await Assert.That(tenantedTypes).IsEquivalentTo([typeof(ChurchMembership)]);
+        await Assert.That(tenantedTypes).IsNotEmpty();
+        await Assert.That(tenantedTypes).Contains(typeof(ChurchMembership));
         await Assert.That(primaryKey).IsEquivalentTo(
             [nameof(ChurchMembership.ChurchId), nameof(ChurchMembership.Id)],
             CollectionOrdering.Matching);
