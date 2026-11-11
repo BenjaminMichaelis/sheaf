@@ -34,7 +34,15 @@ jobs:
           global-json-file: global.json
 
       - name: Install Android workload
-        run: dotnet workload install android
+        shell: bash
+        run: |
+          dotnet --info
+          sdk_version="$(jq -er '.sdk.version' global.json)"
+          workload_version="$(jq -er '.sdk.workloadVersion' global.json)"
+          test "$(dotnet --version)" = "$sdk_version"
+          dotnet workload install android
+          dotnet workload --info
+          test "$(dotnet workload --version)" = "$workload_version"
 
       - name: Build Android
         run: dotnet build Sheaf.Mobile.Android/Sheaf.Mobile.Android.csproj --configuration Release
@@ -43,8 +51,6 @@ jobs:
     runs-on: xcode-27
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
-      IOS_DOTNET_VERSION: '10.0.404'
-      IOS_WORKLOAD_VERSION: '10.0.404'
     steps:
       - uses: actions/checkout@v7
 
@@ -60,24 +66,22 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: ${{ env.IOS_DOTNET_VERSION }}
+          global-json-file: global.json
 
-      - name: Pin iOS SDK resolution
+      - name: Verify .NET SDK resolution
         shell: bash
         run: |
-          jq --arg version "$IOS_DOTNET_VERSION" \
-            '.sdk.version = $version | .sdk.rollForward = "disable"' \
-            global.json > global.json.tmp
-          mv global.json.tmp global.json
           dotnet --info
-          test "$(dotnet --version)" = "$IOS_DOTNET_VERSION"
+          sdk_version="$(jq -er '.sdk.version' global.json)"
+          test "$(dotnet --version)" = "$sdk_version"
 
       - name: Install iOS workload
         shell: bash
         run: |
-          dotnet workload install ios --version "$IOS_WORKLOAD_VERSION"
+          workload_version="$(jq -er '.sdk.workloadVersion' global.json)"
+          dotnet workload install ios
           dotnet workload --info
-          test "$(dotnet workload --version)" = "$IOS_WORKLOAD_VERSION"
+          test "$(dotnet workload --version)" = "$workload_version"
 
       - name: Build iOS
         run: dotnet build Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj --configuration Release
