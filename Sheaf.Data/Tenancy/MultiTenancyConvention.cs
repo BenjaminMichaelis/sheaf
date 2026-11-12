@@ -101,7 +101,9 @@ public sealed class MultiTenancyConvention(Type contextType) : IModelFinalizingC
                 }
 
                 // Change both sides atomically, preserving explicitly configured navigations and delete behavior.
-                fk.SetProperties([churchId, .. fk.Properties], newPrincipalKey);
+                _ = fk.SetProperties([churchId, .. fk.Properties], newPrincipalKey)
+                    ?? throw Unprotected(dependent,
+                        $"its foreign key to {principal.DisplayName()} could not reference the composite key");
             }
         }
 
