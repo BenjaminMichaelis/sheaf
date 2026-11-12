@@ -70,6 +70,21 @@ public class SqlServerBulkUpdateCompatibilityTests
         await AssertLeaderNamesAsync(seed, "payload-updated", seed.LeaderB.Name);
     }
 
+    [Test]
+    public async Task ExecuteDeleteAsync_IgnoreQueryFiltersOnTenantedEntity_RejectsBeforeMutation()
+    {
+        TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(Sql.CreateContext);
+        await using (TenancyTestDbContext db = Sql.CreateContext(seed.ChurchA.Id))
+        {
+            await Assert.That(async () => await db.Leaders.IgnoreQueryFilters().ExecuteDeleteAsync())
+                .Throws<InvalidOperationException>()
+                .WithMessage($"ExecuteDelete cannot ignore the {MultiTenancyConvention.FilterName} query filter "
+                    + "on tenanted entities; bulk writes must stay scoped to the current church.");
+        }
+
+        await AssertLeaderNamesAsync(seed, seed.LeaderA.Name, seed.LeaderB.Name);
+    }
+
     private async Task AssertLeaderNamesAsync(TwoChurchSeed seed, string churchAName, string churchBName)
     {
         await using TenancyTestDbContext churchA = Sql.CreateContext(seed.ChurchA.Id);

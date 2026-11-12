@@ -24,6 +24,22 @@ public sealed class Person : ITenanted
     public Leader? Leader { get; set; }
 }
 
+/// <summary>A global principal whose collection navigation reaches tenanted rows.</summary>
+public sealed class Hub
+{
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+    public List<Spoke> Spokes { get; set; } = [];
+}
+
+public sealed class Spoke : ITenanted
+{
+    public Guid Id { get; set; }
+    public Guid ChurchId { get; set; }
+    public required string Name { get; set; }
+    public Guid HubId { get; set; }
+}
+
 public sealed class GuardRecord : ITenanted
 {
     public Guid Id { get; set; }
@@ -53,11 +69,11 @@ public sealed class TenancyTestDbContext(DbContextOptions<TenancyTestDbContext> 
     public DbSet<Church> Churches => Set<Church>();
     public DbSet<Leader> Leaders => Set<Leader>();
     public DbSet<Person> People => Set<Person>();
+    public DbSet<Hub> Hubs => Set<Hub>();
+    public DbSet<Spoke> Spokes => Set<Spoke>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // The Person-to-Leader relationship is left to EF conventions: an explicit foreign key
-        // configuration would prevent the tenancy convention from adding ChurchId to it.
         modelBuilder.Entity<Person>().HasIndex(p => new { p.ChurchId, p.Email }).IsUnique();
         modelBuilder.Entity<Leader>()
             .HasOne<Church>()
@@ -69,6 +85,12 @@ public sealed class TenancyTestDbContext(DbContextOptions<TenancyTestDbContext> 
             .HasOne<Church>()
             .WithMany()
             .HasForeignKey(person => person.ChurchId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired();
+        modelBuilder.Entity<Spoke>()
+            .HasOne<Church>()
+            .WithMany()
+            .HasForeignKey(spoke => spoke.ChurchId)
             .OnDelete(DeleteBehavior.Restrict)
             .IsRequired();
         modelBuilder.Entity<GuardRecord>(entity =>

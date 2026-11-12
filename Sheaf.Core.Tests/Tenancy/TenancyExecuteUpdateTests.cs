@@ -213,6 +213,307 @@ public class TenancyExecuteUpdateTests
         await AssertOriginalLeadersAsync(sqlite, seed);
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteDelete_IgnoreQueryFiltersOnTenantedEntity_ThrowsBeforeMutation(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            await AssertFilterBypassAsync("ExecuteDelete",
+                () => DeleteAsync(db.Leaders.IgnoreQueryFilters(), useAsync));
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_IgnoreQueryFiltersOnTenantedEntity_ThrowsBeforeMutation(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            await AssertFilterBypassAsync("ExecuteUpdate", () => UpdateAsync(db.Leaders.IgnoreQueryFilters(),
+                setters => setters.SetProperty(leader => leader.Name, "must-not-be-written"), useAsync));
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_IgnoreNamedTenancyFilter_ThrowsBeforeMutation(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Leaders.IgnoreQueryFilters(["Unrelated", MultiTenancyConvention.FilterName]);
+
+            await AssertFilterBypassAsync("ExecuteUpdate", () => UpdateAsync(query,
+                setters => setters.SetProperty(leader => leader.Name, "must-not-be-written"), useAsync));
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteDelete_IgnoreNamedTenancyFilter_ThrowsBeforeMutation(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            await AssertFilterBypassAsync("ExecuteDelete", () => DeleteAsync(
+                db.Leaders.IgnoreQueryFilters([MultiTenancyConvention.FilterName]), useAsync));
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    public async Task ExecuteDelete_IgnoreQueryFiltersInGlobalSubquery_ThrowsBeforeMutation()
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Leaders.Where(leader => db.Churches.IgnoreQueryFilters()
+                .Any(church => church.Id == leader.ChurchId));
+
+            await AssertFilterBypassAsync("ExecuteDelete", () => query.ExecuteDeleteAsync());
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    public async Task ExecuteUpdate_IgnoreUnrelatedNamedFilter_OnlyUpdatesCurrentChurch()
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            int affected = await db.Leaders.IgnoreQueryFilters(["Unrelated"])
+                .ExecuteUpdateAsync(setters => setters.SetProperty(leader => leader.Name, "updated"));
+
+            await Assert.That(affected).IsEqualTo(1);
+        }
+
+        await using TenancyTestDbContext verify = sqlite.CreateContext(seed.ChurchB.Id);
+        await Assert.That(await verify.Leaders.Select(leader => leader.Name).SingleAsync())
+            .IsEqualTo(seed.LeaderB.Name);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_IgnoreQueryFiltersOnGlobalEntity_UpdatesRows(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using TenancyTestDbContext db = sqlite.CreateContext(null);
+
+        int affected = await UpdateAsync(db.Churches.IgnoreQueryFilters(),
+            setters => setters.SetProperty(church => church.Name, "renamed"), useAsync);
+
+        await Assert.That(affected).IsEqualTo(2);
+        await Assert.That(await db.Churches.Select(church => church.Name).ToListAsync())
+            .IsEquivalentTo(["renamed", "renamed"]);
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    public async Task ExecuteUpdate_LeftJoinPayloadSetter_UpdatesOnlyCurrentChurch()
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Leaders.LeftJoin(db.People,
+                leader => (Guid?)leader.Id, person => person.LeaderId, (leader, _) => leader);
+
+            await Assert.That(await query.ExecuteUpdateAsync(
+                    setters => setters.SetProperty(leader => leader.Name, "renamed-a")))
+                .IsEqualTo(1);
+        }
+
+        await using TenancyTestDbContext verifyA = sqlite.CreateContext(seed.ChurchA.Id);
+        await Assert.That(await verifyA.Leaders.Select(leader => leader.Name).SingleAsync()).IsEqualTo("renamed-a");
+        await using TenancyTestDbContext verifyB = sqlite.CreateContext(seed.ChurchB.Id);
+        await Assert.That(await verifyB.Leaders.Select(leader => leader.Name).SingleAsync())
+            .IsEqualTo(seed.LeaderB.Name);
+    }
+
+    [Test]
+    public async Task ExecuteUpdate_LeftJoinOwnershipSetter_ThrowsBeforeMutation()
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Leaders.LeftJoin(db.People,
+                leader => (Guid?)leader.Id, person => person.LeaderId, (leader, _) => leader);
+
+            await AssertImmutableAsync(() => query.ExecuteUpdateAsync(
+                setters => setters.SetProperty(leader => leader.ChurchId, seed.ChurchB.Id)));
+        }
+
+        await AssertOriginalLeadersAsync(sqlite, seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_LeftJoinInnerEntitySetters_UpdatesPayloadAndRejectsOwnership(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        const string name = "renamed-a-via-left-join";
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Churches.LeftJoin(db.Leaders,
+                    church => church.Id, leader => leader.ChurchId, (_, leader) => new { Entity = leader })
+                .Where(row => row.Entity != null)
+                // The filter excludes unmatched churches, but LINQ does not carry that null-state into Select.
+                .Select(row => row.Entity!);
+
+            int affected = await UpdateAsync(query, setters => setters.SetProperty(leader => leader.Name, name),
+                useAsync);
+
+            await Assert.That(affected).IsEqualTo(1);
+            await AssertImmutableAsync(() => UpdateAsync(query, setters =>
+            {
+                setters.SetProperty(leader => leader.Name, "must-not-be-written");
+                setters.SetProperty(leader => leader.ChurchId, seed.ChurchB.Id);
+            }, useAsync));
+        }
+
+        foreach ((Church church, Leader leader) in seed.Churches)
+        {
+            await using TenancyTestDbContext db = sqlite.CreateContext(church.Id);
+            Leader persisted = await db.Leaders.AsNoTracking().SingleAsync();
+            await Assert.That(persisted.Id).IsEqualTo(leader.Id);
+            await Assert.That(persisted.ChurchId).IsEqualTo(church.Id);
+            await Assert.That(persisted.Name).IsEqualTo(church == seed.ChurchA ? name : leader.Name);
+        }
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_RightJoinInnerEntitySetters_UpdatesPayloadAndRejectsOwnership(bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        BulkSeed seed = await SeedAsync(sqlite);
+        const string name = "renamed-a-via-right-join";
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            IQueryable<Leader> query = db.Churches.RightJoin(db.Leaders,
+                    church => church.Id, leader => leader.ChurchId, (_, leader) => new { Entity = leader })
+                .Select(row => row.Entity);
+
+            int affected = await UpdateAsync(query, setters => setters.SetProperty(leader => leader.Name, name),
+                useAsync);
+
+            await Assert.That(affected).IsEqualTo(1);
+            await AssertImmutableAsync(() => UpdateAsync(query, setters =>
+            {
+                setters.SetProperty(leader => leader.Name, "must-not-be-written");
+                setters.SetProperty(leader => leader.ChurchId, seed.ChurchB.Id);
+            }, useAsync));
+        }
+
+        foreach ((Church church, Leader leader) in seed.Churches)
+        {
+            await using TenancyTestDbContext db = sqlite.CreateContext(church.Id);
+            Leader persisted = await db.Leaders.AsNoTracking().SingleAsync();
+            await Assert.That(persisted.Id).IsEqualTo(leader.Id);
+            await Assert.That(persisted.ChurchId).IsEqualTo(church.Id);
+            await Assert.That(persisted.Name).IsEqualTo(church == seed.ChurchA ? name : leader.Name);
+        }
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteDelete_IgnoreQueryFiltersOnGlobalRootSelectManyTenantedNavigation_ThrowsBeforeMutation(
+        bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(sqlite.CreateContext);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            await AssertFilterBypassAsync("ExecuteDelete",
+                () => DeleteAsync(db.Hubs.IgnoreQueryFilters().SelectMany(hub => hub.Spokes), useAsync));
+        }
+
+        await AssertOriginalSpokesAsync(sqlite, seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_IgnoreQueryFiltersOnGlobalRootSelectManyTenantedNavigation_ThrowsBeforeMutation(
+        bool useAsync)
+    {
+        using SqliteFixture sqlite = new();
+        TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(sqlite.CreateContext);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            await AssertFilterBypassAsync("ExecuteUpdate", () => UpdateAsync(
+                db.Hubs.IgnoreQueryFilters().SelectMany(hub => hub.Spokes),
+                setters => setters.SetProperty(spoke => spoke.Name, "must-not-be-written"), useAsync));
+        }
+
+        await AssertOriginalSpokesAsync(sqlite, seed);
+    }
+
+    [Test]
+    public async Task ExecuteDelete_GlobalRootSelectManyTenantedNavigation_OnlyDeletesCurrentChurch()
+    {
+        using SqliteFixture sqlite = new();
+        TwoChurchSeed seed = await TwoChurchSeed.SeedAsync(sqlite.CreateContext);
+        await using (TenancyTestDbContext db = sqlite.CreateContext(seed.ChurchA.Id))
+        {
+            int affected = await db.Hubs.SelectMany(hub => hub.Spokes).ExecuteDeleteAsync();
+
+            await Assert.That(affected).IsEqualTo(1);
+        }
+
+        await using TenancyTestDbContext verify = sqlite.CreateContext(null);
+        await Assert.That(await verify.Spokes.IgnoreQueryFilters().Select(spoke => spoke.Id).ToListAsync())
+            .IsEquivalentTo([seed.SpokeB.Id]);
+    }
+
+    private static async Task AssertOriginalSpokesAsync(SqliteFixture sqlite, TwoChurchSeed seed)
+    {
+        await using TenancyTestDbContext db = sqlite.CreateContext(null);
+        List<Spoke> persisted = await db.Spokes.IgnoreQueryFilters().AsNoTracking().ToListAsync();
+        await Assert.That(persisted.Select(spoke => (spoke.Id, spoke.ChurchId, spoke.Name)))
+            .IsEquivalentTo([
+                (seed.SpokeA.Id, seed.SpokeA.ChurchId, seed.SpokeA.Name),
+                (seed.SpokeB.Id, seed.SpokeB.ChurchId, seed.SpokeB.Name),
+            ]);
+    }
+
+    private static Task<int> DeleteAsync<TEntity>(IQueryable<TEntity> query, bool useAsync) =>
+        useAsync ? query.ExecuteDeleteAsync() : Task.FromResult(query.ExecuteDelete());
+
+    private static async Task AssertFilterBypassAsync(string operation, Func<Task<int>> write) =>
+        await Assert.That(async () => await write())
+            .Throws<InvalidOperationException>()
+            .WithMessage($"{operation} cannot ignore the {MultiTenancyConvention.FilterName} query filter "
+                + "on tenanted entities; bulk writes must stay scoped to the current church.");
+
     private static Task<int> UpdateAsync<TEntity>(
         IQueryable<TEntity> query, Action<UpdateSettersBuilder<TEntity>> setters, bool useAsync) =>
         useAsync ? query.ExecuteUpdateAsync(setters) : Task.FromResult(query.ExecuteUpdate(setters));

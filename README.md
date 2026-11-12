@@ -34,13 +34,25 @@ are attributed to their root `ITenanted` owner even when the owner itself is unc
 assignments to mapped `ITenanted.ChurchId`, including no-op assignments and queries matching no rows.
 The query interceptor checks setter targets, not values or projected member names: ordinary payload
 updates remain tenant-filtered. Direct mapped properties, `EF.Property`, runtime setter builders,
-and mapped targets reached through `Select`, inner joins, set operations, and correlated
+and mapped targets reached through `Select`, inner/left/right joins, set operations, and correlated
 `SelectMany` are supported when EF can translate the update. Set-operation branches must resolve to
 the same mapped property; projected scalar aliases do not change a column's ownership semantics.
-A setter whose mapped target cannot be resolved fails closed with `InvalidOperationException`.
+A setter whose mapped target cannot be resolved fails closed with `InvalidOperationException`;
+unsupported `ExecuteUpdate` source shapes such as `GroupJoin` (including
+`GroupJoin`/`SelectMany`/`DefaultIfEmpty` left joins) fail closed.
+`ExecuteUpdate`/`ExecuteDelete` (sync and async) are rejected before any mutation when the query
+ignores `TenancyFilter`, whether through `IgnoreQueryFilters()` or a named
+`IgnoreQueryFilters(["TenancyFilter"])`, and either the written entity type is `ITenanted` (including
+tenanted rows reached through a navigation such as `SelectMany`) or the query has a tenanted entity
+set root anywhere. Bulk writes to global entities with no tenanted root may still ignore filters.
+Known limits: in such a global write, tenanted rows reached only through navigations (for example
+`Where(hub => hub.Spokes.Any())`) are read unfiltered and can influence which global rows change; and
+deleting a global principal can trigger database-level cascades into tenanted dependents of every
+church, which EF query filters do not see.
+Cross-church maintenance writes need a separately audited API.
 This is an EF-layer ownership guard,
 not database row-level security: trusted raw SQL, external writers, and deliberately bypassed query
-filters still require their own authorization boundaries.
+filters on reads or tracked loads still require their own authorization boundaries.
 
 This tenancy-foundation change adds only the minimal church-scoped `ChurchMembership` entity and
 production migration needed to prove tenant filtering and write guards on the migrated

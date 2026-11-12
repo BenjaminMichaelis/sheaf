@@ -17,7 +17,7 @@ namespace Sheaf.Core.Tests.Tenancy.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.13")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -37,6 +37,21 @@ namespace Sheaf.Core.Tests.Tenancy.Migrations
                     b.HasKey("ChurchId", "Id");
 
                     b.ToTable("GuardRecord");
+                });
+
+            modelBuilder.Entity("Sheaf.Core.Tests.Hub", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Hubs");
                 });
 
             modelBuilder.Entity("Sheaf.Core.Tests.Leader", b =>
@@ -83,6 +98,28 @@ namespace Sheaf.Core.Tests.Tenancy.Migrations
                     b.HasIndex("ChurchId", "LeaderId");
 
                     b.ToTable("People");
+                });
+
+            modelBuilder.Entity("Sheaf.Core.Tests.Spoke", b =>
+                {
+                    b.Property<Guid>("ChurchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HubId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("ChurchId", "Id");
+
+                    b.HasIndex("HubId");
+
+                    b.ToTable("Spokes");
                 });
 
             modelBuilder.Entity("Sheaf.Data.Church", b =>
@@ -183,6 +220,26 @@ namespace Sheaf.Core.Tests.Tenancy.Migrations
                         .HasForeignKey("ChurchId", "LeaderId");
 
                     b.Navigation("Leader");
+                });
+
+            modelBuilder.Entity("Sheaf.Core.Tests.Spoke", b =>
+                {
+                    b.HasOne("Sheaf.Data.Church", null)
+                        .WithMany()
+                        .HasForeignKey("ChurchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Sheaf.Core.Tests.Hub", null)
+                        .WithMany("Spokes")
+                        .HasForeignKey("HubId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Sheaf.Core.Tests.Hub", b =>
+                {
+                    b.Navigation("Spokes");
                 });
 #pragma warning restore 612, 618
         }

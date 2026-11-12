@@ -7,11 +7,67 @@ using Microsoft.EntityFrameworkCore.Query;
 
 namespace Sheaf.Data.Tenancy;
 
-/// <summary>Rejects bulk assignments to mapped church ownership before query translation.</summary>
+/// <summary>
+/// Rejects bulk assignments to mapped church ownership, and bulk writes that ignore the tenancy filter on
+/// tenanted entities, before query translation.
+/// </summary>
 public sealed class TenancyQueryExpressionInterceptor : IQueryExpressionInterceptor
 {
-    public Expression QueryCompilationStarting(Expression queryExpression, QueryExpressionEventData eventData) =>
-        new OwnershipUpdateVisitor(eventData.Context?.Model).Visit(queryExpression);
+    public Expression QueryCompilationStarting(Expression queryExpression, QueryExpressionEventData eventData)
+    {
+        if (queryExpression is MethodCallExpression { Method.Name: var operation } bulk
+            && bulk.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions)
+            && operation is nameof(EntityFrameworkQueryableExtensions.ExecuteUpdate)
+                or nameof(EntityFrameworkQueryableExtensions.ExecuteDelete))
+        {
+            TenancyFilterBypassFinder finder = new();
+            finder.Visit(queryExpression);
+
+            // EF applies IgnoreQueryFilters to every entity root in the query, wherever the call appears.
+            // Roots alone miss navigation-reached targets (e.g. SelectMany), so the written type also counts.
+            bool writesTenanted = bulk.Method.IsGenericMethod
+                && typeof(ITenanted).IsAssignableFrom(bulk.Method.GetGenericArguments()[0]);
+            if (finder.IgnoresTenancyFilter && (finder.HasTenantedRoot || writesTenanted))
+            {
+                throw new InvalidOperationException(
+                    $"{operation} cannot ignore the {MultiTenancyConvention.FilterName} query filter on tenanted "
+                    + "entities; bulk writes must stay scoped to the current church.");
+            }
+        }
+
+        return new OwnershipUpdateVisitor(eventData.Context?.Model).Visit(queryExpression);
+    }
+
+    private sealed class TenancyFilterBypassFinder : ExpressionVisitor
+    {
+        public bool IgnoresTenancyFilter { get; private set; }
+
+        public bool HasTenantedRoot { get; private set; }
+
+        protected override Expression VisitExtension(Expression node)
+        {
+            if (node is EntityQueryRootExpression root && typeof(ITenanted).IsAssignableFrom(root.EntityType.ClrType))
+            {
+                HasTenantedRoot = true;
+            }
+
+            return base.VisitExtension(node);
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            if (node.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions)
+                && node.Method.Name == nameof(EntityFrameworkQueryableExtensions.IgnoreQueryFilters))
+            {
+                // Filter keys that cannot be inspected are treated as ignoring tenancy.
+                IgnoresTenancyFilter |= node.Arguments.Count == 1
+                    || node.Arguments[1] is not ConstantExpression { Value: IEnumerable<string> keys }
+                    || keys.Contains(MultiTenancyConvention.FilterName);
+            }
+
+            return base.VisitMethodCall(node);
+        }
+    }
 
     private sealed class OwnershipUpdateVisitor(IModel? model) : ExpressionVisitor
     {
@@ -118,7 +174,8 @@ public sealed class TenancyQueryExpressionInterceptor : IQueryExpressionIntercep
         }
 
         if (query.Method.DeclaringType == typeof(Queryable)
-            && ((query.Method.Name == nameof(Queryable.Join) && query.Arguments.Count == 5)
+            && (((query.Method.Name is nameof(Queryable.Join) or nameof(Queryable.LeftJoin)
+                    or nameof(Queryable.RightJoin)) && query.Arguments.Count == 5)
                 || (query.Method.Name == nameof(Queryable.SelectMany) && query.Arguments.Count == 3))
             && Unwrap(query.Arguments[^1]) is LambdaExpression { Parameters.Count: 2 } result)
         {

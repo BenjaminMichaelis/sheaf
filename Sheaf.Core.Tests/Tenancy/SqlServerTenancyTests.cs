@@ -32,6 +32,7 @@ public class SqlServerTenancyTests
         {
             [typeof(Leader)] = [seed.LeaderA.Id],
             [typeof(Person)] = [.. seed.PeopleA.Select(p => p.Id)],
+            [typeof(Spoke)] = [seed.SpokeA.Id],
         };
         int tenantedSets = 0;
         foreach (PropertyInfo dbSet in dbSets)
