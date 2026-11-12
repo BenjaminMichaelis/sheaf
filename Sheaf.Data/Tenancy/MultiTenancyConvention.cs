@@ -10,6 +10,8 @@ namespace Sheaf.Data.Tenancy;
 /// <summary>
 /// For every <see cref="ITenanted"/> entity: adds the <c>TenancyFilter</c> named query filter, makes the primary key
 /// <c>(ChurchId, Id)</c>, and rewires foreign keys to tenanted principals to <c>(ChurchId, FkId)</c>.
+/// Non-tenanted dependents cannot reference tenanted principals, except through ownership relationships.
+/// Many-to-many relationships between tenanted entities require an explicit <see cref="ITenanted"/> join entity.
 /// </summary>
 public sealed class MultiTenancyConvention(Type contextType) : IModelFinalizingConvention
 {
@@ -20,7 +22,22 @@ public sealed class MultiTenancyConvention(Type contextType) : IModelFinalizingC
         IConventionModelBuilder modelBuilder,
         IConventionContext<IConventionModelBuilder> context)
     {
-        List<IConventionEntityType> tenanted = modelBuilder.Metadata.GetEntityTypes()
+        List<IConventionEntityType> entityTypes = modelBuilder.Metadata.GetEntityTypes().ToList();
+        foreach (IConventionEntityType dependent in entityTypes.Where(e => !typeof(ITenanted).IsAssignableFrom(e.ClrType)))
+        {
+            foreach (IConventionForeignKey foreignKey in dependent.GetDeclaredForeignKeys())
+            {
+                IConventionEntityType principal = foreignKey.PrincipalEntityType;
+                if (!foreignKey.IsOwnership && typeof(ITenanted).IsAssignableFrom(principal.ClrType))
+                {
+                    throw new InvalidOperationException(
+                        $"Non-tenanted {dependent.DisplayName()} cannot have a foreign key to tenanted {principal.DisplayName()}. "
+                        + "Use an explicit ITenanted dependent; implicit many-to-many joins are not supported.");
+                }
+            }
+        }
+
+        List<IConventionEntityType> tenanted = entityTypes
             .Where(e => !e.IsOwned() && typeof(ITenanted).IsAssignableFrom(e.ClrType))
             .ToList();
 
@@ -83,11 +100,10 @@ public sealed class MultiTenancyConvention(Type contextType) : IModelFinalizingC
                     continue;
                 }
 
-                IConventionForeignKey rewired = fk.Builder.HasForeignKey([churchId, .. fk.Properties])?.Metadata
-                    ?? throw Unprotected(dependent, $"its foreign key to {principal.DisplayName()} could not include {ChurchIdName}");
-
-                _ = rewired.Builder.HasPrincipalKey(newPrincipalKey.Properties)
-                    ?? throw Unprotected(dependent, $"its foreign key to {principal.DisplayName()} could not reference the composite key");
+                // Change both sides atomically, preserving explicitly configured navigations and delete behavior.
+                _ = fk.SetProperties([churchId, .. fk.Properties], newPrincipalKey)
+                    ?? throw Unprotected(dependent,
+                        $"its foreign key to {principal.DisplayName()} could not reference the composite key");
             }
         }
 

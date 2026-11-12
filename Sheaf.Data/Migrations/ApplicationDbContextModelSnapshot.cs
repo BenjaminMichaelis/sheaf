@@ -263,6 +263,31 @@ namespace Sheaf.Data.Migrations
                     b.ToTable("Churches");
                 });
 
+            modelBuilder.Entity("Sheaf.Data.ChurchMembership", b =>
+                {
+                    b.Property<Guid>("ChurchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("ChurchId", "Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ChurchId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("ChurchMemberships");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -362,6 +387,21 @@ namespace Sheaf.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Sheaf.Data.ChurchMembership", b =>
+                {
+                    b.HasOne("Sheaf.Data.Church", null)
+                        .WithMany()
+                        .HasForeignKey("ChurchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Sheaf.Data.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 #pragma warning restore 612, 618

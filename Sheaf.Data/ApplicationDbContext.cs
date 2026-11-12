@@ -1,5 +1,3 @@
-using System.Linq.Expressions;
-
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +7,7 @@ namespace Sheaf.Data;
 
 public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext
 {
-    private readonly ITenantContext _tenantContext;
+    private readonly ICurrentChurch _currentChurch;
 
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : this(options, new TenantContext())
@@ -18,40 +16,47 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public ApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options,
-        ITenantContext tenantContext)
+        ICurrentChurch currentChurch)
         : base(options)
     {
-        _tenantContext = tenantContext;
+        _currentChurch = currentChurch;
     }
 
     public DbSet<Church> Churches => Set<Church>();
 
-    public Guid ChurchIdOrThrow => _tenantContext.ChurchId
+    public DbSet<ChurchMembership> ChurchMemberships => Set<ChurchMembership>();
+
+    public Guid ChurchIdOrThrow => _currentChurch.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
 
     Guid Tenancy.ITenantContext.ChurchId => ChurchIdOrThrow;
 
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-        optionsBuilder.AddInterceptors(new Tenancy.TenancySaveChangesInterceptor());
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (optionsBuilder.Options.FindExtension<Tenancy.MultiTenancyExtension>() is null)
+        {
+            throw new InvalidOperationException(
+                "ApplicationDbContext requires UseMultiTenancy. Configure production services with AddSheafDatabase.");
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
 
-        foreach (var entityType in builder.Model.GetEntityTypes()
-                     .Where(entityType => typeof(ITenanted).IsAssignableFrom(entityType.ClrType)))
+        builder.Entity<ChurchMembership>(entity =>
         {
-            var entity = Expression.Parameter(entityType.ClrType, "entity");
-            var entityChurchId = Expression.Property(entity, nameof(ITenanted.ChurchId));
-            var currentChurchId = Expression.Property(
-                Expression.Constant(this),
-                nameof(ChurchIdOrThrow));
-            var filter = Expression.Lambda(
-                Expression.Equal(entityChurchId, currentChurchId),
-                entity);
-
-            builder.Entity(entityType.ClrType).HasQueryFilter(filter);
-        }
+            entity.HasOne<Church>()
+                .WithMany()
+                .HasForeignKey(membership => membership.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired();
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(membership => membership.UserId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired();
+        });
 
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {

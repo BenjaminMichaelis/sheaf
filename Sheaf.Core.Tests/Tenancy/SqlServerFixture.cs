@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 using Respawn;
+using Respawn.Graph;
 
 using Testcontainers.MsSql;
 
@@ -28,14 +29,18 @@ public sealed class SqlServerFixture : IAsyncInitializer, IAsyncDisposable
         {
             InitialCatalog = "SheafTenancyTests",
         }.ConnectionString;
-        _options = TenancyTestDbContext.BuildOptions(builder => builder.UseSqlServer(_connectionString));
+        _options = TenancyTestDbContext.BuildOptions(builder => builder.UseAzureSql(_connectionString));
 
         await using TenancyTestDbContext db = CreateContext(null);
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
 
         await using SqlConnection connection = new(_connectionString);
         await connection.OpenAsync();
-        _respawner = await Respawner.CreateAsync(connection, new RespawnerOptions { DbAdapter = DbAdapter.SqlServer });
+        _respawner = await Respawner.CreateAsync(connection, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.SqlServer,
+            TablesToIgnore = [new Table("dbo", "__EFMigrationsHistory")],
+        });
     }
 
     public TenancyTestDbContext CreateContext(Guid? churchId) =>
