@@ -1,5 +1,9 @@
 {
   "chat.newSession.defaultMode": "Squad",
+  "chat.plugins.enabled": true,
+  "chat.plugins.marketplaces": [
+    "dotnet/skills"
+  ],
   "cSpell.words": [
     "ASPIREINTERACTION"
   ]
