@@ -54,10 +54,19 @@ This is an EF-layer ownership guard,
 not database row-level security: trusted raw SQL, external writers, and deliberately bypassed query
 filters on reads or tracked loads still require their own authorization boundaries.
 
-This tenancy-foundation change adds only the minimal church-scoped `ChurchMembership` entity and
-production migration needed to prove tenant filtering and write guards on the migrated
-`ApplicationDbContext`. The broader #20 domain model and its migration remain follow-up work,
-stacked on this tenancy foundation.
+The tenancy foundation supplies the minimal church-scoped `ChurchMembership` entity and its
+production migration. Domain Model v1 (#20), stacked above #124, adds Context, Person, Capture,
+Touchpoint, Proposal, AuditEntry, LeaderToken, Relationship, explicit ContextLeader/ContextMember
+joins, Attendance and PersonExternalRef. Its additive migration retains the existing membership
+table and data. All tenant roots reference Church with `Restrict`; tenant-to-tenant references
+use `(ChurchId, target Id)` foreign keys to the principal's composite primary key. The existing
+tenancy convention expands single-ID mappings to that composite shape during model finalization.
+Context's custom-field schema and definitions are owned JSON, not independent tenant roots.
+
+Leader references use membership IDs, external IDs live only in PersonExternalRef with church-scoped
+uniqueness, and tokens store only hashes. This layer supplies schema and isolation coverage, not
+authorization, token issuance/validation, membership provisioning, church switching, Area schema
+or connector workflows.
 
 The existing production migration chain can be validated on the fixture's isolated SQL Server
 catalog with `Sheaf.Core.Tests.SqlServerMigrationTests` (Docker/amd64 required).
@@ -76,7 +85,9 @@ The runtime options probes are in `Sheaf.Core.Tests.TenancyTests`; factory probe
 to a database or start Aspire.
 
 The SQL Server tenancy tests use the migrated production `ApplicationDbContext` and its actual
-migrations to verify membership query isolation and cross-church write rejection. A separate
+migrations to verify query isolation across every domain set, owned JSON round-trips,
+cross-church membership-leader rejection, external-reference uniqueness and tenant-filtered bulk
+writes. A separate
 test-only model remains for distinct convention/owned-JSON coverage; its migration test applies
 only that fixture's schema and does not stand in for the production migration path. Both use
 `UseAzureSql`, so the test-only owned-JSON migration test requires SQL Server 2025 or Azure SQL.
@@ -89,7 +100,7 @@ These container tests require Docker and an amd64-capable host (the SQL Server i
 amd64-only), including CI on `ubuntu-latest`. Run the migration and isolation cases with:
 
 ```pwsh
-dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerProductionTenancyTests)|(SqlServerTenancyMigrationTests)|(SqlServerTenancyTests)|(SqlServerTenancyWriteGuardTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
+dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(ProductionDomainModelTests)|(ProductionMigrationModelTests)|(TenancyArchitectureTests)|(SqlServerMigrationIsolationTests)|(SqlServerMigrationTests)|(SqlServerProductionTenancyTests)|(SqlServerTenancyMigrationTests)|(SqlServerTenancyTests)|(SqlServerTenancyWriteGuardTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
 ```
 
 For local Podman environments that need an explicit reachable container host, set
