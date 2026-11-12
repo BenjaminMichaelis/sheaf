@@ -21,8 +21,8 @@ public class ChurchMembership : ITenanted
 
 public enum ChurchMembershipRole
 {
-    Leader,
-    Coordinator,
-    Staff,
-    Admin
+    Leader = 0,
+    Coordinator = 1,
+    Staff = 2,
+    Admin = 3
 }
