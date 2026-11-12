@@ -34,23 +34,54 @@ jobs:
           global-json-file: global.json
 
       - name: Install Android workload
-        run: dotnet workload install android
+        shell: bash
+        run: |
+          dotnet --info
+          sdk_version="$(jq -er '.sdk.version' global.json)"
+          workload_version="$(jq -er '.sdk.workloadVersion' global.json)"
+          test "$(dotnet --version)" = "$sdk_version"
+          dotnet workload install android
+          dotnet workload --info
+          test "$(dotnet workload --version)" = "$workload_version"
 
       - name: Build Android
         run: dotnet build Sheaf.Mobile.Android/Sheaf.Mobile.Android.csproj --configuration Release
 
   ios:
     runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
+
+      - name: Select Xcode 27.2
+        shell: bash
+        run: |
+          test -d "$DEVELOPER_DIR"
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          xcode-select --print-path
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
+      - name: Verify .NET SDK resolution
+        shell: bash
+        run: |
+          dotnet --info
+          sdk_version="$(jq -er '.sdk.version' global.json)"
+          test "$(dotnet --version)" = "$sdk_version"
+
       - name: Install iOS workload
-        run: dotnet workload install ios
+        shell: bash
+        run: |
+          workload_version="$(jq -er '.sdk.workloadVersion' global.json)"
+          dotnet workload install ios
+          dotnet workload --info
+          test "$(dotnet workload --version)" = "$workload_version"
 
       - name: Build iOS
         run: dotnet build Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj --configuration Release

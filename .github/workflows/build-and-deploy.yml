@@ -21,7 +21,6 @@ defaults:
     shell: pwsh
 
 env:
-  DOTNET_VERSION: '10.0.x'
   TERRAFORM_VERSION: '1.14.6'
 
 jobs:
@@ -53,8 +52,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
           global-json-file: global.json
+
+      - name: Install pinned workload set
+        run: dotnet workload update
 
       - name: Restore .NET dependencies
         run: dotnet restore Sheaf.Backend.slnf
