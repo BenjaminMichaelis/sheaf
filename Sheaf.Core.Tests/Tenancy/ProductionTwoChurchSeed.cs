@@ -1,0 +1,59 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+using Sheaf.Data;
+
+namespace Sheaf.Core.Tests;
+
+internal sealed record ProductionTwoChurchSeed(
+    Church ChurchA,
+    Church ChurchB,
+    ApplicationUser UserA,
+    ApplicationUser UserB,
+    ChurchMembership MembershipA,
+    ChurchMembership MembershipB)
+{
+    public static async Task<ProductionTwoChurchSeed> SeedAsync(ProductionSqlServerFixture sql)
+    {
+        Church churchA = new() { Slug = "production-a", Name = "Production A" };
+        Church churchB = new() { Slug = "production-b", Name = "Production B" };
+        ApplicationUser userA = new() { Id = "production-user-a", UserName = "production-user-a" };
+        ApplicationUser userB = new() { Id = "production-user-b", UserName = "production-user-b" };
+        ChurchMembership membershipA = new() { ChurchId = churchA.Id, UserId = userA.Id, Role = ChurchMembershipRole.Leader };
+        ChurchMembership membershipB = new() { ChurchId = churchB.Id, UserId = userB.Id, Role = ChurchMembershipRole.Leader };
+
+        await using (AsyncServiceScope scope = sql.CreateScope())
+        {
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.Churches.AddRange(churchA, churchB);
+            db.Users.AddRange(userA, userB);
+            await db.SaveChangesAsync();
+        }
+
+        foreach (ChurchMembership membership in new[] { membershipA, membershipB })
+        {
+            await using AsyncServiceScope scope = sql.CreateScope(membership.ChurchId);
+            ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.ChurchMemberships.Add(membership);
+            await db.SaveChangesAsync();
+        }
+
+        return new(churchA, churchB, userA, userB, membershipA, membershipB);
+    }
+
+    public async Task AssertMembershipsAsync(
+        ProductionSqlServerFixture sql,
+        ChurchMembershipRole roleA = ChurchMembershipRole.Leader,
+        ChurchMembershipRole roleB = ChurchMembershipRole.Leader)
+    {
+        await using AsyncServiceScope scope = sql.CreateScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        ChurchMembership[] persisted = await db.ChurchMemberships.IgnoreQueryFilters().AsNoTracking().ToArrayAsync();
+
+        await Assert.That(persisted.Select(membership => (membership.Id, membership.ChurchId, membership.UserId, membership.Role)))
+            .IsEquivalentTo([
+                (MembershipA.Id, ChurchA.Id, UserA.Id, roleA),
+                (MembershipB.Id, ChurchB.Id, UserB.Id, roleB)
+            ]);
+    }
+}

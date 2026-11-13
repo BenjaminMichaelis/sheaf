@@ -6,7 +6,8 @@ namespace Sheaf.Core.Tests;
 
 internal static class ProductionDatabaseHost
 {
-    public static IHost Create(string connectionString)
+    public static IHost Create(string connectionString =
+        "Server=127.0.0.1,1;Database=SheafProductionModelTests;Integrated Security=True;TrustServerCertificate=True;Connect Timeout=1")
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {

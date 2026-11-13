@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -14,49 +13,6 @@ namespace Sheaf.Core.Tests;
 
 public class TenancyTests
 {
-    [Test]
-    public async Task SaveChangesAsync_DuplicateChurchSlug_Throws()
-    {
-        using SqliteConnection connection = new("DataSource=:memory:");
-        await connection.OpenAsync();
-        DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(connection)
-            .UseMultiTenancy()
-            .Options;
-
-        await using TenantTestDbContext dbContext = new(options, new TenantContext());
-        await dbContext.Database.EnsureCreatedAsync();
-
-        Church church = new() { Slug = "test-church", Name = "Test Church" };
-        dbContext.Churches.Add(church);
-        await dbContext.SaveChangesAsync();
-        await Assert.That(church.Id).IsNotEqualTo(Guid.Empty);
-
-        Church duplicateChurch = new() { Slug = church.Slug, Name = "Duplicate Church" };
-        dbContext.Churches.Add(duplicateChurch);
-
-        await Assert.That(async () => await dbContext.SaveChangesAsync())
-            .Throws<DbUpdateException>();
-    }
-
-    [Test]
-    public async Task ToListAsync_WithoutTenant_Throws()
-    {
-        using SqliteConnection connection = new("DataSource=:memory:");
-        await connection.OpenAsync();
-        DbContextOptions<ApplicationDbContext> options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlite(connection)
-            .UseMultiTenancy()
-            .Options;
-
-        await using TenantTestDbContext dbContext = new(options);
-        await dbContext.Database.EnsureCreatedAsync();
-
-        await Assert.That(async () => await dbContext.TenantRecords.ToListAsync())
-            .Throws<InvalidOperationException>()
-            .WithMessage("A church tenant is required for this query.");
-    }
-
     [Test]
     public async Task ChurchIdOrThrow_SeparateServiceScopes_ReturnsEachScopesChurchId()
     {
@@ -106,21 +62,21 @@ public class TenancyTests
         using IServiceScope scope = host.Services.CreateScope();
         DbContextOptions<ApplicationDbContext> options =
             scope.ServiceProvider.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
-        await using TenantTestDbContext context = new(options);
+        ApplicationDbContext context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         await Assert.That(options.FindExtension<MultiTenancyExtension>()).IsNotNull();
         await Assert.That(context.Database.ProviderName).IsEqualTo("Microsoft.EntityFrameworkCore.SqlServer");
-        IEntityType probe = context.Model.FindEntityType(typeof(TenantRecord))
-            ?? throw new InvalidOperationException("The production-options model is missing the tenanted probe.");
+        IEntityType membership = context.Model.FindEntityType(typeof(ChurchMembership))
+            ?? throw new InvalidOperationException("The production model is missing ChurchMembership.");
 
-        await Assert.That(probe.FindDeclaredQueryFilter(MultiTenancyConvention.FilterName)).IsNotNull();
-        await Assert.That(probe.FindDeclaredQueryFilter(null)).IsNull();
-        await Assert.That(probe.GetDeclaredQueryFilters()).Count().IsEqualTo(1);
-        IKey key = probe.FindPrimaryKey()
-            ?? throw new InvalidOperationException("The tenanted probe is missing its primary key.");
+        await Assert.That(membership.FindDeclaredQueryFilter(MultiTenancyConvention.FilterName)).IsNotNull();
+        await Assert.That(membership.FindDeclaredQueryFilter(null)).IsNull();
+        await Assert.That(membership.GetDeclaredQueryFilters()).Count().IsEqualTo(1);
+        IKey key = membership.FindPrimaryKey()
+            ?? throw new InvalidOperationException("ChurchMembership is missing its primary key.");
         await Assert.That(key.Properties.Count).IsEqualTo(2);
-        await Assert.That(key.Properties[0].Name).IsEqualTo(nameof(TenantRecord.ChurchId));
-        await Assert.That(key.Properties[1].Name).IsEqualTo(nameof(TenantRecord.Id));
+        await Assert.That(key.Properties[0].Name).IsEqualTo(nameof(ChurchMembership.ChurchId));
+        await Assert.That(key.Properties[1].Name).IsEqualTo(nameof(ChurchMembership.Id));
 
         IdentityOptions identityOptions = scope.ServiceProvider.GetRequiredService<IOptions<IdentityOptions>>().Value;
         await Assert.That(identityOptions.Stores.SchemaVersion).IsEqualTo(IdentitySchemaVersions.Version3);
@@ -160,5 +116,5 @@ public class TenancyTests
             .WithMessage("ApplicationDbContext requires UseMultiTenancy. Configure production services with AddSheafDatabase.");
     }
 
-    private static IHost CreateHost() => ApplicationDbContextProbe.CreateHost();
+    private static IHost CreateHost() => ProductionDatabaseHost.Create();
 }

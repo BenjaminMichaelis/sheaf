@@ -1,5 +1,4 @@
 using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -12,7 +11,7 @@ using TUnit.Core.Interfaces;
 
 namespace Sheaf.Core.Tests;
 
-/// <summary>A fresh production catalog per test, borrowing the assembly's existing SQL Server container.</summary>
+/// <summary>An isolated production catalog per fixture, borrowing the assembly's SQL Server container.</summary>
 public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
 {
     private IHost? _host;
@@ -22,17 +21,14 @@ public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
     [ClassDataSource<SqlServerFixture>(Shared = SharedType.PerAssembly)]
     public required SqlServerFixture Sql { get; init; }
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
-        // Nested ClassDataSource initialization starts the existing container before this fixture.
-        await using TenancyTestDbContext conventionContext = Sql.CreateContext(null);
-        string containerConnection = conventionContext.Database.GetConnectionString()
-            ?? throw new InvalidOperationException("The shared SQL Server fixture has no connection string.");
-        _connectionString = new SqlConnectionStringBuilder(containerConnection)
+        _connectionString = new SqlConnectionStringBuilder(Sql.ConnectionString)
         {
             InitialCatalog = $"SheafProductionMigrations_{Guid.NewGuid():N}",
         }.ConnectionString;
         _host = ProductionDatabaseHost.Create(_connectionString);
+        return Task.CompletedTask;
     }
 
     public AsyncServiceScope CreateScope(Guid? churchId = null)

@@ -54,14 +54,10 @@ public class SqlServerMigrationTests
             available = db.Database.GetMigrations().ToArray();
             await Assert.That(available).IsNotEmpty();
             await db.Database.MigrateAsync();
-
-            db.Churches.Add(new Church { Slug = "reset-church", Name = "Reset Church" });
-            db.Users.Add(new ApplicationUser { UserName = "reset-user" });
-            await db.SaveChangesAsync();
-            await Assert.That(await db.Churches.AnyAsync(c => c.Slug == "reset-church")).IsTrue();
-            await Assert.That(await db.Users.AnyAsync(u => u.UserName == "reset-user")).IsTrue();
         }
 
+        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(sql);
+        await seed.AssertMembershipsAsync(sql);
         await sql.ResetAsync();
 
         await using AsyncServiceScope verifyScope = sql.CreateScope();
@@ -71,5 +67,6 @@ public class SqlServerMigrationTests
         await Assert.That(await verify.Database.GetPendingMigrationsAsync()).IsEmpty();
         await Assert.That(await verify.Churches.AsNoTracking().ToListAsync()).IsEmpty();
         await Assert.That(await verify.Users.AsNoTracking().ToListAsync()).IsEmpty();
+        await Assert.That(await verify.ChurchMemberships.IgnoreQueryFilters().AsNoTracking().ToListAsync()).IsEmpty();
     }
 }

@@ -19,7 +19,8 @@ Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --
 Runtime `AddDatabase()` and `DesignTimeAppDbContextFactory` both use `Sheaf.Data`'s
 `AddSheafDatabase()` to configure Azure SQL, the tenancy convention and write interceptors, and
 Identity schema version 3. `ApplicationDbContext` refuses to initialize without `UseMultiTenancy()`.
-SQLite tests keep their test provider and enable the same tenancy extension directly.
+Tenancy integration tests resolve the real context through `AddDatabase()` and apply the
+`Sheaf.Data` migrations to isolated SQL Server catalogs.
 
 Church-owned entities implement only `Sheaf.Data.Tenancy.ITenanted`. The request-scoped
 `ICurrentChurch` exposes nullable church/leader selection; `TenantContext` remains its mutable
@@ -45,8 +46,8 @@ ignores `TenancyFilter`, whether through `IgnoreQueryFilters()` or a named
 `IgnoreQueryFilters(["TenancyFilter"])`, and either the written entity type is `ITenanted` (including
 tenanted rows reached through a navigation such as `SelectMany`) or the query has a tenanted entity
 set root anywhere. Bulk writes to global entities with no tenanted root may still ignore filters.
-Known limits: in such a global write, tenanted rows reached only through navigations (for example
-`Where(hub => hub.Spokes.Any())`) are read unfiltered and can influence which global rows change; and
+Known limits: in such a global write, tenanted rows reached only through navigations are read
+unfiltered and can influence which global rows change; and
 deleting a global principal can trigger database-level cascades into tenanted dependents of every
 church, which EF query filters do not see.
 Cross-church maintenance writes need a separately audited API.
@@ -75,21 +76,22 @@ The runtime options probes are in `Sheaf.Core.Tests.TenancyTests`; factory probe
 `Sheaf.AppHost.Tests.DesignTimeAppDbContextFactoryTests`. These model-only tests do not connect
 to a database or start Aspire.
 
-The SQL Server tenancy tests use the migrated production `ApplicationDbContext` and its actual
-migrations to verify membership query isolation and cross-church write rejection. A separate
-test-only model remains for distinct convention/owned-JSON coverage; its migration test applies
-only that fixture's schema and does not stand in for the production migration path. Both use
-`UseAzureSql`, so the test-only owned-JSON migration test requires SQL Server 2025 or Azure SQL.
+The SQL Server tenancy tests verify membership query isolation, missing-tenant rejection,
+automatic church stamping, immutable ownership, cross-church tracked-write rejection, and
+tenant-filtered bulk updates/deletes, including rejection of filter bypasses and ownership
+updates through membership `Union`/correlated sources. They also verify the migrated membership
+foreign keys, restricted principal deletion, and per-church user uniqueness. The shared container fixture
+starts SQL Server only; it creates no separate test schema.
 
-SQL Server bulk-compatibility cases cover tenant-filtered updates and reject ownership changes
-through `Union` and correlated `SelectMany` sources. Additional provider and alias cases remain in
-the SQLite tenancy test suite.
+There are no synthetic tenancy entities, contexts, or migrations. Owned JSON, tenanted
+domain-to-domain relationships, and navigation-based bulk-write shapes are not covered by this
+branch's minimal membership model; they need coverage when real application entities use them.
 
 These container tests require Docker and an amd64-capable host (the SQL Server image is
 amd64-only), including CI on `ubuntu-latest`. Run the migration and isolation cases with:
 
 ```pwsh
-dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerProductionTenancyTests)|(SqlServerTenancyMigrationTests)|(SqlServerTenancyTests)|(SqlServerTenancyWriteGuardTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
+dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --treenode-filter "/*/*/(SqlServerMigrationTests)|(SqlServerProductionTenancyTests)|(SqlServerBulkUpdateCompatibilityTests)/*"
 ```
 
 For local Podman environments that need an explicit reachable container host, set
