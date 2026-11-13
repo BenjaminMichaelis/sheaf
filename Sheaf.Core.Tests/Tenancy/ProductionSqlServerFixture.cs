@@ -39,6 +39,20 @@ public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
         return scope;
     }
 
+    /// <summary>Runs <paramref name="action"/> against a fresh scoped context; a null church id means no tenant.</summary>
+    public async Task InDatabaseScopeAsync(Guid? churchId, Func<ApplicationDbContext, Task> action)
+    {
+        await using AsyncServiceScope scope = CreateScope(churchId);
+        await action(scope.ServiceProvider.GetRequiredService<ApplicationDbContext>());
+    }
+
+    /// <summary>Runs <paramref name="action"/> against a fresh scoped context; a null church id means no tenant.</summary>
+    public async Task<T> InDatabaseScopeAsync<T>(Guid? churchId, Func<ApplicationDbContext, Task<T>> action)
+    {
+        await using AsyncServiceScope scope = CreateScope(churchId);
+        return await action(scope.ServiceProvider.GetRequiredService<ApplicationDbContext>());
+    }
+
     public async Task ResetAsync()
     {
         string connectionString = _connectionString
