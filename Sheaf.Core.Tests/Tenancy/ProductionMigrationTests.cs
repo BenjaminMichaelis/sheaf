@@ -58,7 +58,7 @@ public class SqlServerMigrationTests
             return migrations;
         });
 
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(sql);
         await seed.AssertMembershipsAsync(sql);
         await sql.ResetAsync();
 

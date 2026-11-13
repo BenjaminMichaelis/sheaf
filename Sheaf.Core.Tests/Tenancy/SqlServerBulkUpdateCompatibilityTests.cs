@@ -24,7 +24,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true)]
     public async Task ExecuteUpdate_CurrentChurchPayload_OnlyUpdatesCurrentChurchMemberships(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => UpdateAsync(db.ChurchMemberships,
             setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin), useAsync));
 
@@ -37,7 +37,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true)]
     public async Task ExecuteDelete_CurrentChurchQuery_OnlyDeletesCurrentChurchMemberships(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => DeleteAsync(db.ChurchMemberships, useAsync));
 
         await Assert.That(affected).IsEqualTo(1);
@@ -53,7 +53,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true, true)]
     public async Task ExecuteUpdate_ChurchIdAssignmentWithOrWithoutMatches_RejectsEntireCommand(bool useAsync, bool noMatches)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             IQueryable<ChurchMembership> query = noMatches
@@ -77,7 +77,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true)]
     public async Task ExecuteUpdate_RuntimeEfPropertyOwnershipSetter_RejectsBeforeMutation(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             string propertyName = nameof(ChurchMembership.Id);
@@ -98,7 +98,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true)]
     public async Task ExecuteUpdate_UnionOrCorrelatedMembershipSource_UpdatesPayloadButRejectsOwnership(bool useUnion)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             IQueryable<ChurchMembership> query = useUnion
@@ -122,7 +122,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Test]
     public async Task ExecuteUpdate_PayloadAliasedChurchId_UpdatesRoleWithoutChangingOwnership()
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => db.ChurchMemberships
             .Select(membership => new { ChurchId = membership.Role })
             .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.ChurchId, ChurchMembershipRole.Coordinator)));
@@ -138,7 +138,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true, true)]
     public async Task ExecuteUpdateDelete_IgnoredTenancyFilter_RejectsBeforeMutation(bool useAsync, bool namedFilter)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             IQueryable<ChurchMembership> query = namedFilter
@@ -160,7 +160,7 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Test]
     public async Task ExecuteUpdate_IgnoreUnrelatedNamedFilter_OnlyUpdatesCurrentChurch()
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => db.ChurchMemberships
             .IgnoreQueryFilters(["Unrelated"])
             .ExecuteUpdateAsync(setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Staff)));

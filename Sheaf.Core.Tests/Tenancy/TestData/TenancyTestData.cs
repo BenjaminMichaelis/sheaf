@@ -1,18 +1,10 @@
-using Microsoft.EntityFrameworkCore;
-
 using Sheaf.Data;
 
 namespace Sheaf.Core.Tests;
 
-internal sealed record ProductionTwoChurchSeed(
-    Church ChurchA,
-    Church ChurchB,
-    ApplicationUser UserA,
-    ApplicationUser UserB,
-    ChurchMembership MembershipA,
-    ChurchMembership MembershipB)
+internal static class TenancyTestData
 {
-    public static async Task<ProductionTwoChurchSeed> SeedAsync(ProductionSqlServerFixture sql)
+    public static async Task<TwoChurchScenario> SeedTwoChurchesAsync(ProductionSqlServerFixture sql)
     {
         Church churchA = new() { Slug = "production-a", Name = "Production A" };
         Church churchB = new() { Slug = "production-b", Name = "Production B" };
@@ -38,20 +30,5 @@ internal sealed record ProductionTwoChurchSeed(
         }
 
         return new(churchA, churchB, userA, userB, membershipA, membershipB);
-    }
-
-    public async Task AssertMembershipsAsync(
-        ProductionSqlServerFixture sql,
-        ChurchMembershipRole roleA = ChurchMembershipRole.Leader,
-        ChurchMembershipRole roleB = ChurchMembershipRole.Leader)
-    {
-        ChurchMembership[] persisted = await sql.InDatabaseScopeAsync(null,
-            db => db.ChurchMemberships.IgnoreQueryFilters().AsNoTracking().ToArrayAsync());
-
-        await Assert.That(persisted.Select(membership => (membership.Id, membership.ChurchId, membership.UserId, membership.Role)))
-            .IsEquivalentTo([
-                (MembershipA.Id, ChurchA.Id, UserA.Id, roleA),
-                (MembershipB.Id, ChurchB.Id, UserB.Id, roleB)
-            ]);
     }
 }

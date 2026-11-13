@@ -23,7 +23,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task Read_MembershipQueryFilter_ReturnsOnlyCurrentChurch(bool churchB)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         ChurchMembership expected = churchB ? seed.MembershipB : seed.MembershipA;
 
         await Sql.InDatabaseScopeAsync(expected.ChurchId, async db =>
@@ -46,7 +46,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true, true)]
     public async Task SaveChanges_BypassLoadedOtherChurchMembership_RejectsModificationOrDeletion(bool delete, bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
 
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
@@ -72,7 +72,7 @@ public class SqlServerProductionTenancyTests
     [Test]
     public async Task SaveChangesAsync_AddMembershipForAnotherChurch_RejectsWrite()
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
 
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
@@ -94,7 +94,7 @@ public class SqlServerProductionTenancyTests
     [Test]
     public async Task ToListAsync_NoCurrentChurch_RejectsMembershipQuery()
     {
-        _ = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        _ = await TenancyTestData.SeedTwoChurchesAsync(Sql);
 
         await Sql.InDatabaseScopeAsync(null, async db =>
             await Assert.That(async () => await db.ChurchMemberships.ToListAsync())
@@ -107,7 +107,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChanges_NoCurrentChurch_RejectsMembershipInsert(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(null, async db =>
         {
             db.ChurchMemberships.Add(new ChurchMembership { ChurchId = seed.ChurchA.Id, UserId = seed.UserB.Id });
@@ -125,7 +125,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChanges_AddMembershipWithoutChurchId_StampsCurrentChurchId(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         ChurchMembership added = new() { UserId = seed.UserB.Id, Role = ChurchMembershipRole.Coordinator };
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
@@ -151,7 +151,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChanges_ModifiedMembershipOwnership_RejectsWrite(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             ChurchMembership membership = await db.ChurchMemberships.SingleAsync();
@@ -169,7 +169,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChanges_CurrentChurchMembership_PersistsPayloadChangeAndDeletion(bool useAsync)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             ChurchMembership membership = await db.ChurchMemberships.SingleAsync();
@@ -195,7 +195,7 @@ public class SqlServerProductionTenancyTests
     [Test]
     public async Task SaveChangesAsync_SameUserAcrossChurches_AllowsMembershipButRejectsDuplicateWithinChurch()
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
         {
             db.ChurchMemberships.Add(new ChurchMembership { ChurchId = seed.ChurchA.Id, UserId = seed.UserB.Id });
@@ -218,7 +218,7 @@ public class SqlServerProductionTenancyTests
     [Test]
     public async Task SaveChangesAsync_DuplicateChurchSlug_RejectsInsert()
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(null, async db =>
         {
             db.Churches.Add(new Church { Slug = seed.ChurchA.Slug, Name = "Duplicate" });
@@ -235,7 +235,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChangesAsync_OrphanMembershipPrincipal_RejectsWithForeignKeyViolation(bool orphanChurch)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         Guid churchId = orphanChurch ? Guid.NewGuid() : seed.ChurchA.Id;
         await Sql.InDatabaseScopeAsync(churchId, async db =>
         {
@@ -257,7 +257,7 @@ public class SqlServerProductionTenancyTests
     [Arguments(true)]
     public async Task SaveChangesAsync_MembershipPrincipalDeletion_RejectsWithForeignKeyViolation(bool deleteChurch)
     {
-        ProductionTwoChurchSeed seed = await ProductionTwoChurchSeed.SeedAsync(Sql);
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(null, async db =>
         {
             if (deleteChurch)
