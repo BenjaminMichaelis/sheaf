@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Sheaf.Data.Tenancy;
 
@@ -30,8 +31,20 @@ public sealed class TenancySaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
+        List<EntityEntry> allEntries = context.ChangeTracker.Entries().ToList();
         List<EntityEntry<ITenanted>> entries = context.ChangeTracker.Entries<ITenanted>().ToList();
-        if (entries.Count == 0)
+
+        // Owned entities (including JSON-mapped ones) are not ITenanted, and the owner can stay Unchanged
+        // when only owned data changes, so each changed owned entry is attributed to its root owner.
+        // Owners are resolved before Added roots are stamped so key matching uses the tracked values.
+        List<(EntityEntry Owned, ITenanted? Owner)> ownedChanges = allEntries
+            .Where(entry => entry.Metadata.IsOwned()
+                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
+                && HasTenantedRoot(entry.Metadata))
+            .Select(entry => (entry, FindTenantedRoot(entry, allEntries)))
+            .ToList();
+
+        if (entries.Count == 0 && ownedChanges.Count == 0)
         {
             return;
         }
@@ -69,6 +82,67 @@ public sealed class TenancySaveChangesInterceptor : SaveChangesInterceptor
                     throw ForeignChurch(entityChurchId, churchId);
             }
         }
+
+        foreach ((EntityEntry owned, ITenanted? owner) in ownedChanges)
+        {
+            if (owner is null)
+            {
+                throw new InvalidOperationException(
+                    $"The owned entity '{owned.Metadata.DisplayName()}' has no tracked tenanted owner.");
+            }
+
+            Guid ownerChurchId = owner.ChurchId;
+            if (ownerChurchId != churchId)
+            {
+                throw ForeignChurch(ownerChurchId, churchId);
+            }
+        }
+    }
+
+    private static bool HasTenantedRoot(IEntityType entityType)
+    {
+        IEntityType current = entityType;
+        while (current.FindOwnership() is { } ownership)
+        {
+            current = ownership.PrincipalEntityType;
+        }
+
+        return typeof(ITenanted).IsAssignableFrom(current.ClrType);
+    }
+
+    private static ITenanted? FindTenantedRoot(EntityEntry entry, List<EntityEntry> trackedEntries)
+    {
+        EntityEntry current = entry;
+        while (current.Metadata.FindOwnership() is { } ownership)
+        {
+            EntityEntry? principal = FindPrincipal(current, ownership, trackedEntries);
+            if (principal is null)
+            {
+                return null;
+            }
+
+            current = principal;
+        }
+
+        return current.Entity as ITenanted;
+    }
+
+    private static EntityEntry? FindPrincipal(
+        EntityEntry dependent,
+        IForeignKey ownership,
+        List<EntityEntry> trackedEntries)
+    {
+        IReadOnlyList<IProperty> foreignKeyProperties = ownership.Properties;
+        IReadOnlyList<IProperty> principalKeyProperties = ownership.PrincipalKey.Properties;
+        object?[] foreignKeyValues = foreignKeyProperties
+            .Select(property => dependent.Property(property).CurrentValue)
+            .ToArray();
+
+        return trackedEntries.FirstOrDefault(candidate =>
+            ownership.PrincipalEntityType.IsAssignableFrom(candidate.Metadata)
+            && principalKeyProperties
+                .Select((property, index) => Equals(candidate.Property(property).CurrentValue, foreignKeyValues[index]))
+                .All(matches => matches));
     }
 
     private static InvalidOperationException ForeignChurch(Guid entityChurchId, Guid currentChurchId) =>
