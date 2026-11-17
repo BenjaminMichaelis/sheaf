@@ -1,7 +1,15 @@
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 class ApiClient {
   private baseUrl = __API_BASE_URL__ || ''
 
-  async get<T>(url: string): Promise<T> {
+  async get<T>(url: string): Promise<T | undefined> {
     const response = await fetch(this.baseUrl + url, {
       credentials: 'include',
     })
@@ -11,17 +19,18 @@ class ApiClient {
     }
     
     const text = await response.text()
-    return text ? JSON.parse(text) : undefined as T
+
+    return text ? JSON.parse(text) : undefined
   }
 
-  async post<T = void>(url: string, data?: unknown): Promise<T> {
+  async post<T = void>(url: string, data?: JsonValue): Promise<T | undefined> {
     const response = await fetch(this.baseUrl + url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data === undefined ? undefined : JSON.stringify(data),
     })
     
     if (!response.ok) {
@@ -30,14 +39,15 @@ class ApiClient {
     }
     
     if (response.status === 204) {
-      return undefined as T
+      return undefined
     }
     
     const text = await response.text()
-    return text ? JSON.parse(text) : undefined as T
+
+    return text ? JSON.parse(text) : undefined
   }
 
-  async delete<T = void>(url: string): Promise<T> {
+  async delete<T = void>(url: string): Promise<T | undefined> {
     const response = await fetch(this.baseUrl + url, {
       method: 'DELETE',
       credentials: 'include',
@@ -48,20 +58,20 @@ class ApiClient {
     }
     
     if (response.status === 204) {
-      return undefined as T
+      return undefined
     }
     
     return response.json()
   }
 
-  async put<T = void>(url: string, data?: unknown): Promise<T> {
+  async put<T = void>(url: string, data?: JsonValue): Promise<T | undefined> {
     const response = await fetch(this.baseUrl + url, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data === undefined ? undefined : JSON.stringify(data),
     })
     
     if (!response.ok) {
@@ -69,7 +79,7 @@ class ApiClient {
     }
     
     if (response.status === 204) {
-      return undefined as T
+      return undefined
     }
     
     return response.json()

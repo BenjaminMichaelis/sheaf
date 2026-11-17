@@ -15,9 +15,11 @@ const THEME_STORAGE_KEY = 'SheafTheme'
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<PaletteMode>(() => {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)
+
     if (stored === 'light' || stored === 'dark') {
       return stored
     }
+
     // Check system preference
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
@@ -77,9 +79,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useTheme() {
   const context = useContext(ThemeContext)
+
   if (context === undefined) {
     throw new Error('useTheme must be used within a ThemeProvider')
   }
+
   return context
 }
 

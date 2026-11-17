@@ -5,13 +5,13 @@ export interface UserInfo {
   isAuthenticated: boolean;
 }
 
-export interface LoginRequest {
+export type LoginRequest = {
   email: string;
   password: string;
   rememberMe?: boolean;
 }
 
-export interface RegisterRequest {
+export type RegisterRequest = {
   email: string;
   password: string;
   confirmPassword: string;

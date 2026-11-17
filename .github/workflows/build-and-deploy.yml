@@ -41,13 +41,21 @@ jobs:
           npm install --global $package.packageManager
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Lint and build frontend
+      - name: Install frontend dependencies
         working-directory: Sheaf.Web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run lint
-          pnpm run test
-          pnpm run build
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint frontend
+        working-directory: Sheaf.Web
+        run: pnpm run lint
+
+      - name: Test frontend
+        working-directory: Sheaf.Web
+        run: pnpm run test
+
+      - name: Build frontend
+        working-directory: Sheaf.Web
+        run: pnpm run build
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6

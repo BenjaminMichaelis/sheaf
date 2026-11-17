@@ -27,6 +27,7 @@ precacheAndRoute(self.__WB_MANIFEST);
 // are fulfilled with your index.html shell. Read more at
 // https://developers.google.com/web/fundamentals/architecture/app-shell
 const fileExtensionRegexp = /\/[^/?]+\.[^/]+$/;
+
 registerRoute(
   // Return false to exempt requests from being fulfilled by index.html.
   ({ request, url }: { request: Request; url: URL }) => {
