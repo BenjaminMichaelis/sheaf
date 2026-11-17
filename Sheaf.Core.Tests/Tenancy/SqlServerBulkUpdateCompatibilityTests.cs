@@ -158,6 +158,53 @@ public class SqlServerBulkUpdateCompatibilityTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_GlobalUserWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
+    {
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(null, async db =>
+        {
+            await Assert.That(async () => await UpdateUsersAsync(GetUsersWithTenantedRoot(db), useAsync))
+                .Throws<InvalidOperationException>()
+                .WithMessageContaining("ExecuteUpdate cannot ignore the TenancyFilter");
+        });
+
+        await AssertUsersAndMembershipsUnchangedAsync(seed);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteDelete_GlobalUserWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
+    {
+        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(null, async db =>
+        {
+            await Assert.That(async () => await DeleteUsersAsync(GetUsersWithTenantedRoot(db), useAsync))
+                .Throws<InvalidOperationException>()
+                .WithMessageContaining("ExecuteDelete cannot ignore the TenancyFilter");
+        });
+
+        await AssertUsersAndMembershipsUnchangedAsync(seed);
+    }
+
+    private async Task AssertUsersAndMembershipsUnchangedAsync(TwoChurchScenario seed)
+    {
+        var persistedUsers = await Sql.InDatabaseScopeAsync(null,
+            db => db.Users.AsNoTracking().Select(user => new { user.Id, user.UserName }).ToArrayAsync());
+        await Assert.That(persistedUsers).IsEquivalentTo([
+            new { seed.UserA.Id, seed.UserA.UserName },
+            new { seed.UserB.Id, seed.UserB.UserName }
+        ]);
+        await seed.AssertMembershipsAsync(Sql);
+    }
+
+    private static IQueryable<ApplicationUser> GetUsersWithTenantedRoot(ApplicationDbContext db) =>
+        db.Users.Where(user => db.ChurchMemberships.Any(membership => membership.UserId == user.Id))
+            .IgnoreQueryFilters();
+
+    [Test]
     public async Task ExecuteUpdate_IgnoreUnrelatedNamedFilter_OnlyUpdatesCurrentChurch()
     {
         TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
@@ -175,6 +222,14 @@ public class SqlServerBulkUpdateCompatibilityTests
 
     private static Task<int> DeleteAsync<TEntity>(IQueryable<TEntity> query, bool useAsync) =>
         useAsync ? query.ExecuteDeleteAsync() : Task.FromResult(query.ExecuteDelete());
+
+    private static Task<int> UpdateUsersAsync(IQueryable<ApplicationUser> users, bool useAsync) =>
+        useAsync
+            ? users.ExecuteUpdateAsync(setters => setters.SetProperty(user => user.UserName, "changed"))
+            : Task.FromResult(users.ExecuteUpdate(setters => setters.SetProperty(user => user.UserName, "changed")));
+
+    private static Task<int> DeleteUsersAsync(IQueryable<ApplicationUser> users, bool useAsync) =>
+        useAsync ? users.ExecuteDeleteAsync() : Task.FromResult(users.ExecuteDelete());
 
     private static async Task AssertImmutableAsync(Func<Task<int>> update) =>
         await Assert.That(async () => await update())
