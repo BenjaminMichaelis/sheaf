@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 
 using Sheaf.Data;
@@ -40,13 +41,19 @@ internal static class AuthEndpoints
             }
 
             return Results.Unauthorized();
-        });
+        })
+        .WithName("Login")
+        .Produces<UserInfo>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
 
-        group.MapPost("/register", async (RegisterRequest request, SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager) =>
+        group.MapPost("/register", async Task<Results<Ok<UserInfo>, ValidationProblem>> (RegisterRequest request, SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager) =>
         {
             if (request.Password != request.ConfirmPassword)
             {
-                return Results.BadRequest(new { errors = PasswordMismatchErrors });
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    [nameof(RegisterRequest.ConfirmPassword)] = PasswordMismatchErrors
+                });
             }
 
             var user = new ApplicationUser { UserName = request.Email, Email = request.Email };
@@ -62,7 +69,7 @@ internal static class AuthEndpoints
                 if (result.Succeeded)
                 {
                     await signInManager.SignInAsync(user, isPersistent: false);
-                    return Results.Ok(new UserInfo
+                    return TypedResults.Ok(new UserInfo
                     {
                         UserId = user.Id,
                         UserName = user.UserName ?? "",
@@ -72,14 +79,24 @@ internal static class AuthEndpoints
                 }
             }
 
-            return Results.BadRequest(new { errors = result.Errors.Select(e => e.Description) });
-        });
+            return TypedResults.ValidationProblem(result.Errors
+                .GroupBy(error => error.Code)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(error => error.Description).ToArray()));
+        })
+        .WithName("Register")
+        .Produces<UserInfo>(StatusCodes.Status200OK)
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest);
 
         group.MapPost("/logout", async (SignInManager<ApplicationUser> signInManager) =>
         {
             await signInManager.SignOutAsync();
             return Results.NoContent();
-        }).RequireAuthorization();
+        })
+        .RequireAuthorization()
+        .WithName("Logout")
+        .Produces(StatusCodes.Status204NoContent);
 
         group.MapGet("/user", async (ClaimsPrincipal user, UserManager<ApplicationUser> userManager) =>
         {
@@ -97,13 +114,15 @@ internal static class AuthEndpoints
                 Email = appUser?.Email ?? user.Identity?.Name ?? "",
                 IsAuthenticated = true
             });
-        });
+        })
+        .WithName("GetCurrentUser")
+        .Produces<UserInfo>(StatusCodes.Status200OK);
 
         return app;
     }
 }
 
-public record LoginRequest(string Email, string Password, bool? RememberMe);
+public record LoginRequest(string Email, string Password, bool? RememberMe = null);
 public record RegisterRequest(string Email, string Password, string ConfirmPassword);
 public record UserInfo
 {

@@ -1,24 +1,7 @@
-export interface UserInfo {
-  userId: string;
-  userName: string;
-  email: string;
-  isAuthenticated: boolean;
-}
+import type { components } from '@/api/schema'
 
-export type LoginRequest = {
-  email: string;
-  password: string;
-  rememberMe?: boolean;
-}
+export type UserInfo = components['schemas']['UserInfo']
 
-export type RegisterRequest = {
-  email: string;
-  password: string;
-  confirmPassword: string;
-}
+export type LoginRequest = components['schemas']['LoginRequest']
 
-export interface ApiResponse<T = void> {
-  success: boolean;
-  data?: T;
-  errors?: string[];
-}
+export type RegisterRequest = components['schemas']['RegisterRequest']

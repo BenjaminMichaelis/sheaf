@@ -1,4 +1,8 @@
+using System.Reflection;
+
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.OpenApi;
 
 using Scalar.AspNetCore;
 
@@ -8,14 +12,53 @@ using Sheaf.Endpoints;
 using Sheaf.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+var isOpenApiGeneration = Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
 
-builder.AddServiceDefaults()
-    .AddDatabase();
+builder.AddServiceDefaults();
 
+if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database") is null)
+{
+    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["ConnectionStrings:Database"] = "Server=localhost;Database=OpenApiGeneration;TrustServerCertificate=True"
+    });
+}
+
+builder.AddDatabase();
 
 // Add services to the container.
 builder.Services.AddProblemDetails();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["identityCookie"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.ApiKey,
+            In = ParameterLocation.Cookie,
+            Name = ".AspNetCore.Identity.Application",
+            Description = "ASP.NET Core Identity application cookie."
+        };
+
+        return Task.CompletedTask;
+    });
+
+    options.AddOperationTransformer((operation, context, _) =>
+    {
+        if (context.Description.ActionDescriptor.EndpointMetadata.OfType<IAuthorizeData>().Any())
+        {
+            operation.Security ??= [];
+            operation.Security.Add(new OpenApiSecurityRequirement
+            {
+                [new OpenApiSecuritySchemeReference("identityCookie", context.Document)] = []
+            });
+        }
+
+        return Task.CompletedTask;
+    });
+});
 
 // Add CORS for cross-origin clients
 builder.Services.AddCors(options =>
@@ -55,6 +98,7 @@ authBuilder.AddIdentityCookies(options =>
 {
     options.ApplicationCookie?.Configure(cookieOptions =>
     {
+        cookieOptions.Cookie.Name = ".AspNetCore.Identity.Application";
         cookieOptions.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 
         if (builder.Environment.IsDevelopment())
