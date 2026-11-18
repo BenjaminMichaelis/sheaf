@@ -13,6 +13,32 @@ The React + Vite PWA lives in `Sheaf.Web` (requires Node and pnpm; Aspire runs `
 
 Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --project <test csproj>`.
 
+### Isolated development SQL storage
+
+For a worktree that needs a fresh development database, choose a stable, Docker-safe
+suffix and reuse it on every start:
+
+```pwsh
+aspire start --non-interactive --isolated --apphost Sheaf.AppHost\Sheaf.AppHost.csproj -- --Sheaf:ContainerSuffix=bmichaelis-reimagined-telegram --DisableDbGate=true
+```
+
+This scope uses container `Sheaf-bmichaelis-reimagined-telegram-sql` and persistent
+volume `Sheaf-bmichaelis-reimagined-telegram-database`, with catalog `Sheaf-db`.
+The existing migration resource applies the current migrations before the backend starts.
+`--isolated` isolates Aspire's ports/secrets, not explicitly named Docker volumes;
+`Sheaf:ContainerSuffix` scopes both the SQL container and its volume. DBGate is
+disabled here because its optional persistent container has a shared fixed name.
+The backend's explicitly configured port `5285` must still be free.
+Without a suffix (or with whitespace), the existing `Sheaf-sql` / `Sheaf-database`
+names are unchanged. Azure publish settings are unaffected.
+
+Use the same suffix to retain this worktree's database across restarts. Choosing a
+previously unused suffix creates new storage; it does not repair or delete the old
+database, its migration history, or its volume. Do not mount the same SQL data volume
+into multiple SQL containers. Stop this AppHost with
+`aspire stop --non-interactive --apphost Sheaf.AppHost\Sheaf.AppHost.csproj`;
+persistent SQL storage/container are intentionally retained (no force/reset needed).
+
 ### Regenerating API types
 
 Requires the .NET SDK pinned in `global.json`, Node.js (24 in CI), and pnpm
