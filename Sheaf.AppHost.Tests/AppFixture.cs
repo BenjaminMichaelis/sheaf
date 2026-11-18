@@ -8,12 +8,9 @@ namespace Sheaf.AppHost.Tests;
 /// </summary>
 public class AppHostFixture : AspireFixture<Projects.Sheaf_AppHost>
 {
-    private const string SigningKey = "ThisIsATemplateDevelopmentSigningKeyAtLeast32Chars";
-
     protected override string[] Args =>
     [
-        "--DisableDbGate=true",
-        $"--Parameters:auth-signing-key={SigningKey}"
+        "--DisableDbGate=true"
     ];
 
     /// <summary>
