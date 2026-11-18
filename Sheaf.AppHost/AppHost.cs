@@ -11,7 +11,6 @@ builder.AddAzureContainerAppEnvironment("Sheaf-cae");
 
 var docsGroup = builder.AddLogicalGroup("docs");
 builder.AddAspireDocs().WithParentRelationship(docsGroup);
-var authSigningKey = builder.AddParameter("auth-signing-key", secret: true);
 
 IResourceBuilder<IResourceWithConnectionString> db;
 IResourceBuilder<SqlServerServerResource>? sql = null;
@@ -70,8 +69,6 @@ var backendMigrations = backend
     .PublishAsMigrationScript()
     .PublishAsMigrationBundle(publishContainer: true);
 
-backend.WithEnvironment("Auth__SigningKey", authSigningKey);
-
 if (!builder.ExecutionContext.IsPublishMode)
 {
     backend.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development");
@@ -92,9 +89,6 @@ if (!builder.ExecutionContext.IsPublishMode)
             await db.Resource.GetConnectionStringAsync(context.CancellationToken)
             ?? throw new InvalidOperationException($"Connection string '{ConnectionStrings.DatabaseKey}' could not be resolved.");
     });
-    // The backend startup project (Program.cs) validates Auth:SigningKey at startup, so it must
-    // be available when EF runs database update against the backend startup project.
-    backendMigrations.WithEnvironment("Auth__SigningKey", authSigningKey);
 }
 else
 {

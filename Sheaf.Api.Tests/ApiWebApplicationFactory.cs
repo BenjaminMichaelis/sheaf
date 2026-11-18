@@ -8,8 +8,7 @@ public sealed class ApiWebApplicationFactory : TestWebApplicationFactory<Program
     {
         configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:Database"] = "Server=localhost;Database=SheafTests;TrustServerCertificate=True",
-            ["Auth:SigningKey"] = "ThisIsATestSigningKeyAtLeast32CharactersLong"
+            ["ConnectionStrings:Database"] = "Server=localhost;Database=SheafTests;TrustServerCertificate=True"
         });
     }
 }

@@ -6,7 +6,6 @@ Leader-first relational capture for churches: capture the people you meet, keep 
 Prerequisites: .NET SDK (see `global.json`), Docker, and the [Aspire CLI](https://aspire.dev).
 
 ```pwsh
-aspire secret set Parameters:auth-signing-key "<at least 32 characters>"
 aspire run          # API, SQL Server, migrations and the React frontend; API at http://localhost:5285
 ```
 
@@ -69,8 +68,6 @@ Check model/snapshot parity through both configuration paths without creating a 
 dotnet ef migrations has-pending-model-changes --project Sheaf.Data\Sheaf.Data.csproj --startup-project Sheaf\Sheaf.csproj
 dotnet ef migrations has-pending-model-changes --project Sheaf.Data\Sheaf.Data.csproj --startup-project Sheaf.AppHost\Sheaf.AppHost.csproj
 ```
-
-The backend check also needs `Auth:SigningKey`; supply local-only configuration for model checks.
 
 The runtime options probes are in `Sheaf.Core.Tests.TenancyTests`; factory probes are in
 `Sheaf.AppHost.Tests.DesignTimeAppDbContextFactoryTests`. These model-only tests do not connect

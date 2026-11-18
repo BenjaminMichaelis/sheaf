@@ -1,8 +1,4 @@
-using System.Text;
-
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.IdentityModel.Tokens;
 
 using Scalar.AspNetCore;
 
@@ -49,17 +45,6 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddAuthorization();
 
-var signingKey = builder.Configuration["Auth:SigningKey"];
-if (string.IsNullOrWhiteSpace(signingKey))
-{
-    throw new InvalidOperationException("Missing required configuration value 'Auth:SigningKey'.");
-}
-
-if (signingKey.Length < 32)
-{
-    throw new InvalidOperationException("Configuration value 'Auth:SigningKey' must be at least 32 characters.");
-}
-
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = IdentityConstants.ApplicationScheme;
@@ -85,20 +70,6 @@ authBuilder.AddIdentityCookies(options =>
             cookieOptions.Cookie.SameSite = SameSiteMode.Lax;
         }
     });
-});
-
-authBuilder.AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = "Sheaf",
-        ValidAudience = "Sheaf",
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey))
-    };
 });
 
 // No-op email sender for now (can be replaced with real implementation)
