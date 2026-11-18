@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "pnpm run test:ts && vite build",
     "lint": "eslint . && oxlint",
     "test": "vitest run",
+    "test:ts": "tsc -b && tsc --noEmit -p tsconfig.node.json",
     "gen:api": "node tools/gen-api.mjs",
     "preview": "vite preview"
   },

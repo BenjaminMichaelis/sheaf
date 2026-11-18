@@ -55,7 +55,13 @@ describe('apiClient', () => {
       },
     })
 
-    const [request] = fetchMock.mock.calls[0]
+    const call = fetchMock.mock.calls[0]
+
+    if (!call) {
+      throw new Error('Fetch was not called')
+    }
+
+    const [request] = call
 
     expect(request).toMatchObject({
       url: `${__API_BASE_URL__}/api/auth/login`,
