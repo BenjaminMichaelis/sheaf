@@ -9,11 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Testcontainers.MsSql" />
     <PackageReference Include="TUnit.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Sheaf/Sheaf.csproj" />
+    <Compile Include="..\Sheaf.Core.Tests\Tenancy\SqlServerFixture.cs" Link="Infrastructure\SqlServerFixture.cs" />
   </ItemGroup>
 
   <ItemGroup>

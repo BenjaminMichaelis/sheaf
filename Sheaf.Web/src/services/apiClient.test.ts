@@ -14,7 +14,17 @@ describe('apiClient', () => {
       userName: 'leader@example.com',
       email: 'leader@example.com',
       isAuthenticated: true,
-    }
+      churches: [{
+        churchId: '019a0000-0000-7000-8000-000000000001',
+        churchName: 'Community Church',
+        role: 'Coordinator',
+      }],
+      currentChurch: {
+        churchId: '019a0000-0000-7000-8000-000000000001',
+        churchName: 'Community Church',
+        role: 'Coordinator',
+      },
+    } satisfies UserInfo
 
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(user), { status: 200 }),
@@ -25,6 +35,9 @@ describe('apiClient', () => {
     expect(error).toBeUndefined()
     expect(data).toEqual(user)
     expectTypeOf(data).toEqualTypeOf<UserInfo | undefined>()
+    expectTypeOf(data?.currentChurch?.role).toEqualTypeOf<
+      'Leader' | 'Coordinator' | 'Staff' | 'Admin' | undefined
+    >()
     expect(fetchMock).toHaveBeenCalledWith(
       expect.objectContaining({
         url: `${__API_BASE_URL__}/api/auth/user`,
@@ -42,6 +55,8 @@ describe('apiClient', () => {
           userName: 'leader@example.com',
           email: 'leader@example.com',
           isAuthenticated: true,
+          churches: [],
+          currentChurch: null,
         }),
         { status: 200 },
       ),

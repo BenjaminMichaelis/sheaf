@@ -94,6 +94,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get the signed-in account, its churches and its current church selection. */
         get: operations["GetCurrentUser"];
         put?: never;
         post?: never;
@@ -107,6 +108,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ChurchInfo: {
+            /** Format: uuid */
+            churchId: string;
+            churchName: string;
+            role: components["schemas"]["ChurchMembershipRole"];
+        };
+        /** @enum {unknown} */
+        ChurchMembershipRole: "Leader" | "Coordinator" | "Staff" | "Admin";
         HttpValidationProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -133,6 +142,8 @@ export interface components {
             userName?: string;
             email?: string;
             isAuthenticated?: boolean;
+            churches?: components["schemas"]["ChurchInfo"][];
+            currentChurch?: null | components["schemas"]["ChurchInfo"];
         };
     };
     responses: never;

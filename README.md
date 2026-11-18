@@ -43,12 +43,47 @@ Tenancy integration tests resolve the real context through `AddDatabase()` and a
 `Sheaf.Data` migrations to isolated SQL Server catalogs.
 
 Church-owned entities implement only `Sheaf.Data.Tenancy.ITenanted`. The request-scoped
-`ICurrentChurch` exposes nullable church/leader selection; `TenantContext` remains its mutable
-implementation. This is distinct from `Tenancy.ITenantContext`, which requires a church ID:
+`ICurrentChurch` and `TenantContext` expose read-only, nullable church/leader selection.
+Only authentication's `ChurchAccessService` and application-cookie events call
+`ITenantContextInitializer`; changing churches while tenanted entities are tracked is rejected
+without discarding tracked work. This is distinct from `Tenancy.ITenantContext`, which requires a church ID:
 `ApplicationDbContext` adapts request state through `ChurchIdOrThrow`. An options-only context
 can build the model without a selected church, but queries against tenanted entities fail closed.
-When authentication selection is wired, `LeaderId` denotes the church membership ID, not a global
-Identity user ID.
+`LeaderId` denotes the church membership ID, not a global Identity user ID. The non-pooled,
+scoped context reads this selection without depending on the authentication services.
+
+### Church-aware Identity sessions
+
+Fresh login and registration use Identity's validated account, not an incoming/provider principal.
+Exactly one church membership selects that church; zero or multiple memberships leave the account
+authenticated without a church. The cookie contains a coherent `cid` (church ID), `cmid` (membership ID),
+and `role` tuple only for a selected membership. `role` is Identity's configured role claim type and
+comes from the membership, never persisted user role/church claims. Canonical Identity account and
+security-stamp claims are retained. Malformed, partial, duplicate, empty-ID or invalid-role church
+tuples reject the cookie rather than selecting a church.
+
+Application-cookie validation initializes request selection before invoking Identity's security-stamp
+validator, then synchronizes from its final principal (or clears selection on rejection). At the
+five-minute validation interval, a selected membership is rechecked through the normal tenancy filter
+and its role rebuilt. Removal clears selection even without a security-stamp change. Unselected
+sessions stay unselected on every renewal, including when exactly one different membership remains;
+only a fresh sign-in auto-selects. Cookie and stamp validation share the DI `TimeProvider`, allowing
+tests to advance beyond the interval without sleeping.
+
+`POST /api/auth/login`, `POST /api/auth/register` and `GET /api/auth/user` return the existing account
+fields plus `churches` and nullable `currentChurch`. Each church contains `churchId`, `churchName`
+and a string `role` (`Leader`, `Coordinator`, `Staff` or `Admin`). Available churches are read for the
+validated account only; caller-supplied user IDs are not accepted. Anonymous user responses have an
+empty church list and no current church, without querying the directory.
+
+`ChurchMembershipDirectory` is the sole production named `TenancyFilter` read bypass and is called
+only by `ChurchAccessService`. It projects church ID/name/role, keeps other named filters enabled,
+and records structured `ChurchMembershipDirectoryRead` audit event **15600** with `UserId` and
+`ChurchCount`. Selection additionally rechecks the membership's ID and role under normal filters.
+This establishes session/context state, not the church policies or switch endpoint tracked separately
+in #157/#158. API cookie challenges retain HTTP 401/403 rather than login/access-denied redirects.
+
+### Tenancy write guards
 
 `SaveChanges` protects tracked writes, including changes to owned entities, which
 are attributed to their root `ITenanted` owner even when the owner itself is unchanged. `ExecuteUpdate`/`ExecuteUpdateAsync` also reject explicit
@@ -115,6 +150,15 @@ dotnet test --project Sheaf.Core.Tests\Sheaf.Core.Tests.csproj --no-restore --tr
 For local Podman environments that need an explicit reachable container host, set
 `$env:TESTCONTAINERS_HOST_OVERRIDE = "127.0.0.1"` in the test process only; no machine-level
 configuration change is required.
+
+The church-session tests use the same SQL Server container fixture and isolated migrated catalogs,
+with real Identity cookies and controlled time, through
+[TUnit's ASP.NET Core integration](https://tunit.dev/docs/examples/aspnet.md).
+They also pin compiled directory/initializer call sites. Run them with:
+
+```pwsh
+dotnet test --project Sheaf.Api.Tests\Sheaf.Api.Tests.csproj --treenode-filter "/*/*/(ChurchSessionTests)|(ChurchAuthenticationArchitectureTests)/*"
+```
 
 ### Mobile (Avalonia)
 
