@@ -147,7 +147,7 @@ jobs:
             --no-build `
             --configuration Release `
             --project Sheaf.Data/Sheaf.Data.csproj `
-            --startup-project .\Sheaf.AppHost\Sheaf.AppHost.csproj `
+            --startup-project Sheaf.AppHost/Sheaf.AppHost.csproj `
             --output efbundle
 
       - name: Upload DB Migration
