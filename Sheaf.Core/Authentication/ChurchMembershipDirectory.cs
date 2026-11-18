@@ -15,12 +15,16 @@ internal sealed partial class ChurchMembershipDirectory(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
-        ChurchInfo[] churches = await (
-            from membership in db.ChurchMemberships.IgnoreQueryFilters([MultiTenancyConvention.FilterName])
-            where membership.UserId == userId
-            join church in db.Churches on membership.ChurchId equals church.Id
-            orderby church.Name, church.Id
-            select new ChurchInfo(membership.ChurchId, church.Name, membership.Role))
+        ChurchInfo[] churches = await db.ChurchMemberships
+            .IgnoreQueryFilters([MultiTenancyConvention.FilterName])
+            .Where(membership => membership.UserId == userId)
+            .Join(db.Churches,
+                membership => membership.ChurchId,
+                church => church.Id,
+                (membership, church) => new { Membership = membership, Church = church })
+            .OrderBy(result => result.Church.Name)
+            .ThenBy(result => result.Church.Id)
+            .Select(result => new ChurchInfo(result.Membership.ChurchId, result.Church.Name, result.Membership.Role))
             .ToArrayAsync(cancellationToken);
 
         LogDirectoryRead(logger, userId, churches.Length);
