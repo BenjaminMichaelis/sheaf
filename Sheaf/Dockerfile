@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=sheaf-nuget,target=/root/.nuget/packages,sharing=locke
 
 # Runtime stage: Ubuntu Noble Chiseled - distroless-like, minimal attack surface.
 # No shell, no package manager, no root; runs as UID 65532 (app) by default.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
+FROM mcr.microsoft.com/dotnet/aspnet:11.0-noble-chiseled AS final
 WORKDIR /app
 EXPOSE 8080
 ENV ASPNETCORE_HTTP_PORTS=8080 \
