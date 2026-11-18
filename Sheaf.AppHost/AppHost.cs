@@ -53,8 +53,9 @@ else
     }
 }
 
-var backend = builder.AddProject<Projects.Sheaf>(
+var backend = builder.AddDotnetProject(
         "Sheaf-backend",
+        "../Sheaf/Sheaf.csproj",
         options => options.ExcludeLaunchProfile = true)
     .WaitFor(db)
     .PublishAsAzureContainerApp((infra, app) => app.Template.Scale.MaxReplicas = 1);
