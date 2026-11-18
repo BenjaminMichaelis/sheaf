@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
   <PropertyGroup>
-    <TargetFramework>net10.0-browser</TargetFramework>
+    <TargetFramework>net11.0-browser</TargetFramework>
     <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!--
@@ -14,6 +14,9 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Browser" />
+    <!-- SkiaSharp 3.x ships no emscripten 6 build for .NET 11 WebAssembly; remove once Avalonia depends on SkiaSharp 4. -->
+    <PackageReference Include="SkiaSharp" VersionOverride="4.157.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" VersionOverride="4.157.0" />
   </ItemGroup>
 
   <ItemGroup>

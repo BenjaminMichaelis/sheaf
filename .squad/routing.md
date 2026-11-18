@@ -7,7 +7,7 @@ How to decide who handles what.
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
 | Architecture, scope, decisions, tenant isolation, consent/trust design, code review | Architect (Lead) | System boundaries, per-church isolation, approval policy |
-| .NET 10, ASP.NET Core, Aspire, SQL Server, Azure Container Apps | Backend | APIs, persistence, services, deployment |
+| .NET 11, ASP.NET Core, Aspire, SQL Server, Azure Container Apps | Backend | APIs, persistence, services, deployment |
 | React PWA, capture flows, staff dashboards | Frontend | Consent capture, leader and staff UI |
 | Claude/Foundry, Azure AI Speech, Planning Center, CardDAV | AI-Integrations | AI, speech, church-management and contact integrations |
 | Tests, QA, consent/minor-safety edge cases, audit-log checks | Tester | Regression coverage and safety-sensitive behavior |
