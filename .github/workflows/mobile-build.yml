@@ -75,13 +75,41 @@ jobs:
           sdk_version="$(jq -er '.sdk.version' global.json)"
           test "$(dotnet --version)" = "$sdk_version"
 
+      - name: Setup iOS .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: Sheaf.Mobile.iOS/global.json
+
       - name: Install iOS workload
         shell: bash
         run: |
+          # Shared project references retain the repository's workload set.
+          dotnet workload restore Sheaf.Mobile/Sheaf.Mobile.csproj
+          cd Sheaf.Mobile.iOS
+          dotnet --info
+          sdk_version="$(jq -er '.sdk.version' global.json)"
           workload_version="$(jq -er '.sdk.workloadVersion' global.json)"
+          test "$(dotnet --version)" = "$sdk_version"
           dotnet workload install ios
           dotnet workload --info
           test "$(dotnet workload --version)" = "$workload_version"
 
+      - name: Verify iOS pack resolution
+        shell: bash
+        working-directory: Sheaf.Mobile.iOS
+        run: |
+          resolution="$(dotnet msbuild Sheaf.Mobile.iOS.csproj -property:Configuration=Release -getProperty:NETCoreSdkVersion,TargetFramework,TargetPlatformVersion,XamarinRelativeSdkRootDirectory,_PackageVersion,RecommendedXcodeVersion)"
+          echo "$resolution"
+          echo "$resolution" | jq -e --arg sdk_version "$(jq -er '.sdk.version' global.json)" '
+            .Properties |
+            .NETCoreSdkVersion == $sdk_version and
+            .TargetFramework == "net10.0-ios" and
+            .TargetPlatformVersion == "27.2" and
+            (.XamarinRelativeSdkRootDirectory | contains("Microsoft.iOS.Sdk.net10.0_27.2")) and
+            ._PackageVersion == "27.2.10000" and
+            .RecommendedXcodeVersion == "27.2"
+          '
+
       - name: Build iOS
-        run: dotnet build Sheaf.Mobile.iOS/Sheaf.Mobile.iOS.csproj --configuration Release
+        working-directory: Sheaf.Mobile.iOS
+        run: dotnet build Sheaf.Mobile.iOS.csproj --configuration Release
