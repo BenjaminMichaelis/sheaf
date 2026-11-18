@@ -18,6 +18,7 @@ export default function Register() {
 
     if (password !== confirmPassword) {
       enqueueSnackbar('Passwords do not match', { variant: 'error' })
+
       return
     }
 

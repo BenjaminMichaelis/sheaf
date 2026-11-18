@@ -20,6 +20,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async () => {
     try {
       const userData = await apiClient.get<UserInfo>('/api/auth/user')
+
+      if (userData === undefined) {
+        throw new Error('User response is empty')
+      }
+
       setUser(userData)
     } catch {
       setUser(null)
@@ -33,6 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apiClient
       .get<UserInfo>('/api/auth/user')
       .then(userData => {
+        if (userData === undefined) {
+          throw new Error('User response is empty')
+        }
+
         if (!cancelled) setUser(userData)
       })
       .catch(() => {
@@ -41,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
+
     return () => {
       cancelled = true
     }
@@ -48,11 +58,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (credentials: LoginRequest) => {
     const userData = await apiClient.post<UserInfo>('/api/auth/login', credentials)
+
+    if (userData === undefined) {
+      throw new Error('Login response is empty')
+    }
+
     setUser(userData)
   }
 
   const register = async (data: RegisterRequest) => {
     const userData = await apiClient.post<UserInfo>('/api/auth/register', data)
+
+    if (userData === undefined) {
+      throw new Error('Registration response is empty')
+    }
+
     setUser(userData)
   }
 
@@ -71,8 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const context = useContext(AuthContext)
+
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider')
   }
+
   return context
 }
