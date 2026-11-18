@@ -60,20 +60,20 @@ Generated from `.squad/team.md`, `.squad/routing.md`, the casting registry, and 
 | Agent | Role | Authority | Focus |
 | --- | --- | --- | --- |
 | Architect | Lead | review | Product scope, system architecture, tenant isolation, consent and trust design |
-| Backend | Backend Dev | advisory | .NET 10, ASP.NET Core, Aspire, SQL Server, Azure Container Apps |
+| Backend | Backend Dev | advisory | .NET 11, ASP.NET Core, Aspire, SQL Server, Azure Container Apps |
 | Frontend | Frontend Dev | review | React, Progressive Web Apps, capture flows, dashboards |
 | AI-Integrations | AI & Integrations | advisory | Claude via Microsoft Foundry, Azure AI Speech, Planning Center, CardDAV |
 | Tester | Tester | review | Automated testing, consent and minor-safety cases, audit-log verification |
 
 ### Supported task types
 
-.NET 10, ASP.NET Core, Aspire, SQL Server, Azur…, React PWA, capture flows, staff dashboards, Claude/Foundry, Azure AI Speech, Planning Cente…, Tests, QA, consent/minor-safety edge cases, aud…
+.NET 11, ASP.NET Core, Aspire, SQL Server, Azur…, React PWA, capture flows, staff dashboards, Claude/Foundry, Azure AI Speech, Planning Cente…, Tests, QA, consent/minor-safety edge cases, aud…
 
 ### Routing hints
 
 | Domain | Route to |
 | --- | --- |
-| .NET 10, ASP.NET Core, Aspire, SQL Server, Azur… | Backend |
+| .NET 11, ASP.NET Core, Aspire, SQL Server, Azur… | Backend |
 | React PWA, capture flows, staff dashboards | Frontend |
 | Claude/Foundry, Azure AI Speech, Planning Cente… | AI-Integrations |
 | Tests, QA, consent/minor-safety edge cases, aud… | Tester |
