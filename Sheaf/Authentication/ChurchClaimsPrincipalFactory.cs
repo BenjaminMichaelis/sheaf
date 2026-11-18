@@ -20,8 +20,12 @@ internal sealed class ChurchClaimsPrincipalFactory(
     protected override async Task<ClaimsIdentity> GenerateClaimsAsync(ApplicationUser user)
     {
         ClaimsIdentity identity = await base.GenerateClaimsAsync(user);
-        foreach (Claim claim in identity.Claims.Where(claim => claim.Type == Options.ClaimsIdentity.RoleClaimType
-            || claim.Type is SheafClaimTypes.ChurchId or SheafClaimTypes.ChurchMembershipId or SheafClaimTypes.Role or ClaimTypes.Role)
+        foreach (Claim claim in identity.Claims.Where(claim =>
+            claim.Type.Equals(Options.ClaimsIdentity.RoleClaimType, StringComparison.OrdinalIgnoreCase)
+            || claim.Type.Equals(SheafClaimTypes.ChurchId, StringComparison.OrdinalIgnoreCase)
+            || claim.Type.Equals(SheafClaimTypes.ChurchMembershipId, StringComparison.OrdinalIgnoreCase)
+            || claim.Type.Equals(SheafClaimTypes.Role, StringComparison.OrdinalIgnoreCase)
+            || claim.Type.Equals(ClaimTypes.Role, StringComparison.OrdinalIgnoreCase))
             .ToArray())
         {
             identity.RemoveClaim(claim);

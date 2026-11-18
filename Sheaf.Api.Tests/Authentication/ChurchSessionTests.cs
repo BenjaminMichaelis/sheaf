@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
@@ -40,6 +42,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
 
     private readonly ControlledTimeProvider _time = new();
     private readonly ConcurrentQueue<DirectoryRead> _auditReads = new();
+    private readonly ConcurrentQueue<RequestChurchContext> _requestChurchContexts = new();
     private readonly QueryRecorder _queries = new();
     private string _connectionString = "";
 
@@ -65,6 +68,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     {
         services.AddSingleton<TimeProvider>(_time);
         services.AddSingleton<ILoggerProvider>(new DirectoryAuditProvider(_auditReads));
+        services.AddSingleton<IStartupFilter>(new ChurchContextObserver(_requestChurchContexts));
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseAzureSql(_connectionString).AddInterceptors(_queries));
     }
@@ -231,6 +235,43 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         await Assert.That(principal.FindFirstValue(ClaimTypes.Email)).IsEqualTo(user.Email);
         await Assert.That(principal.FindAll(ClaimTypes.Role)).IsEmpty();
         await Assert.That(principal.IsInRole("Admin")).IsFalse();
+    }
+
+    [Test]
+    [Arguments("CID", "CMID", "ROLE", "HTTP://SCHEMAS.MICROSOFT.COM/WS/2008/06/IDENTITY/CLAIMS/ROLE")]
+    [Arguments("cId", "cMiD", "rOlE", "http://schemas.microsoft.com/ws/2008/06/identity/claims/Role")]
+    public async Task Login_StoredCasedAuthorityWithoutMembership_OmitsChurchAndRoles(
+        string churchIdType, string membershipIdType, string roleType, string roleAliasType)
+    {
+        ApplicationUser user = await CreateUserAsync();
+        await StoreCasedAuthorityAsync(user, churchIdType, membershipIdType, roleType, roleAliasType);
+        using HttpClient client = CreateClient();
+
+        (UserInfo info, string cookie) = await LoginAsync(client, user);
+
+        await AssertUnselectedResponseAsync(info, cookie, user);
+        using HttpResponseMessage response = await GetUserAsync(client, cookie);
+        await AssertUnselectedResponseAsync(await ReadUserAsync(response), cookie, user);
+    }
+
+    [Test]
+    [Arguments("CID", "CMID", "ROLE", "HTTP://SCHEMAS.MICROSOFT.COM/WS/2008/06/IDENTITY/CLAIMS/ROLE")]
+    [Arguments("cId", "cMiD", "rOlE", "http://schemas.microsoft.com/ws/2008/06/identity/claims/Role")]
+    public async Task ValidatePrincipal_StoredCasedAuthorityWithoutMembership_RenewsWithoutChurchOrRoles(
+        string churchIdType, string membershipIdType, string roleType, string roleAliasType)
+    {
+        ApplicationUser user = await CreateUserAsync();
+        using HttpClient client = CreateClient();
+        (_, string cookie) = await LoginAsync(client, user);
+        await StoreCasedAuthorityAsync(user, churchIdType, membershipIdType, roleType, roleAliasType);
+
+        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        using HttpResponseMessage renewal = await GetUserAsync(client, cookie);
+        string renewedCookie = ReadCookie(renewal);
+
+        await AssertUnselectedResponseAsync(await ReadUserAsync(renewal), renewedCookie, user);
+        using HttpResponseMessage response = await GetUserAsync(client, renewedCookie);
+        await AssertUnselectedResponseAsync(await ReadUserAsync(response), renewedCookie, user);
     }
 
     [Test]
@@ -632,6 +673,24 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         return user;
     }
 
+    private Task StoreCasedAuthorityAsync(
+        ApplicationUser user, string churchIdType, string membershipIdType, string roleType, string roleAliasType) =>
+        InScopeAsync(async services =>
+        {
+            UserManager<ApplicationUser> manager = services.GetRequiredService<UserManager<ApplicationUser>>();
+            ApplicationUser stored = await manager.FindByIdAsync(user.Id)
+                ?? throw new InvalidOperationException("The test account was not persisted.");
+            IdentityResult result = await manager.AddClaimsAsync(stored,
+            [
+                new Claim(churchIdType, Guid.NewGuid().ToString("D")),
+                new Claim(membershipIdType, Guid.NewGuid().ToString("D")),
+                new Claim(roleType, "Admin"),
+                new Claim(roleAliasType, "Admin"),
+                new Claim("preference", "retained")
+            ]);
+            await Assert.That(result.Succeeded).IsTrue();
+        });
+
     private async Task<ChurchMembership> AddMembershipAsync(
         ApplicationUser user, ChurchMembershipRole role = ChurchMembershipRole.Leader)
     {
@@ -742,6 +801,42 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         await Assert.That(principal.ReadChurchClaims(out ChurchSelection? selection)).IsEqualTo(ChurchClaimState.Unselected);
         await Assert.That(selection).IsNull();
         await Assert.That(principal.FindAll(ClaimTypes.Role)).IsEmpty();
+    }
+
+    private async Task AssertUnselectedResponseAsync(UserInfo info, string cookie, ApplicationUser user)
+    {
+        await Assert.That(info.IsAuthenticated).IsTrue();
+        await Assert.That(info.UserId).IsEqualTo(user.Id);
+        await Assert.That(info.CurrentChurch).IsNull();
+        await Assert.That(info.Churches).IsEmpty();
+        ClaimsPrincipal principal = ReadTicket(cookie).Principal;
+        await AssertUnselectedAsync(principal, user);
+        await Assert.That(principal.IsInRole("Admin")).IsFalse();
+        await Assert.That(principal.FindFirstValue("AspNet.Identity.SecurityStamp")).IsEqualTo(user.SecurityStamp);
+        await Assert.That(principal.FindFirstValue(ClaimTypes.Email)).IsEqualTo(user.Email);
+        await Assert.That(principal.FindFirstValue("preference")).IsEqualTo("retained");
+        RequestChurchContext request = _requestChurchContexts.Last();
+        await Assert.That(request.ChurchId).IsNull();
+        await Assert.That(request.MembershipId).IsNull();
+        await Assert.That(request.Principal.IsInRole("Admin")).IsFalse();
+        await Assert.That(request.Principal.FindAll(SheafClaimTypes.Role)).IsEmpty();
+        await Assert.That(request.Principal.FindAll(ClaimTypes.Role)).IsEmpty();
+    }
+
+    private sealed record RequestChurchContext(Guid? ChurchId, Guid? MembershipId, ClaimsPrincipal Principal);
+
+    private sealed class ChurchContextObserver(ConcurrentQueue<RequestChurchContext> contexts) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (HttpContext http, RequestDelegate request) =>
+            {
+                await request(http);
+                ICurrentChurch church = http.RequestServices.GetRequiredService<ICurrentChurch>();
+                contexts.Enqueue(new RequestChurchContext(church.ChurchId, church.LeaderId, http.User));
+            });
+            next(app);
+        };
     }
 
     private sealed class ControlledTimeProvider : TimeProvider
