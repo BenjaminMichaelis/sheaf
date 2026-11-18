@@ -1,5 +1,8 @@
 {
   "appHost": {
     "path": "Sheaf.AppHost/Sheaf.AppHost.csproj"
+  },
+  "sdk": {
+    "version": "17.0.0"
   }
 }
