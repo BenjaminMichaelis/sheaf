@@ -13,6 +13,27 @@ The React + Vite PWA lives in `Sheaf.Web` (requires Node and pnpm; Aspire runs `
 
 Backend-only build/test: `dotnet build Sheaf.Backend.slnf`, then `dotnet test --project <test csproj>`.
 
+### Regenerating API types
+
+Requires the .NET SDK pinned in `global.json`, Node.js (24 in CI), and pnpm
+(`pnpm@11.1.3`, pinned in `Sheaf.Web\package.json`). From the repository root:
+
+```pwsh
+Set-Location Sheaf.Web
+pnpm install --frozen-lockfile
+pnpm run gen:api       # npm run gen:api also works after dependencies are installed
+```
+
+The command builds the API in Release, exporting the producer-owned
+`Sheaf\openapi\v1.json` document and generating
+`Sheaf.Web\src\api\schema.d.ts` from it. Commit both generated files after API
+contract changes; do not edit them by hand. Normal builds also export the spec.
+The exporter runs with entry assembly `GetDocument.Insider`; only that generation
+process uses a non-secret local connection string to register database services
+without connecting to a database. Runtime startup still requires its configured
+database connection. No running Aspire app or database is needed for export.
+CI regenerates both artifacts and fails if either differs or is untracked.
+
 ### Database tenancy
 
 Runtime `AddDatabase()` and `DesignTimeAppDbContextFactory` both use `Sheaf.Data`'s

@@ -1,89 +1,32 @@
-type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue }
+import createClient from 'openapi-fetch'
+import type { components, paths } from '@/api/schema'
 
-class ApiClient {
-  private baseUrl = __API_BASE_URL__ || ''
+export const apiClient = createClient<paths>({
+  baseUrl: __API_BASE_URL__ || '',
+  credentials: 'include',
+  fetch: request => fetch(request),
+})
 
-  async get<T>(url: string): Promise<T | undefined> {
-    const response = await fetch(this.baseUrl + url, {
-      credentials: 'include',
-    })
-    
+apiClient.use({
+  async onResponse({ request, response }) {
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-    
-    const text = await response.text()
+      const body = request.method === 'POST' ? await response.clone().text() : ''
 
-    return text ? JSON.parse(text) : undefined
-  }
+      let message = body || `HTTP error! status: ${response.status}`
 
-  async post<T = void>(url: string, data?: JsonValue): Promise<T | undefined> {
-    const response = await fetch(this.baseUrl + url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: data === undefined ? undefined : JSON.stringify(data),
-    })
-    
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(error || `HTTP error! status: ${response.status}`)
-    }
-    
-    if (response.status === 204) {
-      return undefined
-    }
-    
-    const text = await response.text()
+      if (response.headers.get('content-type')?.includes('application/problem+json') && body) {
+        try {
+          // SAFETY: This response uses the generated Problem Details contract; malformed JSON falls through to the catch.
+          const problem = JSON.parse(body) as components['schemas']['HttpValidationProblemDetails']
+          const validationMessages = Object.values(problem.errors ?? {}).flat()
 
-    return text ? JSON.parse(text) : undefined
-  }
+          message = validationMessages.join('\n') || String(problem.detail || problem.title || message)
+        } catch {
+          // Keep the original response body when it is not valid Problem Details JSON.
+        }
+      }
 
-  async delete<T = void>(url: string): Promise<T | undefined> {
-    const response = await fetch(this.baseUrl + url, {
-      method: 'DELETE',
-      credentials: 'include',
-    })
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      throw new Error(message)
     }
-    
-    if (response.status === 204) {
-      return undefined
-    }
-    
-    return response.json()
-  }
-
-  async put<T = void>(url: string, data?: JsonValue): Promise<T | undefined> {
-    const response = await fetch(this.baseUrl + url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: data === undefined ? undefined : JSON.stringify(data),
-    })
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-    
-    if (response.status === 204) {
-      return undefined
-    }
-    
-    return response.json()
-  }
-}
-
-export const apiClient = new ApiClient()
+  },
+})

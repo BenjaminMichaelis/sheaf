@@ -19,13 +19,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = async () => {
     try {
-      const userData = await apiClient.get<UserInfo>('/api/auth/user')
+      const { data } = await apiClient.GET('/api/auth/user')
 
-      if (userData === undefined) {
+      if (data === undefined) {
         throw new Error('User response is empty')
       }
 
-      setUser(userData)
+      setUser(data)
     } catch {
       setUser(null)
     } finally {
@@ -36,13 +36,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     apiClient
-      .get<UserInfo>('/api/auth/user')
-      .then(userData => {
-        if (userData === undefined) {
+      .GET('/api/auth/user')
+      .then(({ data }) => {
+        if (data === undefined) {
           throw new Error('User response is empty')
         }
 
-        if (!cancelled) setUser(userData)
+        if (!cancelled) setUser(data)
       })
       .catch(() => {
         if (!cancelled) setUser(null)
@@ -57,27 +57,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (credentials: LoginRequest) => {
-    const userData = await apiClient.post<UserInfo>('/api/auth/login', credentials)
+    const { data } = await apiClient.POST('/api/auth/login', { body: credentials })
 
-    if (userData === undefined) {
+    if (data === undefined) {
       throw new Error('Login response is empty')
     }
 
-    setUser(userData)
+    setUser(data)
   }
 
   const register = async (data: RegisterRequest) => {
-    const userData = await apiClient.post<UserInfo>('/api/auth/register', data)
+    const result = await apiClient.POST('/api/auth/register', { body: data })
 
-    if (userData === undefined) {
+    if (result.data === undefined) {
       throw new Error('Registration response is empty')
     }
 
-    setUser(userData)
+    setUser(result.data)
   }
 
   const logout = async () => {
-    await apiClient.post('/api/auth/logout')
+    await apiClient.POST('/api/auth/logout')
+
     setUser(null)
   }
 

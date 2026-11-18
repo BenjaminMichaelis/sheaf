@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
+    <OpenApiGenerateDocuments>true</OpenApiGenerateDocuments>
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)\openapi</OpenApiDocumentsDirectory>
+    <OpenApiGenerateDocumentsOptions>--document-name v1 --file-name v1</OpenApiGenerateDocumentsOptions>
   </PropertyGroup>
 
   <ItemGroup>
@@ -9,6 +12,7 @@
     <ProjectReference Include="..\Sheaf.Data\Sheaf.Data.csproj" />
     <ProjectReference Include="..\Sheaf.ServiceDefaults\Sheaf.ServiceDefaults.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" PrivateAssets="all" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; analyzers; buildtransitive</IncludeAssets>

@@ -68,6 +68,18 @@ jobs:
       - name: Restore .NET dependencies
         run: dotnet restore Sheaf.Backend.slnf
 
+      - name: Verify generated API client
+        run: |
+          pnpm --dir Sheaf.Web run gen:api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code -- Sheaf/openapi/v1.json Sheaf.Web/src/api/schema.d.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $untracked = git ls-files --others --exclude-standard -- Sheaf/openapi/v1.json Sheaf.Web/src/api/schema.d.ts
+          if ($untracked) {
+            Write-Error "Generated API artifacts are not tracked: $untracked"
+            exit 1
+          }
+
       - name: Enforce formatting
         run: |
           .\.github\scripts\Invoke-DotNetFormatStrict.ps1 -Targets Sheaf.Backend.slnf
