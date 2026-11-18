@@ -3,7 +3,7 @@ Leader-first relational capture for churches: capture the people you meet, keep 
 
 ## Development
 
-Prerequisites: .NET SDK (see `global.json`), Docker, and the [Aspire CLI](https://aspire.dev).
+Prerequisites: .NET SDK (see `global.json`), Docker, and the [Aspire CLI](https://aspire.dev) 17+ (the AppHost build uses the CLI bundle; it falls back to `dnx` when `aspire` is not on `PATH`).
 
 ```pwsh
 aspire run          # API, SQL Server, migrations and the React frontend; API at http://localhost:5285
