@@ -102,24 +102,17 @@ configuration change is required.
 
 `Sheaf.Mobile*` holds the shared app plus Android, iOS, Browser and Desktop heads. Install workloads with `dotnet workload restore`. Android is built locally; iOS requires macOS (built in CI). Mobile apps run separately from Aspire; point them at the API (Android emulator: `http://10.0.2.2:5285`, iOS simulator: `http://localhost:5285`).
 
-For iOS, run workload installation and builds from `Sheaf.Mobile.iOS` so its
-`global.json` selects SDK and workload set `10.0.404`. Install that SDK alongside
-the repository's SDK 11. This pins
-`Microsoft.iOS.Sdk.net10.0_27.2` to `27.2.10000` for Xcode 27.2; the repository's
-`11.0.100` workload set only supplies the older iOS 26.0 pack for .NET 10.
-SDK 11 cannot use the older workload set because their runtime manifests conflict.
-Restore the shared project's workload manifests from the repository root first:
+For local iOS builds, install .NET SDK 10.0.404 alongside the repository SDK and use Xcode 27.2. The iOS project pins SDK and workload set 10.0.404 for its `net10.0-ios` target and Apple SDK pack 27.2.10000. From the repository root, restore the shared project's workloads, then run iOS commands from `Sheaf.Mobile.iOS`:
 
 ```pwsh
 dotnet workload restore Sheaf.Mobile\Sheaf.Mobile.csproj
-Set-Location Sheaf.Mobile.iOS
+Push-Location Sheaf.Mobile.iOS
 dotnet workload install ios
 dotnet build Sheaf.Mobile.iOS.csproj --configuration Release
+Pop-Location
 ```
 
-See the [Apple SDK release](https://github.com/dotnet/macios/releases/tag/dotnet-10.0.1xx-xcode27.2.10000)
-and [.NET workload-set pinning](https://learn.microsoft.com/dotnet/core/tools/dotnet-workload-sets#use-globaljson-for-the-workload-set-version).
-Android and backend commands continue to use the root `global.json`.
+See Microsoft's [.NET workload-set guidance](https://learn.microsoft.com/dotnet/core/tools/dotnet-workload-sets#use-globaljson-for-the-workload-set) and [iOS SDK release for Xcode 27.2](https://github.com/dotnet/macios/releases/tag/dotnet-10.0.1xx-xcode27.2.10000).
 
 ## License
 
