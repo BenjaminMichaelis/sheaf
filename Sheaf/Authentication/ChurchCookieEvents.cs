@@ -33,7 +33,7 @@ internal sealed class ChurchCookieEvents(
         }
         catch
         {
-            initializer.Initialize(null, null);
+            InitializeTenantContext(null, null);
             throw;
         }
         finally
@@ -44,7 +44,7 @@ internal sealed class ChurchCookieEvents(
 
     public override Task SigningOut(CookieSigningOutContext context)
     {
-        initializer.Initialize(null, null);
+        InitializeTenantContext(null, null);
         return base.SigningOut(context);
     }
 
@@ -76,8 +76,16 @@ internal sealed class ChurchCookieEvents(
         bool valid = principal is null
             || (principal.Identity?.IsAuthenticated == true
                 && principal.ReadChurchClaims(out selection) != ChurchClaimState.Invalid);
-        initializer.Initialize(valid ? selection?.ChurchId : null, valid ? selection?.MembershipId : null);
+        InitializeTenantContext(valid ? selection?.ChurchId : null, valid ? selection?.MembershipId : null);
         return valid;
+    }
+
+    private void InitializeTenantContext(Guid? churchId, Guid? membershipId)
+    {
+        // Audited tenant selection: the cookie principal's validated church claims define the request church.
+#pragma warning disable RS0030
+        initializer.Initialize(churchId, membershipId);
+#pragma warning restore RS0030
     }
 
     private static async Task RejectAsync(CookieValidatePrincipalContext context)

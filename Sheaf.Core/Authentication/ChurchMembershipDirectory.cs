@@ -15,8 +15,11 @@ internal sealed partial class ChurchMembershipDirectory(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
+        // Audited tenancy bypass: sign-in must list memberships across churches before one is selected.
+#pragma warning disable RS0030
         ChurchInfo[] churches = await db.ChurchMemberships
             .IgnoreQueryFilters([MultiTenancyConvention.FilterName])
+#pragma warning restore RS0030
             .Where(membership => membership.UserId == userId)
             .Join(db.Churches,
                 membership => membership.ChurchId,

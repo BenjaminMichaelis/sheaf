@@ -109,6 +109,12 @@ and records structured `ChurchMembershipDirectoryRead` audit event **15600** wit
 This establishes session/context state, not the church policies or switch endpoint tracked separately
 in #157/#158. API cookie challenges retain HTTP 401/403 rather than login/access-denied redirects.
 
+Both `IgnoreQueryFilters` overloads and `ITenantContextInitializer.Initialize` are listed in
+`BannedSymbols.txt` and enforced in the `Sheaf`, `Sheaf.Core` and `Sheaf.Data` projects by
+`Microsoft.CodeAnalysis.BannedApiAnalyzers` (RS0030, a build error). The directory, `ChurchAccessService`
+and `ChurchCookieEvents` hold the only `#pragma warning disable RS0030` exemptions; new exemptions
+require security review.
+
 ### Tenancy write guards
 
 `SaveChanges` protects tracked writes, including changes to owned entities, which

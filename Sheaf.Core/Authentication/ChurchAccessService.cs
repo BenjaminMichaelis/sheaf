@@ -16,7 +16,7 @@ internal sealed class ChurchAccessService(
     public async Task<ChurchSelection?> ResolveSignInAsync(
         ApplicationUser user, CancellationToken cancellationToken = default)
     {
-        initializer.Initialize(null, null);
+        InitializeTenantContext(null, null);
         IReadOnlyList<ChurchInfo> churches = await GetChurchesForUserAsync(user, cancellationToken);
         return churches.Count == 1
             ? await RecheckMembershipAsync(user, churches[0].ChurchId, null, cancellationToken)
@@ -31,14 +31,14 @@ internal sealed class ChurchAccessService(
             return RecheckMembershipAsync(user, selection.ChurchId, selection.MembershipId, cancellationToken);
         }
 
-        initializer.Initialize(null, null);
+        InitializeTenantContext(null, null);
         return Task.FromResult<ChurchSelection?>(null);
     }
 
     private async Task<ChurchSelection?> RecheckMembershipAsync(
         ApplicationUser user, Guid churchId, Guid? membershipId, CancellationToken cancellationToken)
     {
-        initializer.Initialize(churchId, null);
+        InitializeTenantContext(churchId, null);
         ChurchSelection? selection = await db.ChurchMemberships
             .Where(membership => membership.UserId == user.Id
                 && (membershipId == null || membership.Id == membershipId))
@@ -50,7 +50,15 @@ internal sealed class ChurchAccessService(
             selection = null;
         }
 
-        initializer.Initialize(selection?.ChurchId, selection?.MembershipId);
+        InitializeTenantContext(selection?.ChurchId, selection?.MembershipId);
         return selection;
+    }
+
+    private void InitializeTenantContext(Guid? churchId, Guid? membershipId)
+    {
+        // Audited tenant selection: sign-in and renewal resolve the church after rechecking membership.
+#pragma warning disable RS0030
+        initializer.Initialize(churchId, membershipId);
+#pragma warning restore RS0030
     }
 }
