@@ -125,6 +125,10 @@ public class AuthorizationPolicyTests
     [Arguments("/api/church/memberships", AccountOnlyValue, HttpStatusCode.Forbidden)]
     [Arguments("/api/church/memberships", nameof(ChurchMembershipRole.Staff), HttpStatusCode.Forbidden)]
     [Arguments("/api/church/memberships", nameof(ChurchMembershipRole.Admin), HttpStatusCode.OK)]
+    [Arguments("/standalone-permission", null, HttpStatusCode.Unauthorized)]
+    [Arguments("/standalone-permission", AccountOnlyValue, HttpStatusCode.Forbidden)]
+    [Arguments("/standalone-permission", nameof(ChurchMembershipRole.Staff), HttpStatusCode.Forbidden)]
+    [Arguments("/standalone-permission", nameof(ChurchMembershipRole.Admin), HttpStatusCode.OK)]
     public async Task Request_PolicyScenario_ReturnsExpectedStatus(string path, string? role, HttpStatusCode expected)
     {
         await using WebApplication app = await StartAppAsync();
@@ -174,6 +178,7 @@ public class AuthorizationPolicyTests
         RouteGroupBuilder church = app.MapChurchGroup();
         church.MapGet("/ping", () => "ok");
         church.MapGet("/memberships", () => "ok").RequirePermission(Permission.ManageMemberships);
+        app.MapGet("/standalone-permission", () => "ok").RequirePermission(Permission.ManageMemberships);
 
         await app.StartAsync();
         return app;

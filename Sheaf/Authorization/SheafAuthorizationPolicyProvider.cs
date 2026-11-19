@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 
-using Sheaf.Core.Authentication;
-
 namespace Sheaf.Authorization;
 
 public sealed class SheafAuthorizationPolicyProvider(IOptions<AuthorizationOptions> options) : IAuthorizationPolicyProvider
@@ -21,9 +19,9 @@ public sealed class SheafAuthorizationPolicyProvider(IOptions<AuthorizationOptio
         }
 
         string name = policyName[SheafPolicies.PermissionPrefix.Length..];
-        AuthorizationPolicyBuilder builder = new AuthorizationPolicyBuilder()
-            .RequireAuthenticatedUser()
-            .RequireClaim(SheafClaimTypes.ChurchId);
+        AuthorizationPolicy churchMember = await _fallback.GetPolicyAsync(SheafPolicies.ChurchMember)
+            ?? throw new InvalidOperationException($"The '{SheafPolicies.ChurchMember}' policy is not registered.");
+        AuthorizationPolicyBuilder builder = new(churchMember);
 
         if (Enum.TryParse(name, out Permission permission) && Enum.IsDefined(permission) && name == permission.ToString())
         {
