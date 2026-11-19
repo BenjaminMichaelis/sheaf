@@ -24,10 +24,8 @@ public class TenancyTests
         Guid churchIdB = Guid.NewGuid();
         Guid leaderIdA = Guid.NewGuid();
         Guid leaderIdB = Guid.NewGuid();
-        scopeA.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdA;
-        scopeB.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchIdB;
-        scopeA.ServiceProvider.GetRequiredService<TenantContext>().LeaderId = leaderIdA;
-        scopeB.ServiceProvider.GetRequiredService<TenantContext>().LeaderId = leaderIdB;
+        scopeA.ServiceProvider.GetRequiredService<ITenantContextInitializer>().Initialize(churchIdA, leaderIdA);
+        scopeB.ServiceProvider.GetRequiredService<ITenantContextInitializer>().Initialize(churchIdB, leaderIdB);
         ApplicationDbContext contextA = scopeA.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         ApplicationDbContext contextB = scopeB.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
@@ -53,6 +51,28 @@ public class TenancyTests
         await Assert.That(() => context.ChurchIdOrThrow)
             .Throws<InvalidOperationException>()
             .WithMessage("A church tenant is required for this query.");
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Initialize_ChangingChurchWithTrackedMembership_RejectsChangeWithoutDiscardingWork(bool unchanged)
+    {
+        using IHost host = CreateHost();
+        using IServiceScope scope = host.Services.CreateScope();
+        ITenantContextInitializer initializer = scope.ServiceProvider.GetRequiredService<ITenantContextInitializer>();
+        ICurrentChurch currentChurch = scope.ServiceProvider.GetRequiredService<ICurrentChurch>();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Guid churchId = Guid.NewGuid();
+        initializer.Initialize(churchId, null);
+        ChurchMembership membership = new() { ChurchId = churchId, UserId = "user" };
+        db.Entry(membership).State = unchanged ? EntityState.Unchanged : EntityState.Added;
+
+        await Assert.That(() => initializer.Initialize(Guid.NewGuid(), null))
+            .Throws<InvalidOperationException>().WithMessageContaining("tenanted entities are tracked");
+        await Assert.That(() => initializer.Initialize(null, null)).Throws<InvalidOperationException>();
+        await Assert.That(currentChurch.ChurchId).IsEqualTo(churchId);
+        await Assert.That(db.Entry(membership).State).IsEqualTo(unchanged ? EntityState.Unchanged : EntityState.Added);
     }
 
     [Test]

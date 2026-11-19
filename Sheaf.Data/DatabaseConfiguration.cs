@@ -11,6 +11,9 @@ public static class DatabaseConfiguration
     /// <summary>Registers the model-affecting database settings shared by runtime and design-time contexts.</summary>
     public static IServiceCollection AddSheafDatabase(this IServiceCollection services, string connectionString)
     {
+        services.AddScoped<TenantContext>();
+        services.AddScoped<ICurrentChurch>(provider => provider.GetRequiredService<TenantContext>());
+        services.AddScoped<ITenantContextInitializer, TenantContext.Initializer>();
         services.Configure<IdentityOptions>(options =>
             options.Stores.SchemaVersion = IdentitySchemaVersions.Version3);
         services.AddDbContext<ApplicationDbContext>(

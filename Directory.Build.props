@@ -29,6 +29,12 @@ See: https://learn.microsoft.com/visualstudio/msbuild/customize-your-build
   If you want project to have their own, set it to a different value on each project.
   See: https://learn.microsoft.com/dotnet/architecture/microservices/secure-net-microservices-web-applications/developer-app-secrets-storage
   -->
+  <!-- Tenancy-bypass APIs are banned in server production code; exemptions require reviewed RS0030 pragmas. -->
+  <ItemGroup Label="Banned APIs" Condition="'$(MSBuildProjectName)' == 'Sheaf' Or '$(MSBuildProjectName)' == 'Sheaf.Core' Or '$(MSBuildProjectName)' == 'Sheaf.Data'">
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+
   <PropertyGroup Label="User Secrets">
     <UserSecretsId>Sheaf-secrets</UserSecretsId>
   </PropertyGroup>

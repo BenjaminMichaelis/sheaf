@@ -1,11 +1,15 @@
 using System.Reflection;
+using System.Text.Json.Serialization;
 
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.OpenApi;
 
 using Scalar.AspNetCore;
 
+using Sheaf.Authentication;
 using Sheaf.Core;
 using Sheaf.Data;
 using Sheaf.Endpoints;
@@ -25,6 +29,25 @@ if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database")
 }
 
 builder.AddDatabase();
+builder.Services.AddScoped<ChurchClaimsPrincipalFactory>();
+builder.Services.AddScoped<IUserClaimsPrincipalFactory<ApplicationUser>>(services =>
+    services.GetRequiredService<ChurchClaimsPrincipalFactory>());
+builder.Services.AddScoped<ChurchCookieEvents>();
+builder.Services.TryAddSingleton(TimeProvider.System);
+builder.Services.AddOptions<SecurityStampValidatorOptions>()
+    .Configure<TimeProvider>((options, timeProvider) =>
+    {
+        options.ValidationInterval = TimeSpan.FromMinutes(5);
+        options.TimeProvider = timeProvider;
+    });
+builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
+    .Configure<TimeProvider>((options, timeProvider) =>
+    {
+        options.EventsType = typeof(ChurchCookieEvents);
+        options.TimeProvider = timeProvider;
+    });
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>()));
 
 // Add services to the container.
 builder.Services.AddProblemDetails();

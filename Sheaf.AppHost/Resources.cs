@@ -28,12 +28,13 @@ public static partial class Resources
         {
             string? containerSuffix = builder.Configuration[ContainerSuffixKey];
             string? containerName = string.IsNullOrWhiteSpace(containerSuffix) ? "Sheaf-sql" : $"Sheaf-{containerSuffix}-sql";
+            string volumeName = string.IsNullOrWhiteSpace(containerSuffix) ? "Sheaf-database" : $"Sheaf-{containerSuffix}-database";
 
             return builder
                 .AddSqlServer(SqlServer)
                 .WithLifetime(ContainerLifetime.Persistent)
                 .WithContainerName(containerName)
-                .WithDataVolume("Sheaf-database")
+                .WithDataVolume(volumeName)
 
                 // This pairs with the usage of .UseAzureSql() which has a compatibility level of 170.
                 .WithImageTag("2025-latest")

@@ -35,7 +35,7 @@ public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
     {
         IHost host = _host ?? throw new InvalidOperationException("The fixture is not initialized.");
         AsyncServiceScope scope = host.Services.CreateAsyncScope();
-        scope.ServiceProvider.GetRequiredService<TenantContext>().ChurchId = churchId;
+        scope.ServiceProvider.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
         return scope;
     }
 
