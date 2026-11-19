@@ -22,6 +22,33 @@ public class ApiTests : WebApplicationTest<ApiWebApplicationFactory, Program>
     }
 
     [Test]
+    public async Task Health_AnonymousRequest_ReturnsOk()
+    {
+        using var client = Factory.CreateClient();
+        using var response = await client.GetAsync("/health");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task ChurchRoute_AnonymousRequest_ReturnsUnauthorized()
+    {
+        using var client = Factory.CreateClient();
+        using var response = await client.GetAsync("/api/church/anything");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
+    public async Task Logout_AnonymousRequest_ReturnsUnauthorized()
+    {
+        using var client = Factory.CreateClient();
+        using var response = await client.PostAsync("/api/auth/logout", null);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
     public async Task Register_PasswordsDoNotMatch_ReturnsValidationProblemDetails()
     {
         using var client = Factory.CreateClient();
