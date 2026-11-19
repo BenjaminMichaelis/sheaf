@@ -27,6 +27,11 @@ public class AuthorizationPolicyTests
     private const string TestScheme = "Test";
     private const string RoleHeader = "X-Role";
     private const string AccountOnlyValue = "account";
+    private const string IncoherentCid = "cid-only";
+    private const string MissingMembership = "no-cmid";
+    private const string MissingRole = "no-role";
+    private const string BadRole = "bad-role";
+    private const string StrayRoleClaim = "stray-role";
 
     [Test]
     [Arguments(ChurchMembershipRole.Admin, true)]
@@ -39,18 +44,20 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
-    public async Task GetPolicyAsync_KnownPermission_RequiresChurchMemberAndPermission()
+    public async Task GetPolicyAsync_KnownPermission_DeniesUnauthenticatedIdentityWithAdminChurchClaims()
     {
         IAuthorizationPolicyProvider provider = CreateProvider();
-
+        IAuthorizationService authorization = CreateAuthorizationService();
         AuthorizationPolicy? policy = await provider.GetPolicyAsync(SheafPolicies.ForPermission(Permission.ManageMemberships));
+        ClaimsPrincipal unauthenticated = new(new ClaimsIdentity(
+            CreatePrincipal(ChurchMembershipRole.Admin).Claims, authenticationType: null, ClaimTypes.Name, SheafClaimTypes.Role));
 
         await Assert.That(policy).IsNotNull();
-        await Assert.That(policy!.Requirements.OfType<PermissionRequirement>().Single().Permission)
-            .IsEqualTo(Permission.ManageMemberships);
-        await Assert.That(policy.Requirements.OfType<DenyAnonymousAuthorizationRequirement>().Count()).IsEqualTo(1);
-        await Assert.That(policy.Requirements.OfType<ClaimsAuthorizationRequirement>()
-            .Any(requirement => requirement.ClaimType == SheafClaimTypes.ChurchId)).IsTrue();
+        AuthorizationResult denied = await authorization.AuthorizeAsync(unauthenticated, null, policy!);
+        AuthorizationResult allowed = await authorization.AuthorizeAsync(CreatePrincipal(ChurchMembershipRole.Admin), null, policy!);
+
+        await Assert.That(denied.Succeeded).IsFalse();
+        await Assert.That(allowed.Succeeded).IsTrue();
     }
 
     [Test]
@@ -144,6 +151,42 @@ public class AuthorizationPolicyTests
         await Assert.That(response.StatusCode).IsEqualTo(expected);
     }
 
+    [Test]
+    [Arguments("/api/church/ping", IncoherentCid)]
+    [Arguments("/api/church/ping", MissingMembership)]
+    [Arguments("/api/church/ping", MissingRole)]
+    [Arguments("/api/church/ping", BadRole)]
+    [Arguments("/api/church/ping", StrayRoleClaim)]
+    [Arguments("/fallback", IncoherentCid)]
+    [Arguments("/fallback", MissingMembership)]
+    [Arguments("/fallback", MissingRole)]
+    [Arguments("/fallback", BadRole)]
+    [Arguments("/fallback", StrayRoleClaim)]
+    public async Task Request_IncoherentChurchClaims_ReturnsForbidden(string path, string role)
+    {
+        await using WebApplication app = await StartAppAsync();
+        using HttpClient client = app.GetTestClient();
+        using HttpRequestMessage request = new(HttpMethod.Get, path);
+        request.Headers.Add(RoleHeader, role);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+    }
+
+    [Test]
+    public async Task Request_ChurchGroupWithoutFallback_ForbidsAccountOnlyUser()
+    {
+        await using WebApplication app = await StartAppAsync(withoutFallback: true);
+        using HttpClient client = app.GetTestClient();
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/church/ping");
+        request.Headers.Add(RoleHeader, AccountOnlyValue);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+    }
+
     private static IAuthorizationPolicyProvider CreateProvider() =>
         new ServiceCollection().AddLogging().AddSheafAuthorization().BuildServiceProvider()
             .GetRequiredService<IAuthorizationPolicyProvider>();
@@ -160,11 +203,27 @@ public class AuthorizationPolicyTests
             new Claim(SheafClaimTypes.Role, role.ToString())
         ], TestScheme, ClaimTypes.Name, SheafClaimTypes.Role));
 
-    private static async Task<WebApplication> StartAppAsync()
+    private static ClaimsPrincipal Account() =>
+        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "user")], TestScheme));
+
+    private static ClaimsPrincipal With(ClaimsPrincipal principal, params string[] removedTypes) =>
+        new(new ClaimsIdentity(
+            principal.Claims.Where(claim => !removedTypes.Contains(claim.Type)), TestScheme, ClaimTypes.Name, SheafClaimTypes.Role));
+
+    private static ClaimsPrincipal Replace(ClaimsPrincipal principal, Claim claim) =>
+        new(new ClaimsIdentity(
+            principal.Claims.Where(existing => claim.Type == ClaimTypes.Role || existing.Type != claim.Type).Append(claim),
+            TestScheme, ClaimTypes.Name, SheafClaimTypes.Role));
+
+    private static async Task<WebApplication> StartAppAsync(bool withoutFallback = false)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSheafAuthorization();
+        if (withoutFallback)
+        {
+            builder.Services.Configure<AuthorizationOptions>(options => options.FallbackPolicy = null);
+        }
         builder.Services.AddAuthentication(TestScheme).AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>(TestScheme, null);
 
         WebApplication app = builder.Build();
@@ -195,9 +254,16 @@ public class AuthorizationPolicyTests
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
 
-            ClaimsPrincipal principal = value == AccountOnlyValue
-                ? new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "user")], TestScheme))
-                : CreatePrincipal(Enum.Parse<ChurchMembershipRole>(value.ToString()));
+            ClaimsPrincipal principal = value.ToString() switch
+            {
+                AccountOnlyValue => Account(),
+                IncoherentCid => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId, SheafClaimTypes.Role),
+                MissingMembership => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId),
+                MissingRole => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.Role),
+                BadRole => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(SheafClaimTypes.Role, "admin")),
+                StrayRoleClaim => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(ClaimTypes.Role, "Admin")),
+                var role => CreatePrincipal(Enum.Parse<ChurchMembershipRole>(role))
+            };
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, TestScheme)));
         }
     }

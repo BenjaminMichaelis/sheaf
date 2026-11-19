@@ -15,7 +15,7 @@ public static class AuthorizationExtensions
                 .Build();
             AuthorizationPolicy churchMember = new AuthorizationPolicyBuilder()
                 .RequireAuthenticatedUser()
-                .RequireClaim(SheafClaimTypes.ChurchId)
+                .RequireAssertion(context => context.User.ReadChurchClaims(out _) == ChurchClaimState.Selected)
                 .Build();
 
             options.AddPolicy(SheafPolicies.Authenticated, authenticated);

@@ -629,6 +629,21 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     }
 
     [Test]
+    public async Task UnmappedApiPath_SignedInWithoutChurch_FallbackReturnsForbiddenWithoutRedirect()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        using HttpClient client = CreateClient();
+        (_, string cookie) = await LoginAsync(client, user);
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/church/anything");
+        request.Headers.Add(HeaderNames.Cookie, cookie);
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        await Assert.That(response.Headers.Location).IsNull();
+    }
+
+    [Test]
     public async Task RedirectToAccessDenied_ApiRequest_ReturnsForbiddenWithoutLoginRedirect()
     {
         await InScopeAsync(async services =>

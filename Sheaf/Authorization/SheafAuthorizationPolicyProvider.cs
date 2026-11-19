@@ -7,6 +7,8 @@ public sealed class SheafAuthorizationPolicyProvider(IOptions<AuthorizationOptio
 {
     private readonly DefaultAuthorizationPolicyProvider _fallback = new(options);
 
+    public bool AllowsCachingPolicies => true;
+
     public Task<AuthorizationPolicy> GetDefaultPolicyAsync() => _fallback.GetDefaultPolicyAsync();
 
     public Task<AuthorizationPolicy?> GetFallbackPolicyAsync() => _fallback.GetFallbackPolicyAsync();
