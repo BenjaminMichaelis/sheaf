@@ -1,0 +1,7 @@
+@baseUrl = http://localhost:5285
+@cookie = replace-with-identity-cookie
+@churchId = replace-with-member-church-guid
+
+### Switch the active church; use the resulting Set-Cookie value for later requests
+POST {{baseUrl}}/api/auth/church/{{churchId}}
+Cookie: {{cookie}}

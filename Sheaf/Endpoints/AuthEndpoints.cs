@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 
+using Sheaf.Authentication;
 using Sheaf.Authorization;
 using Sheaf.Core.Authentication;
 using Sheaf.Data;
@@ -94,6 +95,62 @@ internal static class AuthEndpoints
         .WithName("Logout")
         .Produces(StatusCodes.Status204NoContent);
 
+        group.MapPost("/church/{churchId}", async Task<Results<Ok<UserInfo>, ProblemHttpResult, UnauthorizedHttpResult>> (
+            Guid churchId, ClaimsPrincipal user, SignInManager<ApplicationUser> signInManager,
+            IChurchAccessService churchAccess, ICurrentChurch currentChurch,
+            ChurchClaimsPrincipalFactory principalFactory, CancellationToken cancellationToken) =>
+        {
+            if (!signInManager.IsSignedIn(user))
+            {
+                return TypedResults.Unauthorized();
+            }
+
+            ApplicationUser? verifiedUser = await signInManager.ValidateSecurityStampAsync(user);
+            if (verifiedUser is null)
+            {
+                await signInManager.SignOutAsync();
+                return TypedResults.Unauthorized();
+            }
+
+            ChurchSwitchResult result = await churchAccess.SwitchChurchAsync(verifiedUser, churchId, cancellationToken);
+            if (result.Failure == ChurchSwitchFailure.TenantedEntitiesTracked)
+            {
+                return TypedResults.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Church switch could not be completed.",
+                    detail: "Complete or discard pending church changes before switching.");
+            }
+
+            if (result.Failure == ChurchSwitchFailure.ChurchNotAccessible || result.Selection is null)
+            {
+                return TypedResults.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Church access denied.");
+            }
+
+            UserInfo info = await CreateUserInfoAsync(
+                verifiedUser, churchAccess, currentChurch, cancellationToken, result.Selection);
+            principalFactory.SwitchSelection = result.Selection;
+            try
+            {
+                await signInManager.RefreshSignInAsync(verifiedUser);
+            }
+            finally
+            {
+                principalFactory.SwitchSelection = null;
+            }
+
+            return TypedResults.Ok(info);
+        })
+        .RequireAuthorization(SheafPolicies.Authenticated)
+        .WithMetadata(new ChurchSwitchEndpointMetadata())
+        .WithName("SwitchChurch")
+        .WithSummary("Switches the active church for the authenticated account.")
+        .Produces<UserInfo>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status401Unauthorized)
+        .ProducesProblem(StatusCodes.Status403Forbidden)
+        .ProducesProblem(StatusCodes.Status409Conflict);
+
         group.MapGet("/user", async (
             ClaimsPrincipal user, UserManager<ApplicationUser> userManager,
             IChurchAccessService churchAccess, ICurrentChurch currentChurch, CancellationToken cancellationToken) =>
@@ -119,9 +176,16 @@ internal static class AuthEndpoints
 
     private static async Task<UserInfo> CreateUserInfoAsync(
         ApplicationUser user, IChurchAccessService churchAccess,
-        ICurrentChurch currentChurch, CancellationToken cancellationToken)
+        ICurrentChurch currentChurch, CancellationToken cancellationToken, ChurchSelection? currentSelection = null)
     {
         IReadOnlyList<ChurchInfo> churches = await churchAccess.GetChurchesForUserAsync(user, cancellationToken);
+        Guid? currentChurchId = currentSelection?.ChurchId ?? currentChurch.ChurchId;
+        ChurchInfo? selection = churches.SingleOrDefault(church => church.ChurchId == currentChurchId);
+        if (selection is not null && currentSelection is not null)
+        {
+            selection = selection with { Role = currentSelection.Role };
+        }
+
         return new UserInfo
         {
             UserId = user.Id,
@@ -129,7 +193,7 @@ internal static class AuthEndpoints
             Email = user.Email ?? "",
             IsAuthenticated = true,
             Churches = churches,
-            CurrentChurch = churches.SingleOrDefault(church => church.ChurchId == currentChurch.ChurchId)
+            CurrentChurch = selection
         };
     }
 }

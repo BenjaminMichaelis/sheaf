@@ -17,6 +17,8 @@ internal sealed class ChurchClaimsPrincipalFactory(
 {
     internal ClaimsPrincipal? RenewalPrincipal { get; set; }
 
+    internal ChurchSelection? SwitchSelection { get; set; }
+
     protected override async Task<ClaimsIdentity> GenerateClaimsAsync(ApplicationUser user)
     {
         ClaimsIdentity identity = await base.GenerateClaimsAsync(user);
@@ -33,7 +35,11 @@ internal sealed class ChurchClaimsPrincipalFactory(
 
         CancellationToken cancellationToken = httpContextAccessor.HttpContext?.RequestAborted ?? default;
         ChurchSelection? selection;
-        if (RenewalPrincipal is { } renewalPrincipal)
+        if (SwitchSelection is { } switchSelection)
+        {
+            selection = switchSelection;
+        }
+        else if (RenewalPrincipal is { } renewalPrincipal)
         {
             renewalPrincipal.ReadChurchClaims(out ChurchSelection? previousSelection);
             selection = await churchAccess.ResolveRenewalAsync(
