@@ -22,6 +22,28 @@ public class ApiTests : WebApplicationTest<ApiWebApplicationFactory, Program>
     }
 
     [Test]
+    [Arguments("/health")]
+    [Arguments("/alive")]
+    [Arguments("/")]
+    [Arguments("/openapi/v1.json")]
+    public async Task PublicEndpoint_AnonymousRequest_ReturnsOk(string path)
+    {
+        using var client = Factory.CreateClient();
+        using var response = await client.GetAsync(path);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task UnmappedChurchPath_AnonymousRequest_FallbackReturnsUnauthorized()
+    {
+        using var client = Factory.CreateClient();
+        using var response = await client.GetAsync("/api/church/anything");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
     public async Task Register_PasswordsDoNotMatch_ReturnsValidationProblemDetails()
     {
         using var client = Factory.CreateClient();

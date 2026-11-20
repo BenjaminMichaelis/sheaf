@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 
+using Sheaf.Authorization;
 using Sheaf.Core.Authentication;
 using Sheaf.Data;
 
@@ -40,6 +41,7 @@ internal static class AuthEndpoints
             return TypedResults.Unauthorized();
         })
         .WithName("Login")
+        .AllowAnonymous()
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized);
 
@@ -79,6 +81,7 @@ internal static class AuthEndpoints
                     group => group.Select(error => error.Description).ToArray()));
         })
         .WithName("Register")
+        .AllowAnonymous()
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .ProducesValidationProblem(StatusCodes.Status400BadRequest);
 
@@ -87,7 +90,7 @@ internal static class AuthEndpoints
             await signInManager.SignOutAsync();
             return Results.NoContent();
         })
-        .RequireAuthorization()
+        .RequireAuthorization(SheafPolicies.Authenticated)
         .WithName("Logout")
         .Produces(StatusCodes.Status204NoContent);
 
@@ -107,6 +110,7 @@ internal static class AuthEndpoints
                 : await CreateUserInfoAsync(appUser, churchAccess, currentChurch, cancellationToken));
         })
         .WithName("GetCurrentUser")
+        .AllowAnonymous()
         .WithSummary("Get the signed-in account, its churches and its current church selection.")
         .Produces<UserInfo>(StatusCodes.Status200OK);
 

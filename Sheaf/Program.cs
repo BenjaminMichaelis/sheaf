@@ -10,6 +10,7 @@ using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 
 using Sheaf.Authentication;
+using Sheaf.Authorization;
 using Sheaf.Core;
 using Sheaf.Data;
 using Sheaf.Endpoints;
@@ -109,7 +110,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddSheafAuthorization();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
@@ -155,8 +156,8 @@ app.UseCors("AllowedOrigins");
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference();
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference().AllowAnonymous();
     app.UseMigrationsEndPoint();
 }
 else
@@ -171,7 +172,7 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/", () => "API is running.");
+app.MapGet("/", () => "API is running.").AllowAnonymous();
 
 app.MapAuthEndpoints();
 
