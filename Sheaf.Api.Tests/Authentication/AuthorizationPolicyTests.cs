@@ -25,20 +25,36 @@ namespace Sheaf.Api.Tests.Authentication;
 public class AuthorizationPolicyTests
 {
     private const string TestScheme = "Test";
-    private const string RoleHeader = "X-Role";
-    private const string AccountOnlyValue = "account";
-    private const string IncoherentCid = "cid-only";
-    private const string MissingMembership = "no-cmid";
-    private const string MissingRole = "no-role";
-    private const string BadRole = "bad-role";
-    private const string StrayRoleClaim = "stray-role";
+    private const string CallerHeader = "X-Caller";
+
+    public enum Caller
+    {
+        Anonymous,
+        AccountOnly,
+        Leader,
+        Coordinator,
+        Staff,
+        Admin,
+        CidOnly,
+        MissingMembership,
+        MissingRole,
+        BadRole,
+        StrayRoleClaim
+    }
+
+    public static IEnumerable<(ChurchMembershipRole Role, bool Expected)> ManageMembershipsExpectations() =>
+        Enum.GetValues<ChurchMembershipRole>().Select(role => (role, role switch
+        {
+            ChurchMembershipRole.Admin => true,
+            ChurchMembershipRole.Staff => false,
+            ChurchMembershipRole.Coordinator => false,
+            ChurchMembershipRole.Leader => false,
+            _ => throw new NotSupportedException($"Decide whether {role} holds ManageMemberships.")
+        }));
 
     [Test]
-    [Arguments(ChurchMembershipRole.Admin, true)]
-    [Arguments(ChurchMembershipRole.Staff, false)]
-    [Arguments(ChurchMembershipRole.Coordinator, false)]
-    [Arguments(ChurchMembershipRole.Leader, false)]
-    public async Task HasPermission_ManageMemberships_AllowsOnlyAdmin(ChurchMembershipRole role, bool expected)
+    [MethodDataSource(nameof(ManageMembershipsExpectations))]
+    public async Task HasPermission_ManageMemberships_MatchesExpectedRoles(ChurchMembershipRole role, bool expected)
     {
         await Assert.That(RolePermissions.HasPermission(role, Permission.ManageMemberships)).IsEqualTo(expected);
     }
@@ -89,8 +105,7 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
-    [Arguments(ChurchMembershipRole.Admin, true)]
-    [Arguments(ChurchMembershipRole.Staff, false)]
+    [MethodDataSource(nameof(ManageMembershipsExpectations))]
     public async Task HandleAsync_ManageMembershipsRequirement_FollowsRolePermissions(ChurchMembershipRole role, bool expected)
     {
         IAuthorizationService authorization = CreateAuthorizationService();
@@ -116,35 +131,28 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
-    [Arguments("/api/church/ping", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/api/church/ping", AccountOnlyValue, HttpStatusCode.Forbidden)]
-    [Arguments("/api/church/ping", nameof(ChurchMembershipRole.Leader), HttpStatusCode.OK)]
-    [Arguments("/api/church/unmapped", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/api/church/unmapped", AccountOnlyValue, HttpStatusCode.Forbidden)]
-    [Arguments("/fallback", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/fallback", AccountOnlyValue, HttpStatusCode.Forbidden)]
-    [Arguments("/fallback", nameof(ChurchMembershipRole.Leader), HttpStatusCode.OK)]
-    [Arguments("/account", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/account", AccountOnlyValue, HttpStatusCode.OK)]
-    [Arguments("/authenticated", AccountOnlyValue, HttpStatusCode.OK)]
-    [Arguments("/public", null, HttpStatusCode.OK)]
-    [Arguments("/api/church/memberships", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/api/church/memberships", AccountOnlyValue, HttpStatusCode.Forbidden)]
-    [Arguments("/api/church/memberships", nameof(ChurchMembershipRole.Staff), HttpStatusCode.Forbidden)]
-    [Arguments("/api/church/memberships", nameof(ChurchMembershipRole.Admin), HttpStatusCode.OK)]
-    [Arguments("/standalone-permission", null, HttpStatusCode.Unauthorized)]
-    [Arguments("/standalone-permission", AccountOnlyValue, HttpStatusCode.Forbidden)]
-    [Arguments("/standalone-permission", nameof(ChurchMembershipRole.Staff), HttpStatusCode.Forbidden)]
-    [Arguments("/standalone-permission", nameof(ChurchMembershipRole.Admin), HttpStatusCode.OK)]
-    public async Task Request_PolicyScenario_ReturnsExpectedStatus(string path, string? role, HttpStatusCode expected)
+    [Arguments("/api/church/ping", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/api/church/ping", Caller.AccountOnly, HttpStatusCode.Forbidden)]
+    [Arguments("/api/church/ping", Caller.Leader, HttpStatusCode.OK)]
+    [Arguments("/api/church/unmapped", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/api/church/unmapped", Caller.AccountOnly, HttpStatusCode.Forbidden)]
+    [Arguments("/fallback", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/fallback", Caller.AccountOnly, HttpStatusCode.Forbidden)]
+    [Arguments("/fallback", Caller.Leader, HttpStatusCode.OK)]
+    [Arguments("/account", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/account", Caller.AccountOnly, HttpStatusCode.OK)]
+    [Arguments("/authenticated", Caller.AccountOnly, HttpStatusCode.OK)]
+    [Arguments("/public", Caller.Anonymous, HttpStatusCode.OK)]
+    [Arguments("/api/church/memberships", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/api/church/memberships", Caller.AccountOnly, HttpStatusCode.Forbidden)]
+    [Arguments("/standalone-permission", Caller.Anonymous, HttpStatusCode.Unauthorized)]
+    [Arguments("/standalone-permission", Caller.AccountOnly, HttpStatusCode.Forbidden)]
+    public async Task Request_PolicyScenario_ReturnsExpectedStatus(string path, Caller caller, HttpStatusCode expected)
     {
         await using WebApplication app = await StartAppAsync();
         using HttpClient client = app.GetTestClient();
         using HttpRequestMessage request = new(HttpMethod.Get, path);
-        if (role is not null)
-        {
-            request.Headers.Add(RoleHeader, role);
-        }
+        request.Headers.Add(CallerHeader, caller.ToString());
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
@@ -152,22 +160,41 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
-    [Arguments("/api/church/ping", IncoherentCid)]
-    [Arguments("/api/church/ping", MissingMembership)]
-    [Arguments("/api/church/ping", MissingRole)]
-    [Arguments("/api/church/ping", BadRole)]
-    [Arguments("/api/church/ping", StrayRoleClaim)]
-    [Arguments("/fallback", IncoherentCid)]
-    [Arguments("/fallback", MissingMembership)]
-    [Arguments("/fallback", MissingRole)]
-    [Arguments("/fallback", BadRole)]
-    [Arguments("/fallback", StrayRoleClaim)]
-    public async Task Request_IncoherentChurchClaims_ReturnsForbidden(string path, string role)
+    [MethodDataSource(nameof(ManageMembershipsExpectations))]
+    public async Task Request_PermissionRoutes_FollowRolePermissions(ChurchMembershipRole role, bool allowed)
+    {
+        await using WebApplication app = await StartAppAsync();
+        using HttpClient client = app.GetTestClient();
+        HttpStatusCode expected = allowed ? HttpStatusCode.OK : HttpStatusCode.Forbidden;
+
+        foreach (string path in new[] { "/api/church/memberships", "/standalone-permission" })
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, path);
+            request.Headers.Add(CallerHeader, role.ToString());
+
+            using HttpResponseMessage response = await client.SendAsync(request);
+
+            await Assert.That(response.StatusCode).IsEqualTo(expected);
+        }
+    }
+
+    [Test]
+    [Arguments("/api/church/ping", Caller.CidOnly)]
+    [Arguments("/api/church/ping", Caller.MissingMembership)]
+    [Arguments("/api/church/ping", Caller.MissingRole)]
+    [Arguments("/api/church/ping", Caller.BadRole)]
+    [Arguments("/api/church/ping", Caller.StrayRoleClaim)]
+    [Arguments("/fallback", Caller.CidOnly)]
+    [Arguments("/fallback", Caller.MissingMembership)]
+    [Arguments("/fallback", Caller.MissingRole)]
+    [Arguments("/fallback", Caller.BadRole)]
+    [Arguments("/fallback", Caller.StrayRoleClaim)]
+    public async Task Request_IncoherentChurchClaims_ReturnsForbidden(string path, Caller caller)
     {
         await using WebApplication app = await StartAppAsync();
         using HttpClient client = app.GetTestClient();
         using HttpRequestMessage request = new(HttpMethod.Get, path);
-        request.Headers.Add(RoleHeader, role);
+        request.Headers.Add(CallerHeader, caller.ToString());
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
@@ -180,7 +207,7 @@ public class AuthorizationPolicyTests
         await using WebApplication app = await StartAppAsync(withoutFallback: true);
         using HttpClient client = app.GetTestClient();
         using HttpRequestMessage request = new(HttpMethod.Get, "/api/church/ping");
-        request.Headers.Add(RoleHeader, AccountOnlyValue);
+        request.Headers.Add(CallerHeader, nameof(Caller.AccountOnly));
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
@@ -249,20 +276,26 @@ public class AuthorizationPolicyTests
     {
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
-            if (!Request.Headers.TryGetValue(RoleHeader, out var value))
+            if (!Request.Headers.TryGetValue(CallerHeader, out var value))
             {
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
 
-            ClaimsPrincipal principal = value.ToString() switch
+            Caller caller = Enum.Parse<Caller>(value.ToString());
+            if (caller == Caller.Anonymous)
             {
-                AccountOnlyValue => Account(),
-                IncoherentCid => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId, SheafClaimTypes.Role),
-                MissingMembership => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId),
-                MissingRole => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.Role),
-                BadRole => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(SheafClaimTypes.Role, "admin")),
-                StrayRoleClaim => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(ClaimTypes.Role, "Admin")),
-                var role => CreatePrincipal(Enum.Parse<ChurchMembershipRole>(role))
+                return Task.FromResult(AuthenticateResult.NoResult());
+            }
+
+            ClaimsPrincipal principal = caller switch
+            {
+                Caller.AccountOnly => Account(),
+                Caller.CidOnly => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId, SheafClaimTypes.Role),
+                Caller.MissingMembership => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.ChurchMembershipId),
+                Caller.MissingRole => With(CreatePrincipal(ChurchMembershipRole.Admin), SheafClaimTypes.Role),
+                Caller.BadRole => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(SheafClaimTypes.Role, "admin")),
+                Caller.StrayRoleClaim => Replace(CreatePrincipal(ChurchMembershipRole.Admin), new Claim(ClaimTypes.Role, "Admin")),
+                var role => CreatePrincipal(Enum.Parse<ChurchMembershipRole>(role.ToString()))
             };
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, TestScheme)));
         }
