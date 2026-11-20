@@ -23,9 +23,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 
+using Sheaf.Authorization;
 using Sheaf.Core.Authentication;
 using Sheaf.Core.Tests;
-using Sheaf.Authorization;
 using Sheaf.Data;
 using Sheaf.Data.Tenancy;
 using Sheaf.Endpoints;
