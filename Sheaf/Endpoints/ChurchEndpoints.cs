@@ -42,7 +42,7 @@ internal sealed class ChurchHeaderEndpointFilter : IEndpointFilter
         {
             return TypedResults.Problem(
                 statusCode: StatusCodes.Status409Conflict,
-                type: "https://sheaf.dev/problems/church-header-conflict",
+                type: "tag:sheaf,2026:problems/church-header-conflict",
                 title: ConflictTitle,
                 detail: ConflictDetail);
         }

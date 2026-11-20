@@ -745,7 +745,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
             await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.None);
             await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("application/problem+json");
-            await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-access-denied");
+            await AssertProblemTypeAsync(response, "tag:sheaf,2026:problems/church-access-denied");
             string body = await ReadProblemFingerprintAsync(response);
             if (normalizedDenial is null)
             {
@@ -904,7 +904,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
         await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("application/problem+json");
-        await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-switch-tracked");
+        await AssertProblemTypeAsync(response, "tag:sheaf,2026:problems/church-switch-tracked");
         await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.None);
         using HttpResponseMessage followUp = await GetUserAsync(client, cookie);
         await Assert.That((await ReadUserAsync(followUp)).CurrentChurch?.ChurchId).IsEqualTo(active.ChurchId);
@@ -993,7 +993,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         {
             await Assert.That(response.Content.Headers.ContentType?.MediaType)
                 .IsEqualTo("application/problem+json");
-            await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-header-conflict");
+            await AssertProblemTypeAsync(response, "tag:sheaf,2026:problems/church-header-conflict");
         }
         Guid[] expectedWrites = expectedStatus == HttpStatusCode.OK
             && method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE")
@@ -1024,7 +1024,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpResponseMessage staleResponse = await client.SendAsync(staleTab);
 
         await Assert.That(staleResponse.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-        await AssertProblemTypeAsync(staleResponse, "https://sheaf.dev/problems/church-header-conflict");
+        await AssertProblemTypeAsync(staleResponse, "tag:sheaf,2026:problems/church-header-conflict");
         await Assert.That(writes).IsEmpty();
 
         using HttpRequestMessage currentTab = new(HttpMethod.Post, "/api/church/write");

@@ -117,7 +117,7 @@ internal static class AuthEndpoints
             {
                 return TypedResults.Problem(
                     statusCode: StatusCodes.Status409Conflict,
-                    type: "https://sheaf.dev/problems/church-switch-tracked",
+                    type: "tag:sheaf,2026:problems/church-switch-tracked",
                     title: "Church switch could not be completed.",
                     detail: "Complete or discard pending church changes before switching.");
             }
@@ -126,7 +126,7 @@ internal static class AuthEndpoints
             {
                 return TypedResults.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
-                    type: "https://sheaf.dev/problems/church-access-denied",
+                    type: "tag:sheaf,2026:problems/church-access-denied",
                     title: "Church access denied.");
             }
 
