@@ -107,7 +107,7 @@ public sealed class TenancyQueryExpressionInterceptor : IQueryExpressionIntercep
         }
     }
 
-    private static (IEntityType EntityType, IProperty Property) ResolveProperty(
+    internal static (IEntityType EntityType, IProperty Property) ResolveProperty(
         IModel model, Expression source, ParameterExpression parameter, Expression target)
     {
         if (source is EntityQueryRootExpression root)
@@ -265,7 +265,7 @@ public sealed class TenancyQueryExpressionInterceptor : IQueryExpressionIntercep
         }
     }
 
-    private static Expression Unwrap(Expression expression)
+    internal static Expression Unwrap(Expression expression)
     {
         while (expression is UnaryExpression
             { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked or ExpressionType.TypeAs or ExpressionType.Quote } unary)

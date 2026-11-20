@@ -9,8 +9,8 @@ namespace Sheaf.Core.Tests;
 [NotInParallel("sql-server")]
 public class SqlServerBulkUpdateCompatibilityTests
 {
-    [ClassDataSource<ProductionSqlServerFixture>(Shared = SharedType.PerClass)]
-    public required ProductionSqlServerFixture Sql { get; init; }
+    [ClassDataSource<TenancyOnlySqlServerFixture>(Shared = SharedType.PerClass)]
+    public required TenancyOnlySqlServerFixture Sql { get; init; }
 
     [Before(Test)]
     public async Task MigrateAndResetAsync()

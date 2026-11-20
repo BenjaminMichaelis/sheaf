@@ -12,7 +12,7 @@ using TUnit.Core.Interfaces;
 namespace Sheaf.Core.Tests;
 
 /// <summary>An isolated production catalog per fixture, borrowing the assembly's SQL Server container.</summary>
-public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
+public class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
 {
     private IHost? _host;
     private string? _connectionString;
@@ -21,13 +21,15 @@ public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
     [ClassDataSource<SqlServerFixture>(Shared = SharedType.PerAssembly)]
     public required SqlServerFixture Sql { get; init; }
 
+    protected virtual bool MembershipSecurity => true;
+
     public Task InitializeAsync()
     {
         _connectionString = new SqlConnectionStringBuilder(Sql.ConnectionString)
         {
             InitialCatalog = $"SheafProductionMigrations_{Guid.NewGuid():N}",
         }.ConnectionString;
-        _host = ProductionDatabaseHost.Create(_connectionString);
+        _host = ProductionDatabaseHost.Create(_connectionString, MembershipSecurity);
         return Task.CompletedTask;
     }
 
@@ -69,5 +71,16 @@ public sealed class ProductionSqlServerFixture : IAsyncInitializer, IDisposable
     }
 
     // The shared fixture owns the container and its catalogs; never dispose it or delete migration history here.
-    public void Dispose() => _host?.Dispose();
+    public void Dispose()
+    {
+        _host?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+}
+
+
+/// <summary>Production tenancy without membership security, so tenancy tests can use membership role bulk writes as payload.</summary>
+public sealed class TenancyOnlySqlServerFixture : ProductionSqlServerFixture
+{
+    protected override bool MembershipSecurity => false;
 }
