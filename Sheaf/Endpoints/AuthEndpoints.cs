@@ -117,6 +117,7 @@ internal static class AuthEndpoints
             {
                 return TypedResults.Problem(
                     statusCode: StatusCodes.Status409Conflict,
+                    type: "https://sheaf.dev/problems/church-switch-tracked",
                     title: "Church switch could not be completed.",
                     detail: "Complete or discard pending church changes before switching.");
             }
@@ -125,6 +126,7 @@ internal static class AuthEndpoints
             {
                 return TypedResults.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
+                    type: "https://sheaf.dev/problems/church-access-denied",
                     title: "Church access denied.");
             }
 
@@ -147,7 +149,7 @@ internal static class AuthEndpoints
         .WithName("SwitchChurch")
         .WithSummary("Switches the active church for the authenticated account.")
         .Produces<UserInfo>(StatusCodes.Status200OK)
-        .ProducesProblem(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status401Unauthorized)
         .ProducesProblem(StatusCodes.Status403Forbidden)
         .ProducesProblem(StatusCodes.Status409Conflict);
 

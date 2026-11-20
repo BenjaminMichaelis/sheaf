@@ -54,7 +54,8 @@ currently shown by the client, in `D` Guid format. Missing, malformed, or mismat
 values return 409 ProblemDetails; safe methods do not require the header. After a
 successful switch, clients should update their shared cookie state and reload stale tabs.
 The check rejects stale-tab writes whose cookie and displayed church disagree; it does not
-cancel requests already in flight or serialize concurrent cookie updates.
+cancel requests already in flight or serialize concurrent cookie updates. This consistency
+header is not CSRF protection; CSRF protections are tracked separately in #160.
 
 Church-owned entities implement `Sheaf.Data.Tenancy.ITenanted`. EF query filters and
 write guards enforce church ownership; queries require a selected church. These are

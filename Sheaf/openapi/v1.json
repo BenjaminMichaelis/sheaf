@@ -145,14 +145,7 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Unauthorized"
           },
           "403": {
             "description": "Forbidden",

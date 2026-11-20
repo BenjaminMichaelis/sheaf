@@ -286,9 +286,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+                content?: never;
             };
             /** @description Forbidden */
             403: {

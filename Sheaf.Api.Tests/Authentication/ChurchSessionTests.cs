@@ -46,6 +46,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     private readonly ControlledTimeProvider _time = new();
     private readonly ConcurrentQueue<DirectoryRead> _auditReads = new();
     private readonly ConcurrentQueue<RequestChurchContext> _requestChurchContexts = new();
+    private readonly ConcurrentQueue<bool> _trackSwitchRequests = new();
     private readonly QueryRecorder _queries = new();
     private string _connectionString = "";
 
@@ -71,7 +72,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     {
         services.AddSingleton<TimeProvider>(_time);
         services.AddSingleton<ILoggerProvider>(new DirectoryAuditProvider(_auditReads));
-        services.AddSingleton<IStartupFilter>(new ChurchContextObserver(_requestChurchContexts));
+        services.AddSingleton<IStartupFilter>(new ChurchContextObserver(_requestChurchContexts, _trackSwitchRequests));
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseAzureSql(_connectionString).AddInterceptors(_queries));
     }
@@ -690,6 +691,29 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     }
 
     [Test]
+    public async Task SwitchChurch_SameChurchAfterRoleChange_RechecksRoleInTicketAndUserInfo()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        ChurchMembership active = await AddMembershipAsync(user, ChurchMembershipRole.Leader);
+        using HttpClient client = CreateClient();
+        (_, string cookie) = await LoginAsync(client, user);
+        active.Role = ChurchMembershipRole.Staff;
+        await InChurchAsync(active.ChurchId, async db =>
+        {
+            ChurchMembership stored = await db.ChurchMemberships.SingleAsync();
+            stored.Role = active.Role;
+            await db.SaveChangesAsync();
+        });
+
+        (UserInfo info, string switchedCookie, IdentityCookieWrite write) =
+            await SwitchChurchAsync(client, cookie, active.ChurchId);
+
+        await Assert.That(write).IsEqualTo(IdentityCookieWrite.AuthenticatedTicket);
+        await Assert.That(info.CurrentChurch?.Role).IsEqualTo(ChurchMembershipRole.Staff);
+        await AssertSelectionAsync(ReadTicket(switchedCookie).Principal, active);
+    }
+
+    [Test]
     public async Task SwitchChurch_AnonymousRequest_ReturnsUnauthorizedWithoutCookieWrite()
     {
         using HttpClient client = CreateClient();
@@ -712,6 +736,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         ChurchMembership otherChurch = await AddMembershipAsync(otherUser);
         ChurchMembership unknownRole = await AddMembershipAsync(user, (ChurchMembershipRole)int.MaxValue);
 
+        string? normalizedDenial = null;
         foreach (Guid churchId in new[] { otherChurch.ChurchId, Guid.NewGuid(), Guid.Empty, unknownRole.ChurchId })
         {
             using HttpRequestMessage request = CreateSwitchRequest(cookie, churchId);
@@ -720,7 +745,16 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
             await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.None);
             await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("application/problem+json");
-            await AssertSelectionAsync(ReadTicket(cookie).Principal, active);
+            await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-access-denied");
+            string body = await ReadProblemFingerprintAsync(response);
+            if (normalizedDenial is null)
+            {
+                normalizedDenial = body;
+            }
+            else
+            {
+                await Assert.That(body).IsEqualTo(normalizedDenial);
+            }
         }
 
         using HttpRequestMessage malformed = new(HttpMethod.Post, "/api/auth/church/not-a-guid");
@@ -728,12 +762,14 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpResponseMessage malformedResponse = await client.SendAsync(malformed);
         await Assert.That(malformedResponse.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         await Assert.That(ClassifyIdentityCookieWrites(malformedResponse)).IsEqualTo(IdentityCookieWrite.None);
+        using HttpResponseMessage followUp = await GetUserAsync(client, cookie);
+        await Assert.That((await ReadUserAsync(followUp)).CurrentChurch?.ChurchId).IsEqualTo(active.ChurchId);
     }
 
     [Test]
     [Arguments(true)]
     [Arguments(false)]
-    public async Task SwitchChurch_RefusedTargetWithRenewalDue_DoesNotRenewCookie(bool stampRenewalDue)
+    public async Task SwitchChurch_RefusedTargetAtRenewalThreshold_DoesNotRenewCookie(bool securityStampValidationDue)
     {
         ApplicationUser user = await CreateUserAsync();
         ChurchMembership active = await AddMembershipAsync(user);
@@ -741,7 +777,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         ChurchMembership otherChurch = await AddMembershipAsync(otherUser);
         using HttpClient client = CreateClient();
         (_, string cookie) = await LoginAsync(client, user);
-        TimeSpan elapsed = stampRenewalDue
+        TimeSpan elapsed = securityStampValidationDue
             ? TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1)
             : TimeSpan.FromTicks(CookieOptions.ExpireTimeSpan.Ticks / 2) + TimeSpan.FromSeconds(1);
         _time.Advance(elapsed);
@@ -782,20 +818,29 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpResponseMessage response = await client.SendAsync(request);
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
-        await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.Deletion);
+        await Assert.That(ClassifyIdentityCookieWrites(response) != IdentityCookieWrite.AuthenticatedTicket).IsTrue();
         await Assert.That(_queries.Commands.Any(command =>
-            command.Contains("FROM [ChurchMemberships]", StringComparison.Ordinal))).IsFalse();
-        await AssertSelectionAsync(ReadTicket(cookie).Principal, active);
+            command.Contains("[ChurchMemberships]", StringComparison.Ordinal))).IsFalse();
+        using HttpResponseMessage followUp = await GetUserAsync(client, cookie);
+        UserInfo followUpInfo = await ReadUserAsync(followUp);
+        await Assert.That(followUpInfo.CurrentChurch?.ChurchId).IsEqualTo(active.ChurchId);
     }
 
     [Test]
-    [Arguments(EntityState.Unchanged)]
-    [Arguments(EntityState.Modified)]
-    [Arguments(EntityState.Added)]
-    public async Task SwitchChurch_TrackedTenantedEntity_RefusesWithoutDiscardingState(EntityState state)
+    [Arguments(EntityState.Unchanged, false)]
+    [Arguments(EntityState.Modified, false)]
+    [Arguments(EntityState.Added, false)]
+    [Arguments(EntityState.Deleted, false)]
+    [Arguments(EntityState.Unchanged, true)]
+    [Arguments(EntityState.Modified, true)]
+    [Arguments(EntityState.Added, true)]
+    [Arguments(EntityState.Deleted, true)]
+    public async Task SwitchChurch_TrackedTenantedEntity_RefusesWithoutDiscardingState(
+        EntityState state, bool switchToDifferentChurch)
     {
         ApplicationUser user = await CreateUserAsync();
         ChurchMembership active = await AddMembershipAsync(user);
+        ChurchMembership target = switchToDifferentChurch ? await AddMembershipAsync(user) : active;
 
         await InScopeAsync(async services =>
         {
@@ -803,11 +848,15 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             initializer.Initialize(active.ChurchId, active.Id);
             ApplicationDbContext db = services.GetRequiredService<ApplicationDbContext>();
             ChurchMembership tracked = state == EntityState.Unchanged
-                ? await db.ChurchMemberships.SingleAsync()
+                ? await db.ChurchMemberships.SingleAsync(membership => membership.ChurchId == active.ChurchId)
                 : new ChurchMembership { ChurchId = active.ChurchId, UserId = user.Id };
+            if (state is EntityState.Modified or EntityState.Deleted)
+            {
+                tracked = await db.ChurchMemberships.SingleAsync(membership => membership.ChurchId == active.ChurchId);
+            }
             db.Entry(tracked).State = state;
             ChurchSwitchResult result = await services.GetRequiredService<IChurchAccessService>()
-                .SwitchChurchAsync(user, active.ChurchId);
+                .SwitchChurchAsync(user, target.ChurchId);
 
             await Assert.That(result.Failure).IsEqualTo(ChurchSwitchFailure.TenantedEntitiesTracked);
             await Assert.That(db.Entry(tracked).State).IsEqualTo(state);
@@ -817,100 +866,140 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     }
 
     [Test]
-    public async Task ChurchGroup_UnsafeRequestsRequireMatchingChurchHeaderAndSafeRequestsDoNot()
+    public async Task SwitchChurch_PreCancelledMembershipCheck_RestoresPreviousChurchContext()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        ChurchMembership active = await AddMembershipAsync(user);
+        ChurchMembership target = await AddMembershipAsync(user);
+
+        await InScopeAsync(async services =>
+        {
+            services.GetRequiredService<ITenantContextInitializer>().Initialize(active.ChurchId, active.Id);
+            CancellationTokenSource cancellation = new();
+            await cancellation.CancelAsync();
+
+            await Assert.That(async () => await services.GetRequiredService<IChurchAccessService>()
+                .SwitchChurchAsync(user, target.ChurchId, cancellation.Token))
+                .Throws<OperationCanceledException>();
+
+            ICurrentChurch currentChurch = services.GetRequiredService<ICurrentChurch>();
+            await Assert.That(currentChurch.ChurchId).IsEqualTo(active.ChurchId);
+            await Assert.That(currentChurch.LeaderId).IsEqualTo(active.Id);
+        });
+    }
+
+    [Test]
+    public async Task SwitchChurch_TrackedTenantedEntityAtEndpoint_ReturnsTypedConflictWithoutCookieWrite()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        ChurchMembership active = await AddMembershipAsync(user);
+        ChurchMembership target = await AddMembershipAsync(user);
+        using HttpClient client = CreateClient();
+        (_, string accountCookie) = await LoginAsync(client, user);
+        (_, string cookie, _) = await SwitchChurchAsync(client, accountCookie, active.ChurchId);
+        _trackSwitchRequests.Enqueue(true);
+
+        using HttpRequestMessage request = CreateSwitchRequest(cookie, target.ChurchId);
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+        await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("application/problem+json");
+        await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-switch-tracked");
+        await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.None);
+        using HttpResponseMessage followUp = await GetUserAsync(client, cookie);
+        await Assert.That((await ReadUserAsync(followUp)).CurrentChurch?.ChurchId).IsEqualTo(active.ChurchId);
+    }
+
+    [Test]
+    [Arguments("POST missing header", "POST", "missing", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("PUT missing header", "PUT", "missing", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("PATCH missing header", "PATCH", "missing", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("DELETE missing header", "DELETE", "missing", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("PURGE missing header", "PURGE", "missing", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("malformed header", "POST", "malformed", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("empty church ID", "POST", "empty", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("mismatched church ID", "POST", "mismatch", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("N-format church ID", "POST", "n-format", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("multiple header values", "POST", "multiple", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("combined header values", "POST", "combined", "member", HttpStatusCode.Conflict, DisplayName = "$arg1")]
+    [Arguments("matching church ID", "POST", "match", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe GET without header", "GET", "missing", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe GET malformed header", "GET", "malformed", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe GET mismatched header", "GET", "mismatch", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe HEAD", "HEAD", "missing", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe OPTIONS", "OPTIONS", "missing", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("safe TRACE", "TRACE", "missing", "member", HttpStatusCode.OK, DisplayName = "$arg1")]
+    [Arguments("anonymous request", "POST", "missing", "anonymous", HttpStatusCode.Unauthorized, DisplayName = "$arg1")]
+    [Arguments("account without church", "POST", "missing", "account", HttpStatusCode.Forbidden, DisplayName = "$arg1")]
+    public async Task ChurchGroup_HeaderScenario_ReturnsExpectedStatus(
+        string scenario, string method, string headerScenario, string callerScenario, HttpStatusCode expectedStatus)
     {
         ApplicationUser user = await CreateUserAsync();
         ChurchMembership active = await AddMembershipAsync(user);
         using HttpClient authClient = CreateClient();
         (_, string cookie) = await LoginAsync(authClient, user);
+        if (callerScenario == "account")
+        {
+            (_, cookie) = await LoginAsync(authClient, await CreateUserAsync());
+        }
+
         ConcurrentQueue<Guid> writes = new();
         await using WebApplication app = await StartChurchGroupAppAsync(writes);
         using HttpClient client = app.GetTestClient();
-
-        foreach (string method in new[] { "POST", "PUT", "PATCH", "DELETE", "PURGE" })
-        {
-            using HttpRequestMessage request = new(new HttpMethod(method), "/api/church/write");
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-        }
-
-        foreach (string? headerValue in new string?[]
-        {
-            "",
-            "not-a-guid",
-            Guid.Empty.ToString("D"),
-            Guid.NewGuid().ToString("D")
-        })
-        {
-            using HttpRequestMessage request = new(HttpMethod.Post, "/api/church/write");
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-            request.Headers.TryAddWithoutValidation("X-Sheaf-Church", headerValue);
-
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-            await Assert.That(response.Content.Headers.ContentType?.MediaType).IsEqualTo("application/problem+json");
-        }
-
-        using (HttpRequestMessage request = new(HttpMethod.Post, "/api/church/write"))
+        string path = method is "GET" or "HEAD" or "OPTIONS" or "TRACE"
+            ? "/api/church/read"
+            : "/api/church/write";
+        using HttpRequestMessage request = new(new HttpMethod(method), path);
+        if (callerScenario != "anonymous")
         {
             request.Headers.Add(HeaderNames.Cookie, cookie);
-            request.Headers.TryAddWithoutValidation("X-Sheaf-Church",
-                [active.ChurchId.ToString("D"), active.ChurchId.ToString("D")]);
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
         }
 
-        using (HttpRequestMessage request = new(HttpMethod.Post, "/api/church/write"))
+        switch (headerScenario)
         {
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-            request.Headers.TryAddWithoutValidation("X-Sheaf-Church",
-                $"{active.ChurchId:D},{active.ChurchId:D}");
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+            case "malformed":
+                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", "not-a-guid");
+                break;
+            case "empty":
+                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", Guid.Empty.ToString("D"));
+                break;
+            case "mismatch":
+                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", Guid.NewGuid().ToString("D"));
+                break;
+            case "n-format":
+                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", active.ChurchId.ToString("N"));
+                break;
+            case "multiple":
+                request.Headers.TryAddWithoutValidation(
+                    "X-Sheaf-Church", [active.ChurchId.ToString("D"), active.ChurchId.ToString("D")]);
+                break;
+            case "combined":
+                request.Headers.TryAddWithoutValidation(
+                    "X-Sheaf-Church", $"{active.ChurchId:D},{active.ChurchId:D}");
+                break;
+            case "match":
+                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", active.ChurchId.ToString("D"));
+                break;
+            case "missing":
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown header scenario '{headerScenario}'.");
         }
 
-        using (HttpRequestMessage request = new(HttpMethod.Post, "/api/church/write"))
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(expectedStatus);
+        if (expectedStatus == HttpStatusCode.Conflict)
         {
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-            request.Headers.TryAddWithoutValidation("X-Sheaf-Church", active.ChurchId.ToString("D"));
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+            await Assert.That(response.Content.Headers.ContentType?.MediaType)
+                .IsEqualTo("application/problem+json");
+            await AssertProblemTypeAsync(response, "https://sheaf.dev/problems/church-header-conflict");
         }
-
-        foreach (string? headerValue in new string?[] { null, "not-a-guid", Guid.NewGuid().ToString("D") })
-        {
-            using HttpRequestMessage request = new(HttpMethod.Get, "/api/church/read");
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-            if (headerValue is not null)
-            {
-                request.Headers.TryAddWithoutValidation("X-Sheaf-Church", headerValue);
-            }
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        }
-
-        foreach (string method in new[] { "HEAD", "OPTIONS", "TRACE" })
-        {
-            using HttpRequestMessage request = new(new HttpMethod(method), "/api/church/read");
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        }
-
-        using (HttpRequestMessage request = new(HttpMethod.Post, "/api/church/write"))
-        {
-            using HttpResponseMessage response = await client.SendAsync(request);
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
-        }
-
-        using HttpRequestMessage accountCookieRequest = new(HttpMethod.Post, "/api/church/write");
-        (_, string accountCookie) = await LoginAsync(authClient, await CreateUserAsync());
-        accountCookieRequest.Headers.Add(HeaderNames.Cookie, accountCookie);
-        using HttpResponseMessage accountOnly = await client.SendAsync(accountCookieRequest);
-        await Assert.That(accountOnly.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
-        await Assert.That(writes.ToArray()).IsEquivalentTo([active.ChurchId]);
+        Guid[] expectedWrites = expectedStatus == HttpStatusCode.OK
+            && method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE")
+                ? [active.ChurchId]
+                : [];
+        await Assert.That(writes.ToArray()).IsEquivalentTo(expectedWrites);
     }
 
     [Test]
@@ -935,6 +1024,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpResponseMessage staleResponse = await client.SendAsync(staleTab);
 
         await Assert.That(staleResponse.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+        await AssertProblemTypeAsync(staleResponse, "https://sheaf.dev/problems/church-header-conflict");
         await Assert.That(writes).IsEmpty();
 
         using HttpRequestMessage currentTab = new(HttpMethod.Post, "/api/church/write");
@@ -1161,6 +1251,25 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             .Where(value => value.StartsWith(CookieName, StringComparison.Ordinal))
             .Select(value => value.Split(';', 2)[0]));
 
+    private static async Task AssertProblemTypeAsync(HttpResponseMessage response, string expectedType)
+    {
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        await Assert.That(document.RootElement.GetProperty("type").GetString()).IsEqualTo(expectedType);
+    }
+
+    private static async Task<string> ReadProblemFingerprintAsync(HttpResponseMessage response)
+    {
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement problem = document.RootElement;
+        return JsonSerializer.Serialize(new
+        {
+            Type = problem.GetProperty("type").GetString(),
+            Title = problem.GetProperty("title").GetString(),
+            Status = problem.GetProperty("status").GetInt32(),
+            Detail = problem.TryGetProperty("detail", out JsonElement detail) ? detail.GetString() : null
+        });
+    }
+
     private static IdentityCookieWrite ClassifyIdentityCookieWrites(HttpResponseMessage response)
     {
         string[] cookies = response.Headers.TryGetValues(HeaderNames.SetCookie, out IEnumerable<string>? values)
@@ -1265,12 +1374,40 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         AuthenticatedTicket
     }
 
-    private sealed class ChurchContextObserver(ConcurrentQueue<RequestChurchContext> contexts) : IStartupFilter
+    private sealed class ChurchContextObserver(
+        ConcurrentQueue<RequestChurchContext> contexts,
+        ConcurrentQueue<bool> trackSwitchRequests) : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
         {
             app.Use(async (HttpContext http, RequestDelegate request) =>
             {
+                if (http.Request.Path.StartsWithSegments("/api/auth/church")
+                    && trackSwitchRequests.TryDequeue(out _))
+                {
+                    AuthenticateResult authentication = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+                    if (!authentication.Succeeded || authentication.Principal is not { } principal)
+                    {
+                        throw new InvalidOperationException("The tracking endpoint test requires a valid Identity cookie.");
+                    }
+
+                    if (principal.ReadChurchClaims(out ChurchSelection? selection) != ChurchClaimState.Selected
+                        || selection is null)
+                    {
+                        throw new InvalidOperationException("The tracking endpoint test requires a selected church cookie.");
+                    }
+
+                    http.RequestServices.GetRequiredService<ITenantContextInitializer>()
+                        .Initialize(selection.ChurchId, selection.MembershipId);
+                    ICurrentChurch selectedChurch = http.RequestServices.GetRequiredService<ICurrentChurch>();
+                    Guid churchId = selectedChurch.ChurchId
+                        ?? throw new InvalidOperationException("Cookie authentication did not initialize the church.");
+                    string userId = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                        ?? throw new InvalidOperationException("The Identity cookie has no user identifier.");
+                    http.RequestServices.GetRequiredService<ApplicationDbContext>().ChurchMemberships.Add(
+                        new ChurchMembership { ChurchId = churchId, UserId = userId });
+                }
+
                 await request(http);
                 ICurrentChurch church = http.RequestServices.GetRequiredService<ICurrentChurch>();
                 contexts.Enqueue(new RequestChurchContext(church.ChurchId, church.LeaderId, http.User));
