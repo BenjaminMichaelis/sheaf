@@ -43,6 +43,20 @@ Identity cookies authenticate accounts; a church is selected automatically at si
 only when the account has exactly one membership. Authentication alone does not grant
 access to a church.
 
+Authenticated accounts can select a member church with `POST /api/auth/church/{churchId}`.
+The target membership is rechecked before a new Identity cookie is issued; inaccessible
+and nonexistent churches both return 403. A switch is refused with 409 while tenanted
+entities are tracked by the request context.
+
+The Identity cookie represents one active church and is shared by all browser tabs.
+Unsafe requests under `/api/church` must include `X-Sheaf-Church` with the church ID
+currently shown by the client, in `D` Guid format. Missing, malformed, or mismatched
+values return 409 ProblemDetails; safe methods do not require the header. After a
+successful switch, clients should update their shared cookie state and reload stale tabs.
+The check rejects stale-tab writes whose cookie and displayed church disagree; it does not
+cancel requests already in flight or serialize concurrent cookie updates. This consistency
+header is not CSRF protection; CSRF protections are tracked separately in #160.
+
 Church-owned entities implement `Sheaf.Data.Tenancy.ITenanted`. EF query filters and
 write guards enforce church ownership; queries require a selected church. These are
 application-level protections, not database row-level security.

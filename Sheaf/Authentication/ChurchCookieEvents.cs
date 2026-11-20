@@ -13,6 +13,16 @@ internal sealed class ChurchCookieEvents(
     ITenantContextInitializer initializer,
     ChurchClaimsPrincipalFactory principalFactory) : CookieAuthenticationEvents
 {
+    public override Task CheckSlidingExpiration(CookieSlidingExpirationContext context)
+    {
+        if (IsChurchSwitch(context.HttpContext))
+        {
+            context.ShouldRenew = false;
+        }
+
+        return base.CheckSlidingExpiration(context);
+    }
+
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
         if (!Synchronize(context.Principal))
@@ -29,6 +39,10 @@ internal sealed class ChurchCookieEvents(
             if (!Synchronize(context.Principal))
             {
                 await RejectAsync(context);
+            }
+            else if (IsChurchSwitch(context.HttpContext))
+            {
+                context.ShouldRenew = false;
             }
         }
         catch
@@ -88,9 +102,16 @@ internal sealed class ChurchCookieEvents(
 #pragma warning restore RS0030
     }
 
+    private static bool IsChurchSwitch(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<ChurchSwitchEndpointMetadata>() is not null;
+
     private static async Task RejectAsync(CookieValidatePrincipalContext context)
     {
         context.RejectPrincipal();
         await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
     }
+}
+
+internal sealed class ChurchSwitchEndpointMetadata
+{
 }
