@@ -29,6 +29,7 @@
     <PackageVersion Include="Aspire.Hosting.SqlServer" Version="17.0.0" />
     <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="11.0.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="11.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0" />
@@ -39,6 +40,8 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="11.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="7.1.1" />
+    <PackageVersion Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.5" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="11.0.0" />
     <PackageVersion Include="Microsoft.ApplicationInsights.Profiler.AspNetCore" Version="3.0.2" />

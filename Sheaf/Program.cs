@@ -1,8 +1,11 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 
+using Azure.Identity;
+
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.OpenApi;
@@ -31,6 +34,26 @@ if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database")
 }
 
 builder.AddDatabase();
+IDataProtectionBuilder dataProtectionBuilder = builder.Services.AddDataProtection()
+    .SetApplicationName("Sheaf")
+    .PersistKeysToDbContext<ApplicationDbContext>();
+
+if (!isOpenApiGeneration
+    && !builder.Environment.IsDevelopment()
+    && !builder.Environment.IsEnvironment("Testing"))
+{
+    string? keyIdentifier = builder.Configuration["DataProtection:KeyVaultKeyIdentifier"];
+    if (!Uri.TryCreate(keyIdentifier, UriKind.Absolute, out Uri? keyVaultKeyIdentifier)
+        || keyVaultKeyIdentifier is null
+        || keyVaultKeyIdentifier.Scheme != Uri.UriSchemeHttps)
+    {
+        throw new InvalidOperationException(
+            "DataProtection:KeyVaultKeyIdentifier must be configured as an absolute HTTPS URI outside Development and Testing.");
+    }
+
+    dataProtectionBuilder.ProtectKeysWithAzureKeyVault(keyVaultKeyIdentifier, new DefaultAzureCredential());
+}
+
 builder.Services.AddScoped<ChurchClaimsPrincipalFactory>();
 builder.Services.AddScoped<IUserClaimsPrincipalFactory<ApplicationUser>>(services =>
     services.GetRequiredService<ChurchClaimsPrincipalFactory>());
