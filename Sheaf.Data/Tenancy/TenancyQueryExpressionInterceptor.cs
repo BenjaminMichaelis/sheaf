@@ -158,6 +158,21 @@ public sealed class TenancyQueryExpressionInterceptor : IQueryExpressionIntercep
             && query.Method.Name == nameof(Queryable.Select)
             && Unwrap(query.Arguments[1]) is LambdaExpression { Parameters.Count: 1 } projection)
         {
+            if (projection.Body is NewExpression { Members: { } members } shape
+                && Unwrap(target) is MemberExpression
+                {
+                    Expression: ParameterExpression projectedOwner
+                } projectedMember
+                && projectedOwner == projection.Parameters[0])
+            {
+                int projectedIndex = members.ToList().FindIndex(member => member == projectedMember.Member);
+                if (projectedIndex >= 0)
+                {
+                    return ResolveProperty(model, query.Arguments[0], projection.Parameters[0],
+                        shape.Arguments[projectedIndex]);
+                }
+            }
+
             Expression projectedTarget = ReplacingExpressionVisitor.Replace(parameter, projection.Body, target);
             return ResolveProperty(model, query.Arguments[0], projection.Parameters[0], projectedTarget);
         }

@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 
-using Sheaf.Data;
 using Sheaf.Data.Tenancy;
 
 namespace Sheaf.Core.Tests;
@@ -9,41 +8,37 @@ namespace Sheaf.Core.Tests;
 [NotInParallel("sql-server")]
 public class SqlServerBulkUpdateCompatibilityTests
 {
-    [ClassDataSource<TenancyOnlySqlServerFixture>(Shared = SharedType.PerClass)]
-    public required TenancyOnlySqlServerFixture Sql { get; init; }
+    [ClassDataSource<TenancyBulkSqlServerFixture>(Shared = SharedType.PerClass)]
+    public required TenancyBulkSqlServerFixture Sql { get; init; }
 
     [Before(Test)]
-    public async Task MigrateAndResetAsync()
+    public Task ResetAsync() => Sql.ResetAsync();
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_CurrentChurchPayload_OnlyUpdatesCurrentChurchRecords(bool useAsync)
     {
-        await Sql.InDatabaseScopeAsync(null, db => db.Database.MigrateAsync());
-        await Sql.ResetAsync();
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchAId, db => UpdateAsync(db.Records,
+            setters => setters.SetProperty(record => record.Value, "updated"), useAsync));
+
+        await Assert.That(affected).IsEqualTo(1);
+        await seed.AssertRecordsAsync(Sql, valueA: "updated");
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task ExecuteUpdate_CurrentChurchPayload_OnlyUpdatesCurrentChurchMemberships(bool useAsync)
+    public async Task ExecuteDelete_CurrentChurchQuery_OnlyDeletesCurrentChurchRecords(bool useAsync)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => UpdateAsync(db.ChurchMemberships,
-            setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin), useAsync));
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchAId, db => DeleteAsync(db.Records, useAsync));
 
         await Assert.That(affected).IsEqualTo(1);
-        await seed.AssertMembershipsAsync(Sql, roleA: ChurchMembershipRole.Admin);
-    }
-
-    [Test]
-    [Arguments(false)]
-    [Arguments(true)]
-    public async Task ExecuteDelete_CurrentChurchQuery_OnlyDeletesCurrentChurchMemberships(bool useAsync)
-    {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => DeleteAsync(db.ChurchMemberships, useAsync));
-
-        await Assert.That(affected).IsEqualTo(1);
-        Guid[] remaining = await Sql.InDatabaseScopeAsync(null, db => db.ChurchMemberships.IgnoreQueryFilters()
-            .Select(membership => membership.Id).ToArrayAsync());
-        await Assert.That(remaining).IsEquivalentTo([seed.MembershipB.Id]);
+        Guid[] remaining = await Sql.InDatabaseScopeAsync(seed.ChurchAId, db => db.Records.IgnoreQueryFilters()
+            .Select(record => record.Id).ToArrayAsync());
+        await Assert.That(remaining).IsEquivalentTo([seed.RecordB.Id]);
     }
 
     [Test]
@@ -51,25 +46,26 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(false, true)]
     [Arguments(true, false)]
     [Arguments(true, true)]
-    public async Task ExecuteUpdate_ChurchIdAssignmentWithOrWithoutMatches_RejectsEntireCommand(bool useAsync, bool noMatches)
+    public async Task ExecuteUpdate_ChurchIdAssignmentWithOrWithoutMatches_RejectsEntireCommand(
+        bool useAsync, bool noMatches)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            IQueryable<ChurchMembership> query = noMatches
-                ? db.ChurchMemberships.Where(membership => membership.Id == Guid.Empty)
-                : db.ChurchMemberships;
+            IQueryable<TenancyBulkTestRecord> query = noMatches
+                ? db.Records.Where(record => record.Id == Guid.Empty)
+                : db.Records;
 
             await AssertImmutableAsync(() => UpdateAsync(query, setters =>
             {
-                setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin);
-                setters.SetProperty(membership => membership.ChurchId, seed.ChurchB.Id);
+                setters.SetProperty(record => record.Value, "changed");
+                setters.SetProperty(record => record.ChurchId, seed.ChurchBId);
             }, useAsync));
             await AssertImmutableAsync(() => UpdateAsync(query,
-                setters => setters.SetProperty(membership => membership.ChurchId, membership => membership.ChurchId), useAsync));
+                setters => setters.SetProperty(record => record.ChurchId, record => record.ChurchId), useAsync));
         });
 
-        await seed.AssertMembershipsAsync(Sql);
+        await seed.AssertRecordsAsync(Sql);
     }
 
     [Test]
@@ -77,58 +73,58 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true)]
     public async Task ExecuteUpdate_RuntimeEfPropertyOwnershipSetter_RejectsBeforeMutation(bool useAsync)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            string propertyName = nameof(ChurchMembership.Id);
-            Action<UpdateSettersBuilder<ChurchMembership>> setters = setters => setters.SetProperty(
-                membership => EF.Property<Guid>(membership, propertyName),
-                membership => EF.Property<Guid>(membership, propertyName));
+            string propertyName = nameof(TenancyBulkTestRecord.Id);
+            Action<UpdateSettersBuilder<TenancyBulkTestRecord>> setters = setters => setters.SetProperty(
+                record => EF.Property<Guid>(record, propertyName),
+                record => EF.Property<Guid>(record, propertyName));
 
-            await Assert.That(await UpdateAsync(db.ChurchMemberships, setters, useAsync)).IsEqualTo(1);
-            propertyName = nameof(ChurchMembership.ChurchId);
-            await AssertImmutableAsync(() => UpdateAsync(db.ChurchMemberships, setters, useAsync));
+            await Assert.That(await UpdateAsync(db.Records, setters, useAsync)).IsEqualTo(1);
+            propertyName = nameof(TenancyBulkTestRecord.ChurchId);
+            await AssertImmutableAsync(() => UpdateAsync(db.Records, setters, useAsync));
         });
 
-        await seed.AssertMembershipsAsync(Sql);
+        await seed.AssertRecordsAsync(Sql);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task ExecuteUpdate_UnionOrCorrelatedMembershipSource_UpdatesPayloadButRejectsOwnership(bool useUnion)
+    public async Task ExecuteUpdate_UnionOrCorrelatedRecordSource_UpdatesPayloadButRejectsOwnership(bool useUnion)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            IQueryable<ChurchMembership> query = useUnion
-                ? db.ChurchMemberships.Where(membership => membership.UserId != string.Empty)
-                    .Union(db.ChurchMemberships.Where(membership => membership.UserId != string.Empty))
-                : db.ChurchMemberships.SelectMany(
-                    outer => db.ChurchMemberships.Where(inner => inner.Id == outer.Id),
+            IQueryable<TenancyBulkTestRecord> query = useUnion
+                ? db.Records.Where(record => record.Value != string.Empty)
+                    .Union(db.Records.Where(record => record.Value != string.Empty))
+                : db.Records.SelectMany(
+                    outer => db.Records.Where(inner => inner.Id == outer.Id),
                     (outer, _) => outer);
 
             int affected = await query.ExecuteUpdateAsync(
-                setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin));
+                setters => setters.SetProperty(record => record.Value, "updated"));
 
             await Assert.That(affected).IsEqualTo(1);
             await AssertImmutableAsync(() => query.ExecuteUpdateAsync(
-                setters => setters.SetProperty(membership => membership.ChurchId, seed.ChurchB.Id)));
+                setters => setters.SetProperty(record => record.ChurchId, seed.ChurchBId)));
         });
 
-        await seed.AssertMembershipsAsync(Sql, roleA: ChurchMembershipRole.Admin);
+        await seed.AssertRecordsAsync(Sql, valueA: "updated");
     }
 
     [Test]
-    public async Task ExecuteUpdate_PayloadAliasedChurchId_UpdatesRoleWithoutChangingOwnership()
+    public async Task ExecuteUpdate_PayloadAliasedChurchId_UpdatesValueWithoutChangingOwnership()
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => db.ChurchMemberships
-            .Select(membership => new { ChurchId = membership.Role })
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.ChurchId, ChurchMembershipRole.Coordinator)));
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchAId, db => db.Records
+            .Select(record => new { ChurchId = record.Value })
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.ChurchId, "updated")));
 
         await Assert.That(affected).IsEqualTo(1);
-        await seed.AssertMembershipsAsync(Sql, roleA: ChurchMembershipRole.Coordinator);
+        await seed.AssertRecordsAsync(Sql, valueA: "updated");
     }
 
     [Test]
@@ -138,15 +134,15 @@ public class SqlServerBulkUpdateCompatibilityTests
     [Arguments(true, true)]
     public async Task ExecuteUpdateDelete_IgnoredTenancyFilter_RejectsBeforeMutation(bool useAsync, bool namedFilter)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            IQueryable<ChurchMembership> query = namedFilter
-                ? db.ChurchMemberships.IgnoreQueryFilters([MultiTenancyConvention.FilterName])
-                : db.ChurchMemberships.IgnoreQueryFilters();
+            IQueryable<TenancyBulkTestRecord> query = namedFilter
+                ? db.Records.IgnoreQueryFilters([MultiTenancyConvention.FilterName])
+                : db.Records.IgnoreQueryFilters();
 
             await Assert.That(async () => await UpdateAsync(query,
-                    setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin), useAsync))
+                    setters => setters.SetProperty(record => record.Value, "updated"), useAsync))
                 .Throws<InvalidOperationException>()
                 .WithMessageContaining("ExecuteUpdate cannot ignore the TenancyFilter");
             await Assert.That(async () => await DeleteAsync(query, useAsync))
@@ -154,66 +150,67 @@ public class SqlServerBulkUpdateCompatibilityTests
                 .WithMessageContaining("ExecuteDelete cannot ignore the TenancyFilter");
         });
 
-        await seed.AssertMembershipsAsync(Sql);
+        await seed.AssertRecordsAsync(Sql);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task ExecuteUpdate_GlobalUserWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
+    public async Task ExecuteUpdate_GlobalRecordWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(null, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            await Assert.That(async () => await UpdateUsersAsync(GetUsersWithTenantedRoot(db), useAsync))
+            await Assert.That(async () => await UpdateGlobalRecordsAsync(GetGlobalRecordsWithTenantedRoot(db), useAsync))
                 .Throws<InvalidOperationException>()
                 .WithMessageContaining("ExecuteUpdate cannot ignore the TenancyFilter");
         });
 
-        await AssertUsersAndMembershipsUnchangedAsync(seed);
+        await AssertGlobalsAndRecordsUnchangedAsync(seed);
     }
 
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task ExecuteDelete_GlobalUserWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
+    public async Task ExecuteDelete_GlobalRecordWriteWithTenantedQueryRoot_RejectsBeforeMutation(bool useAsync)
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        await Sql.InDatabaseScopeAsync(null, async db =>
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        await Sql.InDatabaseScopeAsync(seed.ChurchAId, async db =>
         {
-            await Assert.That(async () => await DeleteUsersAsync(GetUsersWithTenantedRoot(db), useAsync))
+            await Assert.That(async () => await DeleteGlobalRecordsAsync(GetGlobalRecordsWithTenantedRoot(db), useAsync))
                 .Throws<InvalidOperationException>()
                 .WithMessageContaining("ExecuteDelete cannot ignore the TenancyFilter");
         });
 
-        await AssertUsersAndMembershipsUnchangedAsync(seed);
+        await AssertGlobalsAndRecordsUnchangedAsync(seed);
     }
 
-    private async Task AssertUsersAndMembershipsUnchangedAsync(TwoChurchScenario seed)
+    private async Task AssertGlobalsAndRecordsUnchangedAsync(TwoChurchTenancyScenario seed)
     {
-        var persistedUsers = await Sql.InDatabaseScopeAsync(null,
-            db => db.Users.AsNoTracking().Select(user => new { user.Id, user.UserName }).ToArrayAsync());
-        await Assert.That(persistedUsers).IsEquivalentTo([
-            new { seed.UserA.Id, seed.UserA.UserName },
-            new { seed.UserB.Id, seed.UserB.UserName }
+        TenancyBulkGlobalRecord[] persisted = await Sql.InDatabaseScopeAsync(seed.ChurchAId,
+            db => db.GlobalRecords.AsNoTracking().ToArrayAsync());
+        await Assert.That(persisted.Select(record => (record.Id, record.Value))).IsEquivalentTo([
+            (seed.GlobalA.Id, seed.GlobalA.Value),
+            (seed.GlobalB.Id, seed.GlobalB.Value)
         ]);
-        await seed.AssertMembershipsAsync(Sql);
+        await seed.AssertRecordsAsync(Sql);
     }
 
-    private static IQueryable<ApplicationUser> GetUsersWithTenantedRoot(ApplicationDbContext db) =>
-        db.Users.Where(user => db.ChurchMemberships.Any(membership => membership.UserId == user.Id))
+    private static IQueryable<TenancyBulkGlobalRecord> GetGlobalRecordsWithTenantedRoot(
+        TenancyBulkTestContext db) =>
+        db.GlobalRecords.Where(global => db.Records.Any(record => record.Value == global.Value))
             .IgnoreQueryFilters();
 
     [Test]
     public async Task ExecuteUpdate_IgnoreUnrelatedNamedFilter_OnlyUpdatesCurrentChurch()
     {
-        TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
-        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchA.Id, db => db.ChurchMemberships
+        TwoChurchTenancyScenario seed = await TenancyBulkTestData.SeedTwoChurchesAsync(Sql);
+        int affected = await Sql.InDatabaseScopeAsync(seed.ChurchAId, db => db.Records
             .IgnoreQueryFilters(["Unrelated"])
-            .ExecuteUpdateAsync(setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Staff)));
+            .ExecuteUpdateAsync(setters => setters.SetProperty(record => record.Value, "updated")));
 
         await Assert.That(affected).IsEqualTo(1);
-        await seed.AssertMembershipsAsync(Sql, roleA: ChurchMembershipRole.Staff);
+        await seed.AssertRecordsAsync(Sql, valueA: "updated");
     }
 
     private static Task<int> UpdateAsync<TEntity>(
@@ -223,13 +220,14 @@ public class SqlServerBulkUpdateCompatibilityTests
     private static Task<int> DeleteAsync<TEntity>(IQueryable<TEntity> query, bool useAsync) =>
         useAsync ? query.ExecuteDeleteAsync() : Task.FromResult(query.ExecuteDelete());
 
-    private static Task<int> UpdateUsersAsync(IQueryable<ApplicationUser> users, bool useAsync) =>
+    private static Task<int> UpdateGlobalRecordsAsync(
+        IQueryable<TenancyBulkGlobalRecord> records, bool useAsync) =>
         useAsync
-            ? users.ExecuteUpdateAsync(setters => setters.SetProperty(user => user.UserName, "changed"))
-            : Task.FromResult(users.ExecuteUpdate(setters => setters.SetProperty(user => user.UserName, "changed")));
+            ? records.ExecuteUpdateAsync(setters => setters.SetProperty(record => record.Value, "changed"))
+            : Task.FromResult(records.ExecuteUpdate(setters => setters.SetProperty(record => record.Value, "changed")));
 
-    private static Task<int> DeleteUsersAsync(IQueryable<ApplicationUser> users, bool useAsync) =>
-        useAsync ? users.ExecuteDeleteAsync() : Task.FromResult(users.ExecuteDelete());
+    private static Task<int> DeleteGlobalRecordsAsync(IQueryable<TenancyBulkGlobalRecord> records, bool useAsync) =>
+        useAsync ? records.ExecuteDeleteAsync() : Task.FromResult(records.ExecuteDelete());
 
     private static async Task AssertImmutableAsync(Func<Task<int>> update) =>
         await Assert.That(async () => await update())

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
 
 using Sheaf.Data.Tenancy;
@@ -98,7 +99,9 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
         if (queryExpression is MethodCallExpression { Method: { DeclaringType: { } declaringType } method } bulk
             && declaringType == typeof(EntityFrameworkQueryableExtensions)
             && method.IsGenericMethod
-            && method.GetGenericArguments()[0] == typeof(ChurchMembership))
+            && (method.GetGenericArguments()[0] == typeof(ChurchMembership)
+                || method.Name == nameof(EntityFrameworkQueryableExtensions.ExecuteUpdate)
+                    && TargetsMembershipQuery(bulk.Arguments[0])))
         {
             switch (method.Name)
             {
@@ -114,6 +117,28 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
         }
 
         return queryExpression;
+    }
+
+    private static bool TargetsMembershipQuery(Expression query)
+    {
+        while (query is MethodCallExpression call
+            && call.Method.DeclaringType is { } declaringType
+            && (declaringType == typeof(Queryable)
+                || declaringType == typeof(EntityFrameworkQueryableExtensions)
+                || declaringType == typeof(RelationalQueryableExtensions))
+            && call.Arguments.Count > 0)
+        {
+            if (call.Method.Name is nameof(Queryable.Union) or nameof(Queryable.Concat)
+                or nameof(Queryable.Intersect) or nameof(Queryable.Except))
+            {
+                return TargetsMembershipQuery(call.Arguments[0]) || TargetsMembershipQuery(call.Arguments[1]);
+            }
+
+            query = call.Arguments[0];
+        }
+
+        return query is EntityQueryRootExpression root
+            && root.EntityType.ClrType == typeof(ChurchMembership);
     }
 
     private static void RejectAuthorizationUpdates(MethodCallExpression bulk, IModel? model)
@@ -143,7 +168,8 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
                 throw UnverifiableUpdate();
             }
 
-            if (mapped.Name is nameof(ChurchMembership.Role) or nameof(ChurchMembership.UserId))
+            if (mapped.DeclaringType.ClrType == typeof(ChurchMembership)
+                && (mapped.Name is nameof(ChurchMembership.Role) or nameof(ChurchMembership.UserId)))
             {
                 throw new InvalidOperationException(
                     $"ExecuteUpdate cannot assign ChurchMembership.{mapped.Name}; update tracked entities with "
