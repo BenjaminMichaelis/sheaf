@@ -24,6 +24,11 @@ See: https://learn.microsoft.com/visualstudio/msbuild/customize-your-build
     <!--<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>-->
   </PropertyGroup>
 
+  <!-- Sheaf.Web uses a .csproj to build and publish its TypeScript frontend, not C# sources. -->
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' == '.csproj' And '$(MSBuildProjectName)' != 'Sheaf.Web'">
+    <PackageReference Include="DotNetWrangler.Analyzers" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+  </ItemGroup>
+
   <!--
   This allows all projects to share the same user secrets file. 
   If you want project to have their own, set it to a different value on each project.

@@ -68,9 +68,9 @@ public class AuthorizationPolicyTests
         ClaimsPrincipal unauthenticated = new(new ClaimsIdentity(
             CreatePrincipal(ChurchMembershipRole.Admin).Claims, authenticationType: null, ClaimTypes.Name, SheafClaimTypes.Role));
 
-        await Assert.That(policy).IsNotNull();
-        AuthorizationResult denied = await authorization.AuthorizeAsync(unauthenticated, null, policy!);
-        AuthorizationResult allowed = await authorization.AuthorizeAsync(CreatePrincipal(ChurchMembershipRole.Admin), null, policy!);
+        AuthorizationPolicy requiredPolicy = await Assert.That(policy).IsNotNull();
+        AuthorizationResult denied = await authorization.AuthorizeAsync(unauthenticated, null, requiredPolicy);
+        AuthorizationResult allowed = await authorization.AuthorizeAsync(CreatePrincipal(ChurchMembershipRole.Admin), null, requiredPolicy);
 
         await Assert.That(denied.Succeeded).IsFalse();
         await Assert.That(allowed.Succeeded).IsTrue();
@@ -88,8 +88,8 @@ public class AuthorizationPolicyTests
         IAuthorizationService authorization = CreateAuthorizationService();
         AuthorizationPolicy? policy = await provider.GetPolicyAsync(policyName);
 
-        await Assert.That(policy).IsNotNull();
-        AuthorizationResult result = await authorization.AuthorizeAsync(CreatePrincipal(ChurchMembershipRole.Admin), null, policy!);
+        AuthorizationPolicy requiredPolicy = await Assert.That(policy).IsNotNull();
+        AuthorizationResult result = await authorization.AuthorizeAsync(CreatePrincipal(ChurchMembershipRole.Admin), null, requiredPolicy);
         await Assert.That(result.Succeeded).IsFalse();
     }
 
