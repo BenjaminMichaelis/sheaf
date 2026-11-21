@@ -23,6 +23,31 @@ Reuse the suffix to retain the database; a new suffix creates fresh storage.
 `--isolated` alone does not isolate named SQL volumes. DBGate is disabled to avoid
 its shared container name; backend port `5285` must still be free.
 
+### Checking for missing migrations
+
+The Build and Deploy workflow checks `ApplicationDbContext` for model changes not
+represented by the latest migration after the Release build. It uses the pinned
+`dotnet-ef` tool and the AppHost's design-time factory, which shares the runtime's
+SQL Server, Identity and tenancy model configuration. The check does not start
+Aspire, connect to a database, apply migrations, or require production secrets.
+
+To run the same check locally from the repository root, stop your worktree's
+AppHost first to avoid locked build outputs:
+
+```pwsh
+dotnet tool restore
+dotnet build Sheaf.AppHost\Sheaf.AppHost.csproj --configuration Release
+dotnet tool run dotnet-ef migrations has-pending-model-changes `
+  --configuration Release `
+  --project Sheaf.Data\Sheaf.Data.csproj `
+  --startup-project Sheaf.AppHost\Sheaf.AppHost.csproj `
+  --no-build
+```
+
+A nonzero exit fails CI. When model changes are intentional, add and commit a
+migration and the updated model snapshot, then rerun the check. This compares the
+model with migrations, not with a deployed database's migration history.
+
 ### Regenerating API types
 
 From the repository root, using the SDK and pnpm versions pinned in the repository:
