@@ -194,6 +194,25 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ExecuteUpdate_ProjectedRole_IsRejected(bool useAsync)
+    {
+        await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        await using ApplicationDbContext db = CreateContext();
+        var query = db.ChurchMemberships.Select(membership => new { membership.Role });
+
+        await Assert.That(async () => useAsync
+                ? await query.ExecuteUpdateAsync(
+                    setters => setters.SetProperty(projection => projection.Role, ChurchMembershipRole.Admin))
+                : query.ExecuteUpdate(
+                    setters => setters.SetProperty(projection => projection.Role, ChurchMembershipRole.Admin)))
+            .Throws<InvalidOperationException>()
+            .WithMessageContaining("ChurchMembership.Role");
+        await Assert.That((await db.ChurchMemberships.SingleAsync()).Role).IsEqualTo(ChurchMembershipRole.Staff);
+    }
+
+    [Test]
     public async Task ExecuteUpdate_UnrelatedBulkWrites_AreNotBlocked()
     {
         await using ApplicationDbContext db = CreateContext();
@@ -204,7 +223,7 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     [Test]
-    public async Task AddDatabase_Registration_AddsOneMembershipInterceptorSeparateFromTenancy()
+    public async Task AddDatabase_ProductionRegistration_IncludesMembershipAndTenancyInterceptors()
     {
         using IHost host = ProductionDatabaseHost.Create();
         using IServiceScope scope = host.Services.CreateScope();
@@ -214,14 +233,29 @@ public sealed class MembershipSecurityTests : IDisposable
             options.FindExtension<CoreOptionsExtension>()?.Interceptors ?? [];
 
         await Assert.That(interceptors.OfType<MembershipSecurityStampInterceptor>()).Count().IsEqualTo(1);
+        await Assert.That(interceptors.OfType<TenancySaveChangesInterceptor>()).Count().IsEqualTo(1);
+    }
 
-        using IHost tenancyOnly = ProductionDatabaseHost.Create(membershipSecurity: false);
-        using IServiceScope tenancyScope = tenancyOnly.Services.CreateScope();
-        IEnumerable<Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor> tenancyInterceptors = tenancyScope
-            .ServiceProvider.GetRequiredService<ApplicationDbContext>().GetService<IDbContextOptions>()
-            .FindExtension<CoreOptionsExtension>()?.Interceptors ?? [];
-        await Assert.That(tenancyInterceptors.OfType<MembershipSecurityStampInterceptor>()).IsEmpty();
-        await Assert.That(tenancyInterceptors.OfType<TenancySaveChangesInterceptor>()).Count().IsEqualTo(1);
+    [Test]
+    public async Task AddDatabase_ProductionRegistration_RejectsMembershipBulkWrites()
+    {
+        using IHost host = ProductionDatabaseHost.Create();
+        await using AsyncServiceScope scope = host.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        await Assert.That(async () => await db.ChurchMemberships.ExecuteDeleteAsync())
+            .Throws<InvalidOperationException>()
+            .WithMessageContaining("ExecuteDelete cannot remove church memberships");
+        await Assert.That(async () => await db.ChurchMemberships.ExecuteUpdateAsync(
+                setters => setters.SetProperty(membership => membership.Role, ChurchMembershipRole.Admin)))
+            .Throws<InvalidOperationException>()
+            .WithMessageContaining("ChurchMembership.Role");
+
+        var projectedMemberships = db.ChurchMemberships.Select(membership => new { membership.Role });
+        await Assert.That(async () => await projectedMemberships.ExecuteUpdateAsync(
+                setters => setters.SetProperty(projection => projection.Role, ChurchMembershipRole.Admin)))
+            .Throws<InvalidOperationException>()
+            .WithMessageContaining("ChurchMembership.Role");
     }
 
     private ApplicationDbContext CreateContext()
