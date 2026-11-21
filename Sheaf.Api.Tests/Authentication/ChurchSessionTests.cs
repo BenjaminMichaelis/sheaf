@@ -279,16 +279,19 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     }
 
     [Test]
-    public async Task ValidatePrincipal_SelectedMembershipRoleChanged_RenewsWithCurrentRoleAfterFiveMinutes()
+    [Arguments(ChurchMembershipRole.Leader, ChurchMembershipRole.Staff)]
+    [Arguments(ChurchMembershipRole.Staff, ChurchMembershipRole.Admin)]
+    public async Task ValidatePrincipal_SelectedMembershipRoleChanged_RejectsStaleCookieAfterFiveMinutes(
+        ChurchMembershipRole original, ChurchMembershipRole updated)
     {
         ApplicationUser user = await CreateUserAsync();
-        ChurchMembership membership = await AddMembershipAsync(user);
+        ChurchMembership membership = await AddMembershipAsync(user, original);
         using HttpClient client = CreateClient();
         (_, string cookie) = await LoginAsync(client, user);
         await InChurchAsync(membership.ChurchId, async db =>
         {
             ChurchMembership stored = await db.ChurchMemberships.SingleAsync();
-            stored.Role = ChurchMembershipRole.Staff;
+            stored.Role = updated;
             await db.SaveChangesAsync();
         });
 
@@ -297,12 +300,55 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         await Assert.That(before.Headers.Contains(HeaderNames.SetCookie)).IsFalse();
 
         _time.Advance(TimeSpan.FromSeconds(1));
-        using HttpResponseMessage renewed = await GetUserAsync(client, cookie);
-        string renewedCookie = ReadCookie(renewed);
-        membership.Role = ChurchMembershipRole.Staff;
-        await AssertSelectionAsync(ReadTicket(renewedCookie).Principal, membership);
-        UserInfo info = await ReadUserAsync(renewed);
-        await Assert.That(info.CurrentChurch?.Role).IsEqualTo(ChurchMembershipRole.Staff);
+        using HttpResponseMessage stale = await GetUserAsync(client, cookie);
+        await Assert.That((await ReadUserAsync(stale)).IsAuthenticated).IsFalse();
+
+        (UserInfo fresh, string freshCookie) = await LoginAsync(client, user);
+        await Assert.That(fresh.CurrentChurch?.Role).IsEqualTo(updated);
+        membership.Role = updated;
+        await AssertSelectionAsync(ReadTicket(freshCookie).Principal, membership);
+    }
+
+    [Test]
+    public async Task ValidatePrincipal_SelectedMembershipRemoved_RejectsStaleCookieAndDeniesChurchSwitch()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        ChurchMembership removed = await AddMembershipAsync(user);
+        ChurchMembership remaining = await AddMembershipAsync(user, ChurchMembershipRole.Coordinator);
+        using HttpClient client = CreateClient();
+        (_, string cookie) = await LoginAsync(client, user);
+        await InChurchAsync(removed.ChurchId, async db =>
+        {
+            db.ChurchMemberships.Remove(await db.ChurchMemberships.SingleAsync());
+            await db.SaveChangesAsync();
+        });
+
+        using HttpRequestMessage switchRequest = CreateSwitchRequest(cookie, remaining.ChurchId);
+        using HttpResponseMessage switchResponse = await client.SendAsync(switchRequest);
+        await Assert.That(switchResponse.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+
+        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        using HttpResponseMessage stale = await GetUserAsync(client, cookie);
+        await Assert.That((await ReadUserAsync(stale)).IsAuthenticated).IsFalse();
+
+        (UserInfo fresh, _) = await LoginAsync(client, user);
+        await Assert.That(fresh.Churches.Select(church => church.ChurchId)).IsEquivalentTo([remaining.ChurchId]);
+        await Assert.That(fresh.CurrentChurch?.ChurchId).IsEqualTo(remaining.ChurchId);
+    }
+
+    [Test]
+    public async Task ValidatePrincipal_MembershipAdded_KeepsExistingCookieValid()
+    {
+        ApplicationUser user = await CreateUserAsync();
+        await AddMembershipAsync(user);
+        using HttpClient client = CreateClient();
+        (_, string cookie) = await LoginAsync(client, user);
+        await AddMembershipAsync(user, ChurchMembershipRole.Coordinator);
+
+        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        using HttpResponseMessage response = await GetUserAsync(client, cookie);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
     }
 
     [Test]
@@ -314,7 +360,12 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         (_, string cookie) = await LoginAsync(client, user);
         string? stamp = user.SecurityStamp;
         ChurchMembership remaining = await AddMembershipAsync(user, ChurchMembershipRole.Coordinator);
-        await InChurchAsync(removed.ChurchId, db => db.ChurchMemberships.ExecuteDeleteAsync());
+        await InChurchAsync(removed.ChurchId, async db =>
+        {
+            db.ChurchMemberships.Remove(await db.ChurchMemberships.SingleAsync());
+            await db.SaveChangesAsync();
+        });
+        await RestoreSecurityStampAsync(user, stamp);
 
         _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage renewal = await GetUserAsync(client, cookie);
@@ -691,7 +742,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
     }
 
     [Test]
-    public async Task SwitchChurch_SameChurchAfterRoleChange_RechecksRoleInTicketAndUserInfo()
+    public async Task SwitchChurch_SameChurchAfterRoleChange_RejectsStaleCookie()
     {
         ApplicationUser user = await CreateUserAsync();
         ChurchMembership active = await AddMembershipAsync(user, ChurchMembershipRole.Leader);
@@ -705,12 +756,15 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             await db.SaveChangesAsync();
         });
 
-        (UserInfo info, string switchedCookie, IdentityCookieWrite write) =
-            await SwitchChurchAsync(client, cookie, active.ChurchId);
+        using HttpRequestMessage request = CreateSwitchRequest(cookie, active.ChurchId);
+        using HttpResponseMessage response = await client.SendAsync(request);
 
-        await Assert.That(write).IsEqualTo(IdentityCookieWrite.AuthenticatedTicket);
-        await Assert.That(info.CurrentChurch?.Role).IsEqualTo(ChurchMembershipRole.Staff);
-        await AssertSelectionAsync(ReadTicket(switchedCookie).Principal, active);
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
+        await Assert.That(ClassifyIdentityCookieWrites(response)).IsEqualTo(IdentityCookieWrite.Deletion);
+
+        (UserInfo fresh, string freshCookie) = await LoginAsync(client, user);
+        await Assert.That(fresh.CurrentChurch?.Role).IsEqualTo(ChurchMembershipRole.Staff);
+        await AssertSelectionAsync(ReadTicket(freshCookie).Principal, active);
     }
 
     [Test]
@@ -1124,6 +1178,11 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             ]);
             await Assert.That(result.Succeeded).IsTrue();
         });
+
+    private Task RestoreSecurityStampAsync(ApplicationUser user, string? stamp) =>
+        InScopeAsync(services => services.GetRequiredService<ApplicationDbContext>().Users
+            .Where(stored => stored.Id == user.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(stored => stored.SecurityStamp, stamp)));
 
     private async Task<ChurchMembership> AddMembershipAsync(
         ApplicationUser user, ChurchMembershipRole role = ChurchMembershipRole.Leader)
