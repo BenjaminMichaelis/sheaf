@@ -127,7 +127,7 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
         {
             if (setter is not NewExpression { Arguments.Count: 2 } tuple
                 || TenancyQueryExpressionInterceptor.Unwrap(tuple.Arguments[0]) is not LambdaExpression
-                    { Parameters.Count: 1 } property)
+                { Parameters.Count: 1 } property)
             {
                 throw UnverifiableUpdate();
             }
