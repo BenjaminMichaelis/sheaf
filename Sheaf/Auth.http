@@ -5,3 +5,4 @@
 ### Switch the active church; use the resulting Set-Cookie value for later requests
 POST {{baseUrl}}/api/auth/church/{{churchId}}
 Cookie: {{cookie}}
+Origin: {{baseUrl}}

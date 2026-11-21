@@ -32,7 +32,7 @@ internal static class AuthEndpoints
                 user,
                 request.Password,
                 request.RememberMe ?? false,
-                lockoutOnFailure: false);
+                lockoutOnFailure: true);
 
             if (result.Succeeded)
             {
@@ -42,6 +42,9 @@ internal static class AuthEndpoints
             return TypedResults.Unauthorized();
         })
         .WithName("Login")
+        .RequireRateLimiting(RequestSecurityExtensions.AuthRateLimitPolicy)
+        .ProducesProblem(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status429TooManyRequests)
         .AllowAnonymous()
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -82,6 +85,9 @@ internal static class AuthEndpoints
                     group => group.Select(error => error.Description).ToArray()));
         })
         .WithName("Register")
+        .RequireRateLimiting(RequestSecurityExtensions.AuthRateLimitPolicy)
+        .ProducesProblem(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status429TooManyRequests)
         .AllowAnonymous()
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .ProducesValidationProblem(StatusCodes.Status400BadRequest);
@@ -147,6 +153,8 @@ internal static class AuthEndpoints
         .RequireAuthorization(SheafPolicies.Authenticated)
         .WithMetadata(new ChurchSwitchEndpointMetadata())
         .WithName("SwitchChurch")
+        .RequireRateLimiting(RequestSecurityExtensions.AuthRateLimitPolicy)
+        .Produces(StatusCodes.Status429TooManyRequests)
         .WithSummary("Switches the active church for the authenticated account.")
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized)

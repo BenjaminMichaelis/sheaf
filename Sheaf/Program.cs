@@ -19,6 +19,7 @@ using Sheaf.Middleware;
 var builder = WebApplication.CreateBuilder(args);
 var isOpenApiGeneration = Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
 
+builder.AddRequestSecurity(isOpenApiGeneration);
 builder.AddServiceDefaults();
 
 if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database") is null)
@@ -62,7 +63,7 @@ builder.Services.AddOpenApi(options =>
         {
             Type = SecuritySchemeType.ApiKey,
             In = ParameterLocation.Cookie,
-            Name = ".AspNetCore.Identity.Application",
+            Name = "__Host-sheaf",
             Description = "ASP.NET Core Identity application cookie."
         };
 
@@ -84,32 +85,6 @@ builder.Services.AddOpenApi(options =>
     });
 });
 
-// Add CORS for cross-origin clients
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowedOrigins", policy =>
-    {
-        if (builder.Environment.IsDevelopment())
-        {
-            // In development, allow any localhost origin
-            policy.SetIsOriginAllowed(origin => new Uri(origin).Host == "localhost")
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-        else
-        {
-            // In production, restrict to specific origins from configuration
-            var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-                ?? ["https://yourdomain.com"];
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-    });
-});
-
 builder.Services.AddSheafAuthorization();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
@@ -122,8 +97,13 @@ authBuilder.AddIdentityCookies(options =>
 {
     options.ApplicationCookie?.Configure(cookieOptions =>
     {
-        cookieOptions.Cookie.Name = ".AspNetCore.Identity.Application";
+        cookieOptions.Cookie.Name = "__Host-sheaf";
         cookieOptions.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        cookieOptions.Cookie.HttpOnly = true;
+        cookieOptions.Cookie.Path = "/";
+        cookieOptions.Cookie.Domain = null;
+        cookieOptions.ExpireTimeSpan = TimeSpan.FromDays(14);
+        cookieOptions.SlidingExpiration = true;
 
         if (builder.Environment.IsDevelopment())
         {
@@ -146,10 +126,12 @@ builder.Services.AddScoped<IEmailSender<ApplicationUser>>(sp =>
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.MapDefaultEndpoints();
 
 // Configure the HTTP request pipeline.
 app.UseExceptionHandler();
+app.UseRouting();
 
 // Enable CORS
 app.UseCors("AllowedOrigins");
@@ -169,6 +151,8 @@ else
 // Add exception handling middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+app.UseMiddleware<CsrfOriginCheck>();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

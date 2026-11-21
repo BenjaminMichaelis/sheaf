@@ -37,7 +37,7 @@ namespace Sheaf.Api.Tests;
 public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, Program>
 {
     private const string Password = "Church-session-Password1!";
-    private const string CookieName = ".AspNetCore.Identity.Application";
+    private const string CookieName = "__Host-sheaf";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter<ChurchMembershipRole>() }

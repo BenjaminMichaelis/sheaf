@@ -55,7 +55,51 @@ values return 409 ProblemDetails; safe methods do not require the header. After 
 successful switch, clients should update their shared cookie state and reload stale tabs.
 The check rejects stale-tab writes whose cookie and displayed church disagree; it does not
 cancel requests already in flight or serialize concurrent cookie updates. This consistency
-header is not CSRF protection; CSRF protections are tracked separately in #160.
+header is not CSRF protection; the request-origin gate described below provides that protection.
+
+### Authentication request security
+
+Every POST, PUT, PATCH, and DELETE, including anonymous login and registration, must
+provide a verifiable browser origin. An explicit `Origin` must match `AllowedOrigins`
+or the API's effective scheme/host/port. Without `Origin`, `Sec-Fetch-Site: same-origin`
+is accepted; if fetch metadata is also absent, the `Referer` origin is checked. An
+explicit invalid/disallowed Origin or non-same-origin fetch metadata cannot be bypassed
+with lower-priority headers. Unverifiable writes return 403 ProblemDetails. Safe methods
+are unaffected. Manual/native clients must send an allowed `Origin`, not merely the
+church-consistency header. Development permits HTTP(S) localhost origins at any port.
+
+Outside Development, startup requires a nonempty `AllowedOrigins` array of explicit
+HTTP(S) origins (no credentials, paths, queries, or fragments); there is no placeholder
+fallback. Configure the actual browser frontend origins, including non-default ports.
+The offline OpenAPI generator is exempt from the missing-origin startup check.
+
+Identity uses the secure, HttpOnly `__Host-sheaf` cookie, with path `/`, no Domain,
+and a 14-day sliding authentication lifetime. Remember-me cookies persist until their
+expiry; non-remembered cookies remain session cookies. SameSite is None in Development
+and Lax elsewhere. Existing cookies under the old name require a fresh login.
+
+Incorrect passwords count toward account lockout; all failed logins return the same
+401 response, including unknown and locked accounts. Login, registration, and church
+switching share an IP-based, queue-free fixed-window limiter returning 429. Its counters
+are in-memory and **per application instance**, not distributed across replicas.
+These positive settings are tunable (defaults shown):
+
+| Configuration key | Default |
+| --- | --- |
+| `Authentication:Lockout:MaxFailedAccessAttempts` | 5 |
+| `Authentication:Lockout:Minutes` | 5 |
+| `Authentication:RateLimit:PermitLimit` | 10 |
+| `Authentication:RateLimit:WindowSeconds` | 60 |
+
+Forwarded headers run first. The API accepts `X-Forwarded-For` and
+`X-Forwarded-Proto` only from explicitly configured `ForwardedHeaders:KnownProxies`
+(IP address array) or `ForwardedHeaders:KnownNetworks` (CIDR array). Both default to
+empty, disabling forwarding rather than trusting arbitrary peers. Configure only your
+deployment's actual trusted proxy addresses/ranges; no deployment trust range is guessed.
+`ForwardedHeaders:ForwardLimit` defaults to 1 and must be positive. There is no reliance
+on `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, and forwarded Host is not enabled. Forwarded
+client IPs determine rate-limit partitions; the effective scheme determines the API
+origin check. Configure `AllowedHosts` appropriately for your public API hosts.
 
 Church-owned entities implement `Sheaf.Data.Tenancy.ITenanted`. EF query filters and
 write guards enforce church ownership; queries require a selected church. These are
