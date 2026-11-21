@@ -13,7 +13,7 @@ namespace Sheaf.Api.Tests.Authentication;
 
 public class RequestSecurityTests : WebApplicationTest<RequestSecurityWebApplicationFactory, Program>
 {
-    private static readonly string[] MultipleOrigins = ["https://localhost", "https://attacker.example"];
+    private static readonly string[] _multipleOrigins = ["https://localhost", "https://attacker.example"];
     protected override void ConfigureTestServices(IServiceCollection services) =>
         services.AddSingleton<IStartupFilter>(new ConnectionEndpoints());
 
@@ -99,7 +99,7 @@ public class RequestSecurityTests : WebApplicationTest<RequestSecurityWebApplica
     {
         using HttpClient client = Factory.CreateClient();
         client.DefaultRequestHeaders.Remove("Origin");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", MultipleOrigins);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", _multipleOrigins);
         client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "same-origin");
         using HttpResponseMessage response = await client.PostAsync("/test/security", null);
         await AssertCsrfDeniedAsync(response);
@@ -254,7 +254,7 @@ public class RequestSecurityTests : WebApplicationTest<RequestSecurityWebApplica
             base.ConfigureWebHost(builder);
             ConfigurationBuilder configuration = new();
             ConfigureStartupConfiguration(configuration);
-            foreach (var setting in configuration.Build().AsEnumerable())
+            foreach (KeyValuePair<string, string?> setting in configuration.Build().AsEnumerable())
             {
                 builder.UseSetting(setting.Key, setting.Value);
             }
@@ -333,7 +333,7 @@ public class ProductionSecurityStartupTests
             base.ConfigureWebHost(builder);
             ConfigurationBuilder configuration = new();
             ConfigureStartupConfiguration(configuration);
-            foreach (var setting in configuration.Build().AsEnumerable())
+            foreach (KeyValuePair<string, string?> setting in configuration.Build().AsEnumerable())
             {
                 builder.UseSetting(setting.Key, setting.Value);
             }

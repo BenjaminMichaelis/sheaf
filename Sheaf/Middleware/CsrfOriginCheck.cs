@@ -14,29 +14,17 @@ internal sealed class CsrfOriginCheck(RequestDelegate next, AllowedOriginPolicy 
             return next(context);
         }
 
-        bool allowed;
-        if (request.Headers.TryGetValue(HeaderNames.Origin, out StringValues origin))
-        {
-            allowed = origin.Count == 1 && origins.IsAllowedForRequest(origin.ToString(), request);
-        }
-        else if (request.Headers.TryGetValue("Sec-Fetch-Site", out StringValues fetchSite))
-        {
-            allowed = fetchSite.Count == 1 && fetchSite[0] == "same-origin";
-        }
-        else
-        {
-            allowed = request.Headers.TryGetValue(HeaderNames.Referer, out StringValues referer)
+        bool allowed = request.Headers.TryGetValue(HeaderNames.Origin, out StringValues origin)
+            ? origin.Count == 1 && origins.IsAllowedForRequest(origin.ToString(), request)
+            : request.Headers.TryGetValue("Sec-Fetch-Site", out StringValues fetchSite)
+                ? fetchSite.Count == 1 && fetchSite[0] == "same-origin"
+                : request.Headers.TryGetValue(HeaderNames.Referer, out StringValues referer)
                 && referer.Count == 1
                 && AllowedOriginPolicy.TryGetOrigin(referer.ToString(), out string refererOrigin, allowPath: true)
                 && origins.IsAllowedForRequest(refererOrigin, request);
-        }
-
-        if (allowed)
-        {
-            return next(context);
-        }
-
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+        return allowed
+            ? next(context)
+            : Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "Request origin could not be verified.",
             type: "tag:sheaf,2026:problems/csrf-origin-denied").ExecuteAsync(context);
     }

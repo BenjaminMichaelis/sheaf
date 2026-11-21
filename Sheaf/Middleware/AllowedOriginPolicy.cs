@@ -14,7 +14,7 @@ internal sealed class AllowedOriginPolicy
             throw new InvalidOperationException("AllowedOrigins must contain at least one explicit HTTP(S) origin outside Development.");
         }
 
-        _origins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _origins = [with(StringComparer.OrdinalIgnoreCase)];
         foreach (string origin in origins)
         {
             if (!TryGetOrigin(origin, out string normalized))

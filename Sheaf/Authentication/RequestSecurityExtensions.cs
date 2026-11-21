@@ -23,8 +23,8 @@ internal static class RequestSecurityExtensions
 
         string[] proxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
         string[] networks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
-        IPAddress[] knownProxies = proxies.Select(IPAddress.Parse).ToArray();
-        IPNetwork[] knownNetworks = networks.Select(IPNetwork.Parse).ToArray();
+        IPAddress[] knownProxies = [.. proxies.Select(IPAddress.Parse)];
+        IPNetwork[] knownNetworks = [.. networks.Select(IPNetwork.Parse)];
         int forwardLimit = builder.Configuration.GetValue("ForwardedHeaders:ForwardLimit", 1);
         if (forwardLimit <= 0)
         {
