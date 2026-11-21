@@ -4,9 +4,9 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 
-using IPNetwork = System.Net.IPNetwork;
-
 using Sheaf.Middleware;
+
+using IPNetwork = System.Net.IPNetwork;
 
 namespace Sheaf.Authentication;
 
