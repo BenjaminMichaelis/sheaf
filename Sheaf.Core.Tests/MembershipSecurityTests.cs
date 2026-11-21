@@ -115,10 +115,12 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     [Test]
-    [Arguments(false)]
-    [Arguments(true)]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
     public async Task SaveChanges_StaleDetachedMembershipRole_ThrowsConcurrencyExceptionWithoutOverwritingRole(
-        bool useAsync)
+        bool useAsync, bool changeDetachedRole)
     {
         Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
         ChurchMembership staleMembership;
@@ -153,6 +155,11 @@ public sealed class MembershipSecurityTests : IDisposable
                 ChangeRoleSynchronously,
                 ChangeRoleAsynchronously)))
         {
+            if (changeDetachedRole)
+            {
+                staleMembership.Role = ChurchMembershipRole.Admin;
+            }
+
             staleContext.ChurchMemberships.Update(staleMembership);
 
             await Assert.That(async () => await SaveAsync(staleContext, useAsync))

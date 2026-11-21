@@ -241,6 +241,8 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
                     ChurchMembershipRole originalRole = OriginalRole(entry);
                     if (persistedRoles.TryGetValue(membership.Id, out ChurchMembershipRole persistedRole))
                     {
+                        // Update initializes detached originals from current values; use the read role for concurrency.
+                        entry.Property(entity => entity.Role).OriginalValue = persistedRole;
                         originalRole = persistedRole;
                     }
 
