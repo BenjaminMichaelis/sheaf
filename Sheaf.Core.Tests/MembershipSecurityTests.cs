@@ -181,11 +181,11 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     [Test]
-    public async Task ExecuteUpdate_RuntimeEfPropertyRoleSetter_IsRejected()
+    [Arguments(nameof(ChurchMembership.Role))]
+    public async Task ExecuteUpdate_RuntimeEfPropertyRoleSetter_IsRejected(string propertyName)
     {
         await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
         await using ApplicationDbContext db = CreateContext();
-        string propertyName = nameof(ChurchMembership.Role);
 
         await Assert.That(async () => await db.ChurchMemberships.ExecuteUpdateAsync(setters => setters.SetProperty(
                 m => EF.Property<ChurchMembershipRole>(m, propertyName), ChurchMembershipRole.Admin)))
