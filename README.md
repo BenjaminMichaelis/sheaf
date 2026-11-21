@@ -67,6 +67,43 @@ New exemptions require security review.
 SQL-backed tests require a Docker-compatible container runtime and an amd64-capable
 host for SQL Server. They use isolated, migrated catalogs.
 
+### People and groups foundation
+
+The backend tracker endpoints under `/api/church` persist church-owned People,
+optional households, group types, groups (`Context` of kind `Group`), and dated
+Person membership/leadership intervals. See `Sheaf/Tracker.http` for requests.
+Names and group starting instants are required; contacts, given names, households,
+and group types are optional. `IsActive` is explicit lookup eligibility, not an
+automatic inactivity or erasure policy. Given names are never inferred from full names.
+
+Staff create People, manage group types, create/update/end groups, and assign leaders.
+Leaders manage membership and edit profiles only within their currently led groups.
+Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
+group retains it and all assignment intervals; group end bounds their effective
+activity without rewriting history. Optimistic concurrency rejects stale group/history
+writes with 409. There are no tracker delete or automatic-merge endpoints.
+
+Leadership belongs to a Person, not a separate account access assignment. The optional
+`Person.UserId` is only a future signup-link placeholder: non-null links are unique
+per `(ChurchId, UserId)`. No API creates links, invitations, claims, or email/name
+matches. **Leader access is not operational until signup integration creates an
+explicit link.** Unlinked leaders fail closed for scoped resources. Access additionally
+requires the account's persisted membership in that same church; a link alone or a
+link in another church never grants access. Existing account/church role lifecycle
+and cookie switching remain unchanged.
+
+Staff and leaders may manage whole households associated with accessible people,
+including members outside their groups. Household responses expose identifiers and
+optional given names, not full profiles or contacts; household authority does not
+grant outside-group profile rights. Same-church active lookup returns only name,
+current group names, optional household label and supplied household given names.
+Unsafe tracker requests retain the `X-Sheaf-Church` stale-tab check.
+
+Attendance and discipleship are deferred. Future attendance infers absence when a
+rostered person does not attend; no separate absence workflow or visitor category
+is introduced. Existing consent/trust requirements and Person erasure/anonymization
+policy remain applicable; inactivity does not trigger erasure.
+
 ### Mobile (Avalonia)
 
 `Sheaf.Mobile*` holds the shared app plus Android, iOS, Browser and Desktop heads. Install workloads with `dotnet workload restore`. Android is built locally; iOS requires macOS (built in CI). Mobile apps run separately from Aspire; point them at the API (Android emulator: `http://10.0.2.2:5285`, iOS simulator: `http://localhost:5285`).

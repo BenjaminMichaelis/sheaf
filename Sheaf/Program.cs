@@ -111,6 +111,8 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddSheafAuthorization();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<Sheaf.Services.ITrackerService, Sheaf.Services.TrackerService>();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
@@ -175,6 +177,7 @@ app.UseAuthorization();
 app.MapGet("/", () => "API is running.").AllowAnonymous();
 
 app.MapAuthEndpoints();
+app.MapTracker();
 
 app.Run();
 

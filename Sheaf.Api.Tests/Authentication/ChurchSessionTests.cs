@@ -34,7 +34,7 @@ using TUnit.AspNetCore;
 
 namespace Sheaf.Api.Tests;
 
-public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, Program>
+public partial class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, Program>
 {
     private const string Password = "Church-session-Password1!";
     private const string CookieName = ".AspNetCore.Identity.Application";
