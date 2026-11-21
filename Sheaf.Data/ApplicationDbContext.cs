@@ -46,6 +46,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
         builder.Entity<ChurchMembership>(entity =>
         {
+            entity.Property(membership => membership.Role).IsConcurrencyToken();
             entity.HasOne<Church>()
                 .WithMany()
                 .HasForeignKey(membership => membership.ChurchId)
