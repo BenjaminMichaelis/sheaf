@@ -74,6 +74,46 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SaveChanges_DetachedMembershipRoleChanged_RotatesUsersStamp(bool useAsync)
+    {
+        Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        string[] before = await StampsAsync();
+
+        await using ApplicationDbContext db = CreateContext();
+        ChurchMembership membership = await db.ChurchMemberships.AsNoTracking()
+            .SingleAsync(m => m.Id == membershipId);
+        membership.Role = ChurchMembershipRole.Admin;
+        db.ChurchMemberships.Update(membership);
+        await SaveAsync(db, useAsync);
+
+        string[] after = await StampsAsync();
+        await Assert.That(after[0]).IsNotEqualTo(before[0]);
+        await Assert.That(after[1]).IsEqualTo(before[1]);
+        await using ApplicationDbContext verify = CreateContext();
+        await Assert.That((await verify.ChurchMemberships.AsNoTracking().SingleAsync()).Role)
+            .IsEqualTo(ChurchMembershipRole.Admin);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SaveChanges_DetachedMembershipRoleUnchanged_DoesNotRotateUsersStamp(bool useAsync)
+    {
+        Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        string[] before = await StampsAsync();
+
+        await using ApplicationDbContext db = CreateContext();
+        ChurchMembership membership = await db.ChurchMemberships.AsNoTracking()
+            .SingleAsync(m => m.Id == membershipId);
+        db.ChurchMemberships.Update(membership);
+        await SaveAsync(db, useAsync);
+
+        await Assert.That(await StampsAsync()).IsEquivalentTo(before);
+    }
+
+    [Test]
     public async Task SaveChanges_MembershipAdded_DoesNotRotateStamp()
     {
         string[] before = await StampsAsync();

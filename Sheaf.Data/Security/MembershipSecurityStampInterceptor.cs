@@ -47,7 +47,7 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
     {
         if (eventData.Context is { } context)
         {
-            foreach (string userId in Prepare(context))
+            foreach (string userId in await PrepareAsync(context, cancellationToken))
             {
                 if (await context.FindAsync<ApplicationUser>([userId], cancellationToken) is { } user)
                 {
@@ -186,6 +186,39 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
     private string[] Prepare(DbContext context)
     {
         _pending.Remove(context);
+        Dictionary<Guid, ChurchMembershipRole> persistedRoles = [];
+        foreach (EntityEntry<ChurchMembership> entry in context.ChangeTracker.Entries<ChurchMembership>())
+        {
+            if (NeedsPersistedRole(entry)
+                && PersistedRole(context, entry.Entity.Id) is { } role)
+            {
+                persistedRoles.Add(entry.Entity.Id, role);
+            }
+        }
+
+        return Prepare(context, persistedRoles);
+    }
+
+    private async Task<string[]> PrepareAsync(DbContext context, CancellationToken cancellationToken)
+    {
+        _pending.Remove(context);
+        Dictionary<Guid, ChurchMembershipRole> persistedRoles = [];
+        foreach (EntityEntry<ChurchMembership> entry in context.ChangeTracker.Entries<ChurchMembership>())
+        {
+            if (NeedsPersistedRole(entry)
+                && await PersistedRoleAsync(context, entry.Entity.Id, cancellationToken) is { } role)
+            {
+                persistedRoles.Add(entry.Entity.Id, role);
+            }
+        }
+
+        return Prepare(context, persistedRoles);
+    }
+
+    private string[] Prepare(
+        DbContext context,
+        Dictionary<Guid, ChurchMembershipRole> persistedRoles)
+    {
         List<MembershipChange> changes = [];
         foreach (EntityEntry<ChurchMembership> entry in context.ChangeTracker.Entries<ChurchMembership>())
         {
@@ -206,6 +239,11 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
                 case EntityState.Modified:
                     string originalUserId = OriginalUserId(entry);
                     ChurchMembershipRole originalRole = OriginalRole(entry);
+                    if (persistedRoles.TryGetValue(membership.Id, out ChurchMembershipRole persistedRole))
+                    {
+                        originalRole = persistedRole;
+                    }
+
                     if (originalUserId != membership.UserId)
                     {
                         changes.Add(new(MembershipChangeKind.Removed, membership, originalUserId, originalRole,
@@ -235,6 +273,28 @@ public sealed partial class MembershipSecurityStampInterceptor : SaveChangesInte
             .Distinct(StringComparer.Ordinal)
             .ToArray();
     }
+
+    private static bool NeedsPersistedRole(EntityEntry<ChurchMembership> entry) =>
+        entry.State == EntityState.Modified
+        && entry.Property(membership => membership.Role).IsModified
+        && OriginalRole(entry) == entry.Entity.Role;
+
+    private static ChurchMembershipRole? PersistedRole(DbContext context, Guid membershipId) =>
+        context.Set<ChurchMembership>()
+            .AsNoTracking()
+            .Where(membership => membership.Id == membershipId)
+            .Select(membership => (ChurchMembershipRole?)membership.Role)
+            .SingleOrDefault();
+
+    private static Task<ChurchMembershipRole?> PersistedRoleAsync(
+        DbContext context,
+        Guid membershipId,
+        CancellationToken cancellationToken) =>
+        context.Set<ChurchMembership>()
+            .AsNoTracking()
+            .Where(membership => membership.Id == membershipId)
+            .Select(membership => (ChurchMembershipRole?)membership.Role)
+            .SingleOrDefaultAsync(cancellationToken);
 
     private static string OriginalUserId(EntityEntry<ChurchMembership> entry) =>
         entry.OriginalValues.GetValue<string>(nameof(ChurchMembership.UserId));
