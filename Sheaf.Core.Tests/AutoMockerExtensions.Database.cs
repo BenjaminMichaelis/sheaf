@@ -82,7 +82,8 @@ file sealed class SqliteConnectionResolver<TContext> : IMockResolver, IDisposabl
         static TContext CreateDbContext(AutoMocker autoMocker)
         {
             var options = autoMocker.Get<DbContextOptions<TContext>>();
-            var dbContext = (TContext)Activator.CreateInstance(typeof(TContext), options)!;
+            var dbContext = (TContext?)Activator.CreateInstance(typeof(TContext), options)
+                ?? throw new InvalidOperationException($"Could not create a database context of type '{typeof(TContext)}'.");
             dbContext.Database.EnsureCreated();
             return dbContext;
         }

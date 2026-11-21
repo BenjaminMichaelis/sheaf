@@ -12,7 +12,7 @@ using Sheaf.Mobile.Views;
 namespace Sheaf.Mobile;
 public partial class App : Application
 {
-    private IServiceProvider _serviceProvider = null!;
+    private IServiceProvider? _serviceProvider;
 
     public override void Initialize()
     {
