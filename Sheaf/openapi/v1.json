@@ -2336,23 +2336,22 @@
       },
       "HouseholdRequest": {
         "required": [
-          "label",
           "memberIds"
         ],
         "type": "object",
         "properties": {
-          "label": {
-            "type": [
-              "null",
-              "string"
-            ]
-          },
           "memberIds": {
             "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
             }
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

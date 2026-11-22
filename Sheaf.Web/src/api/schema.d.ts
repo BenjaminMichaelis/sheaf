@@ -465,8 +465,8 @@ export interface components {
             firstName: string;
         };
         HouseholdRequest: {
-            label: null | string;
             memberIds: string[];
+            label?: null | string;
         };
         HouseholdResponse: {
             /** Format: uuid */

@@ -206,6 +206,34 @@ public partial class ChurchSessionTests
     }
 
     [Test]
+    [Arguments("Beta", "The Beta Family")]
+    [Arguments(null, null)]
+    public async Task CreateHousehold_OmittedJsonLabel_DefaultsFromFirstMemberAndPreservesOnUpdate(string? firstSurname, string? expectedLabel)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var earlier = new Person { FirstName = "Earlier", LastName = "Alpha" };
+        var submittedFirst = new Person { FirstName = "Submitted first", LastName = firstSurname };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.People.AddRange(earlier, submittedFirst);
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        var body = new { memberIds = new[] { submittedFirst.Id, earlier.Id } };
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", body);
+        var household = await TrackerReadAsync<HouseholdResponse>(created, HttpStatusCode.Created);
+        await Assert.That(household.Label).IsEqualTo(expectedLabel);
+        await Assert.That(household.Members.Select(p => p.Id)).IsEquivalentTo([submittedFirst.Id, earlier.Id]);
+        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}",
+            new { memberIds = new[] { earlier.Id, submittedFirst.Id } });
+        await Assert.That((await TrackerReadAsync<HouseholdResponse>(updated)).Label).IsEqualTo(expectedLabel ?? "The Alpha Family");
+        using var fetched = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/households/{household.Id}");
+        await Assert.That((await TrackerReadAsync<HouseholdResponse>(fetched)).Label).IsEqualTo(expectedLabel ?? "The Alpha Family");
+    }
+
+    [Test]
     [Arguments(null, "Beta", "The Beta Family")]
     [Arguments("   ", "Beta", "The Beta Family")]
     [Arguments("  Custom label  ", "Beta", "Custom label")]
@@ -223,15 +251,15 @@ public partial class ChurchSessionTests
         });
         using var client = CreateClient();
         var (_, cookie) = await LoginAsync(client, user);
-        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest(label, [submittedFirst.Id, earlier.Id]));
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest([submittedFirst.Id, earlier.Id], label));
         var household = await TrackerReadAsync<HouseholdResponse>(created, HttpStatusCode.Created);
         await Assert.That(household.Label).IsEqualTo(expectedLabel);
         await Assert.That(household.Members.Select(p => p.FirstName)).IsEquivalentTo([earlier.FirstName, submittedFirst.FirstName]);
-        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest(null, [earlier.Id, submittedFirst.Id]));
+        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest([earlier.Id, submittedFirst.Id]));
         await Assert.That((await TrackerReadAsync<HouseholdResponse>(updated)).Label).IsEqualTo(expectedLabel ?? "The Alpha Family");
-        using var renamed = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest("Edited label", [earlier.Id, submittedFirst.Id]));
+        using var renamed = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest([earlier.Id, submittedFirst.Id], "Edited label"));
         await Assert.That((await TrackerReadAsync<HouseholdResponse>(renamed)).Label).IsEqualTo("Edited label");
-        using var preserved = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest(" ", [submittedFirst.Id]));
+        using var preserved = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest([submittedFirst.Id], " "));
         await Assert.That((await TrackerReadAsync<HouseholdResponse>(preserved)).Label).IsEqualTo("Edited label");
         using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
         var found = (await TrackerReadAsync<PersonLookupResponse[]>(lookup)).Single(p => p.Id == submittedFirst.Id);
@@ -304,7 +332,7 @@ public partial class ChurchSessionTests
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
         using var client = CreateClient();
         var (_, cookie) = await LoginAsync(client, user);
-        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest(null, []));
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest([]));
         var result = await TrackerReadAsync<HouseholdResponse>(created, HttpStatusCode.Created);
         await Assert.That(result.Label).IsNull();
         await Assert.That(result.Members).IsEmpty();
@@ -342,10 +370,10 @@ public partial class ChurchSessionTests
             userId = user.Id
         });
         await Assert.That((await TrackerReadAsync<PersonResponse>(updatedProfile)).Name).IsEqualTo("Member Updated");
-        using var unassociated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest("Not associated", [outside.Id]));
+        using var unassociated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest([outside.Id], "Not associated"));
         await Assert.That(unassociated.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         await Assert.That((await unassociated.Content.ReadFromJsonAsync<ProblemDetails>())?.Title).IsEqualTo("Access denied.");
-        using var structure = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest("Renamed", [member.Id, outside.Id]));
+        using var structure = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest([member.Id, outside.Id], "Renamed"));
         var result = await TrackerReadAsync<HouseholdResponse>(structure);
         await Assert.That(result.Members.Select(p => p.Id)).IsEquivalentTo([member.Id, outside.Id]);
         await Assert.That(await structure.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");

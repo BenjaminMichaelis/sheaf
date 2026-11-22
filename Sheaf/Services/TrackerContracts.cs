@@ -20,8 +20,8 @@ public sealed record AssignmentRequest(Guid PersonId, DateTimeOffset StartsAt);
 public sealed record EndRequest(DateTimeOffset EndsAt);
 /// <summary>A retained membership or leadership interval.</summary>
 public sealed record AssignmentResponse(Guid Id, Guid PersonId, DateTimeOffset StartsAt, DateTimeOffset? EndsAt);
-/// <summary>Household structure. An unspecified label preserves the existing label or defaults from the first submitted member's surname.</summary>
-public sealed record HouseholdRequest(string? Label, Guid[] MemberIds);
+/// <summary>Household structure. Label may be omitted; an unspecified label preserves the existing label or defaults from the first submitted member's surname.</summary>
+public sealed record HouseholdRequest(Guid[] MemberIds, string? Label = null);
 /// <summary>A household with only member identifiers and first names.</summary>
 public sealed record HouseholdResponse(Guid Id, string? Label, HouseholdMemberResponse[] Members);
 /// <summary>A household member's limited identity.</summary>
