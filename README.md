@@ -90,7 +90,12 @@ matches. **Leader access is not operational until signup integration creates an
 explicit link.** Unlinked leaders fail closed for scoped resources. Access additionally
 requires the account's persisted membership in that same church; a link alone or a
 link in another church never grants access. Existing account/church role lifecycle
-and cookie switching remain unchanged.
+and cookie switching remain unchanged. A typed current-church actor boundary resolves
+HTTP identity against persisted membership afresh for each tracker operation; actor
+snapshots are not durable authorization grants. ASP.NET Core resource policies enforce
+tracker role eligibility and Staff-only operations. SQL-translatable group/person scopes,
+household rules, and history/concurrency protections remain in application operations;
+HTTP problem responses are translated at the endpoint boundary.
 
 Staff and leaders may manage whole households associated with accessible people,
 including members outside their groups. Household responses expose identifiers and

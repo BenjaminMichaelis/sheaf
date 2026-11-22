@@ -112,6 +112,7 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddSheafAuthorization();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentChurchActor, HttpCurrentChurchActor>();
 builder.Services.AddScoped<Sheaf.Services.ITrackerService, Sheaf.Services.TrackerService>();
 
 var authBuilder = builder.Services.AddAuthentication(options =>

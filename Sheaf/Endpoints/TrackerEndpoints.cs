@@ -150,7 +150,15 @@ internal sealed class TrackerErrorFilter : IEndpointFilter
         }
         catch (TrackerException exception)
         {
-            return TypedResults.Problem(statusCode: exception.StatusCode, title: exception.Message);
+            var (status, title) = exception.Failure switch
+            {
+                TrackerFailure.NotFound => (404, "Resource not found."),
+                TrackerFailure.Forbidden => (403, "Access denied."),
+                TrackerFailure.InvalidInput => (400, "Invalid tracker input."),
+                TrackerFailure.Conflict => (409, "The resource changed or the group has ended."),
+                _ => (500, "An unexpected error occurred.")
+            };
+            return TypedResults.Problem(statusCode: status, title: title);
         }
     }
 }

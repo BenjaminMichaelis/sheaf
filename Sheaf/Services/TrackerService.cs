@@ -1,43 +1,37 @@
-using System.Security.Claims;
-
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
+using Sheaf.Authorization;
 using Sheaf.Data;
 
 namespace Sheaf.Services;
 
-public sealed class TrackerException(int statusCode, string title) : Exception(title)
+public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor currentActor, IAuthorizationService authorization, TimeProvider clock) : ITrackerService
 {
-    public int StatusCode { get; } = statusCode;
-}
+    private static TrackerException Missing() => new(TrackerFailure.NotFound);
+    private static TrackerException Denied() => new(TrackerFailure.Forbidden);
+    private static TrackerException Invalid() => new(TrackerFailure.InvalidInput);
+    private static TrackerException Conflict() => new(TrackerFailure.Conflict);
 
-public sealed class TrackerService(ApplicationDbContext db, ICurrentChurch church, IHttpContextAccessor http, TimeProvider clock) : ITrackerService
-{
-    private static TrackerException Missing() => new(404, "Resource not found.");
-    private static TrackerException Denied() => new(403, "Access denied.");
-    private static TrackerException Invalid() => new(400, "Invalid tracker input.");
-    private static TrackerException Conflict() => new(409, "The resource changed or the group has ended.");
-
-    private async Task<ChurchMembership> ActorAsync(CancellationToken ct)
+    private async Task<ChurchActor> ActorAsync(CancellationToken ct)
     {
-        var principal = http.HttpContext?.User;
-        var userId = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (principal?.Identity?.IsAuthenticated != true || userId is null || church.LeaderId is not { } membershipId)
-            throw Denied();
-        var actor = await db.ChurchMemberships.AsNoTracking()
-            .SingleOrDefaultAsync(m => m.Id == membershipId && m.UserId == userId, ct);
-        if (actor is null || actor.Role is not (ChurchMembershipRole.Staff or ChurchMembershipRole.Leader))
-            throw Denied();
+        var actor = await currentActor.GetAsync(ct) ?? throw Denied();
+        await AuthorizeAsync(actor, SheafPolicies.TrackerActor);
         return actor;
+    }
+
+    private async Task AuthorizeAsync(ChurchActor actor, string policy)
+    {
+        if (!(await authorization.AuthorizeAsync(actor.Principal, actor, policy)).Succeeded)
+            throw Denied();
     }
 
     private async Task StaffAsync(CancellationToken ct)
     {
-        if ((await ActorAsync(ct)).Role != ChurchMembershipRole.Staff)
-            throw Denied();
+        await AuthorizeAsync(await ActorAsync(ct), SheafPolicies.TrackerStaff);
     }
 
-    private IQueryable<Context> AccessibleGroups(ChurchMembership actor)
+    private IQueryable<Context> AccessibleGroups(ChurchActor actor)
     {
         if (actor.Role == ChurchMembershipRole.Staff)
             return db.Contexts;
@@ -47,7 +41,7 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurch churc
                 && db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId)));
     }
 
-    private IQueryable<Person> AccessiblePeople(ChurchMembership actor)
+    private IQueryable<Person> AccessiblePeople(ChurchActor actor)
     {
         if (actor.Role == ChurchMembershipRole.Staff)
             return db.People;
@@ -62,8 +56,8 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurch churc
     private async Task<Context> GroupAsync(Guid id, bool staff, CancellationToken ct)
     {
         var actor = await ActorAsync(ct);
-        if (staff && actor.Role != ChurchMembershipRole.Staff)
-            throw Denied();
+        if (staff)
+            await AuthorizeAsync(actor, SheafPolicies.TrackerStaff);
         return await AccessibleGroups(actor).SingleOrDefaultAsync(g => g.Id == id, ct) ?? throw Missing();
     }
 
@@ -313,7 +307,7 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurch churc
         return result;
     }
 
-    private async Task HouseholdAccessAsync(Guid id, ChurchMembership actor, CancellationToken ct)
+    private async Task HouseholdAccessAsync(Guid id, ChurchActor actor, CancellationToken ct)
     {
         if (actor.Role != ChurchMembershipRole.Staff
             && !await AccessiblePeople(actor).AnyAsync(p => p.HouseholdId == id, ct))
@@ -352,7 +346,7 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurch churc
         return await HouseholdResponseAsync(household, ct);
     }
 
-    private async Task SetHouseholdAsync(Household household, HouseholdRequest request, ChurchMembership actor, bool creating, CancellationToken ct)
+    private async Task SetHouseholdAsync(Household household, HouseholdRequest request, ChurchActor actor, bool creating, CancellationToken ct)
     {
         if (request.MemberIds is null || request.MemberIds.Length > 200 || request.MemberIds.Distinct().Count() != request.MemberIds.Length)
             throw Invalid();
