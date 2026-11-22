@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 
+using Azure.Core;
 using Azure.Identity;
 
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -51,7 +52,9 @@ if (!isOpenApiGeneration
             "DataProtection:KeyVaultKeyIdentifier must be configured as an absolute HTTPS URI outside Development and Testing.");
     }
 
-    dataProtectionBuilder.ProtectKeysWithAzureKeyVault(keyVaultKeyIdentifier, new DefaultAzureCredential());
+    builder.Services.AddSingleton<TokenCredential>(_ => new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned));
+    dataProtectionBuilder.ProtectKeysWithAzureKeyVault(
+        keyVaultKeyIdentifier, services => services.GetRequiredService<TokenCredential>());
 }
 
 builder.Services.AddScoped<ChurchClaimsPrincipalFactory>();

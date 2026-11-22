@@ -110,7 +110,7 @@ deployment's trusted proxy addresses or ranges. Configure
 Outside Development and Testing, runtime startup requires this setting; offline OpenAPI
 generation is exempt. The API persists its shared Data Protection key ring in the
 `DataProtectionKeys` table, scoped to the application name `Sheaf`, and protects those
-keys with Azure Key Vault through `DefaultAzureCredential` (managed identity in Azure).
+keys with Azure Key Vault through `ManagedIdentityCredential` (system-assigned managed identity only).
 Grant that identity permission to get, wrap, and unwrap the configured key. Use a
 versionless key identifier when enabling Key Vault key rotation.
 
