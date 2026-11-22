@@ -1,11 +1,11 @@
 namespace Sheaf.Services;
 
 /// <summary>Creates or updates a church-owned Person; account linking is not accepted.</summary>
-public sealed record PersonRequest(string Name, string? GivenName = null, string? Email = null, string? Phone = null, bool IsActive = true);
+public sealed record PersonRequest(string FirstName, string? LastName = null, string? Email = null, string? Phone = null, bool IsActive = true);
 /// <summary>A scoped Person profile.</summary>
-public sealed record PersonResponse(Guid Id, string Name, string? GivenName, string? Email, string? Phone, Guid? HouseholdId, bool IsActive);
+public sealed record PersonResponse(Guid Id, string Name, string FirstName, string? LastName, string? Email, string? Phone, Guid? HouseholdId, bool IsActive);
 /// <summary>A limited same-church active Person lookup result.</summary>
-public sealed record PersonLookupResponse(Guid Id, string Name, string[] CurrentGroups, string? HouseholdLabel, string[] HouseholdGivenNames);
+public sealed record PersonLookupResponse(Guid Id, string Name, string[] CurrentGroups, string? HouseholdLabel, string[] HouseholdFirstNames);
 /// <summary>A group type name.</summary>
 public sealed record GroupTypeRequest(string Name);
 /// <summary>A church-local group type.</summary>
@@ -20,12 +20,12 @@ public sealed record AssignmentRequest(Guid PersonId, DateTimeOffset StartsAt);
 public sealed record EndRequest(DateTimeOffset EndsAt);
 /// <summary>A retained membership or leadership interval.</summary>
 public sealed record AssignmentResponse(Guid Id, Guid PersonId, DateTimeOffset StartsAt, DateTimeOffset? EndsAt);
-/// <summary>Household structure, independent of Person profile editing.</summary>
+/// <summary>Household structure. An unspecified label preserves the existing label or defaults from the first submitted member's surname.</summary>
 public sealed record HouseholdRequest(string? Label, Guid[] MemberIds);
-/// <summary>A household with only member identifiers and optional given names.</summary>
+/// <summary>A household with only member identifiers and first names.</summary>
 public sealed record HouseholdResponse(Guid Id, string? Label, HouseholdMemberResponse[] Members);
 /// <summary>A household member's limited identity.</summary>
-public sealed record HouseholdMemberResponse(Guid Id, string? GivenName);
+public sealed record HouseholdMemberResponse(Guid Id, string FirstName);
 
 public interface ITrackerService
 {

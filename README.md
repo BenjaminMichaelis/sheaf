@@ -72,9 +72,12 @@ host for SQL Server. They use isolated, migrated catalogs.
 The backend tracker endpoints under `/api/church` persist church-owned People,
 optional households, group types, groups (`Context` of kind `Group`), and dated
 Person membership/leadership intervals. See `Sheaf/Tracker.http` for requests.
-Names and group starting instants are required; contacts, given names, households,
-and group types are optional. `IsActive` is explicit lookup eligibility, not an
-automatic inactivity or erasure policy. Given names are never inferred from full names.
+Person `FirstName` and group names/starting instants are required; `LastName`,
+contacts, households, and group types are optional. Display `Name` is the supplied
+first name followed by the optional surname; names are never guessed or split.
+`IsActive` is explicit lookup eligibility, not automatic inactivity or erasure.
+The unreleased name-schema migration requires an empty People table and fails
+rather than discard unexpected legacy records; it is not a deployed-data conversion.
 
 Staff create People, manage group types, create/update/end groups, and assign leaders.
 Leaders manage membership and edit profiles only within their currently led groups.
@@ -99,9 +102,13 @@ HTTP problem responses are translated at the endpoint boundary.
 
 Staff and leaders may manage whole households associated with accessible people,
 including members outside their groups. Household responses expose identifiers and
-optional given names, not full profiles or contacts; household authority does not
-grant outside-group profile rights. Same-church active lookup returns only name,
-current group names, optional household label and supplied household given names.
+first names, not full profiles or contacts; household authority does not grant
+outside-group profile rights. An omitted/blank household label preserves the existing
+label, or defaults to `The {LastName} Family` using the first submitted `MemberIds`
+entry. If that person has no surname (or the list is empty), the label stays unset;
+other members' surnames are not substituted. Explicit labels are editable and take
+precedence. Same-church active lookup returns only display name, current group names,
+optional household label and household first names.
 Unsafe tracker requests retain the `X-Sheaf-Church` stale-tab check.
 
 Attendance and discipleship are deferred. Future attendance infers absence when a

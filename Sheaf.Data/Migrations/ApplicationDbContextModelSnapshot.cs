@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261121203238_TrackerFoundation";
+    public override string LastMigrationId => "20261122011357_PersonNames";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -485,7 +485,8 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasMaxLength(320)
                     .HasColumnType("nvarchar(320)");
 
-                b.Property<string>("GivenName")
+                b.Property<string>("FirstName")
+                    .IsRequired()
                     .HasMaxLength(100)
                     .HasColumnType("nvarchar(100)");
 
@@ -495,10 +496,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<bool>("IsActive")
                     .HasColumnType("bit");
 
-                b.Property<string>("Name")
-                    .IsRequired()
-                    .HasMaxLength(200)
-                    .HasColumnType("nvarchar(200)");
+                b.Property<string>("LastName")
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
 
                 b.Property<string>("Phone")
                     .HasMaxLength(50)
@@ -520,7 +520,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.ToTable("People", t =>
                     {
-                        t.HasCheckConstraint("CK_People_Name", "TRIM([Name]) <> ''");
+                        t.HasCheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''");
                     });
             });
 

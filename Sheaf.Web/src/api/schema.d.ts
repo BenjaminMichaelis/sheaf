@@ -462,7 +462,7 @@ export interface components {
         HouseholdMemberResponse: {
             /** Format: uuid */
             id: string;
-            givenName: null | string;
+            firstName: string;
         };
         HouseholdRequest: {
             label: null | string;
@@ -496,11 +496,11 @@ export interface components {
             name: string;
             currentGroups: string[];
             householdLabel: null | string;
-            householdGivenNames: string[];
+            householdFirstNames: string[];
         };
         PersonRequest: {
-            name: string;
-            givenName?: null | string;
+            firstName: string;
+            lastName?: null | string;
             email?: null | string;
             phone?: null | string;
             /** @default true */
@@ -510,7 +510,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
-            givenName: null | string;
+            firstName: string;
+            lastName: null | string;
             email: null | string;
             phone: null | string;
             /** Format: uuid */

@@ -22,7 +22,7 @@ Cookie: {{cookie}}
 X-Sheaf-Church: {{churchId}}
 Content-Type: application/json
 
-{"name":"Ada Lovelace","givenName":"Ada"}
+{"firstName":"Ada","lastName":"Lovelace"}
 
 ### Scoped profile update
 PUT {{baseUrl}}/api/church/people/{{personId}}
@@ -30,7 +30,7 @@ Cookie: {{cookie}}
 X-Sheaf-Church: {{churchId}}
 Content-Type: application/json
 
-{"name":"Ada Lovelace","givenName":"Ada","email":null,"phone":null,"isActive":true}
+{"firstName":"Ada","lastName":"Lovelace","email":null,"phone":null,"isActive":true}
 
 ### Group types
 GET {{baseUrl}}/api/church/group-types
@@ -132,13 +132,13 @@ Content-Type: application/json
 GET {{baseUrl}}/api/church/households/{{householdId}}
 Cookie: {{cookie}}
 
-### Create optional household
+### Create optional household; omitted label defaults from the first member's LastName
 POST {{baseUrl}}/api/church/households
 Cookie: {{cookie}}
 X-Sheaf-Church: {{churchId}}
 Content-Type: application/json
 
-{"label":"Lovelace household","memberIds":["{{personId}}"]}
+{"memberIds":["{{personId}}"]}
 
 ### Replace whole household membership, without editing Person profiles
 PUT {{baseUrl}}/api/church/households/{{householdId}}

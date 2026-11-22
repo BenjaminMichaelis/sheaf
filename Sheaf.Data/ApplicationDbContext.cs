@@ -87,7 +87,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(person => new { person.ChurchId, person.UserId }).IsUnique()
                 .HasFilter("[UserId] IS NOT NULL");
-            entity.ToTable(table => table.HasCheckConstraint("CK_People_Name", "TRIM([Name]) <> ''"));
+            entity.ToTable(table => table.HasCheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''"));
         });
         builder.Entity<Household>().HasOne<Church>().WithMany().HasForeignKey(household => household.ChurchId)
             .OnDelete(DeleteBehavior.Restrict).IsRequired();

@@ -4,7 +4,10 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 
 using Sheaf.Authorization;
@@ -152,7 +155,7 @@ public partial class ChurchSessionTests
     }
 
     [Test]
-    public async Task CreatePerson_OptionalFieldsRequiredNameAndStaleChurch_EnforcesContract()
+    public async Task CreatePerson_OptionalFieldsRequiredFirstNameAndStaleChurch_EnforcesContract()
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
@@ -161,6 +164,8 @@ public partial class ChurchSessionTests
         using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("Ada"));
         var person = await TrackerReadAsync<PersonResponse>(created, HttpStatusCode.Created);
         await Assert.That(person.Name).IsEqualTo("Ada");
+        await Assert.That(person.FirstName).IsEqualTo("Ada");
+        await Assert.That(person.LastName).IsNull();
         await Assert.That(person.Email).IsNull();
         await Assert.That(person.HouseholdId).IsNull();
         await Assert.That(created.Headers.Location?.OriginalString).IsEqualTo($"/api/church/people/{person.Id}");
@@ -173,15 +178,148 @@ public partial class ChurchSessionTests
     }
 
     [Test]
+    public async Task UpdatePerson_SeparateNames_NormalizesProfilesAndLookup()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("  Mary Jane  ", "  van Buren  "));
+        var person = await TrackerReadAsync<PersonResponse>(created, HttpStatusCode.Created);
+        await Assert.That(person.FirstName).IsEqualTo("Mary Jane");
+        await Assert.That(person.LastName).IsEqualTo("van Buren");
+        await Assert.That(person.Name).IsEqualTo("Mary Jane van Buren");
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Jane%20van");
+        await Assert.That((await TrackerReadAsync<PersonLookupResponse[]>(lookup)).Single().Name).IsEqualTo(person.Name);
+        foreach (var input in new[] { new PersonRequest(" "), new PersonRequest(new string('a', 101)), new PersonRequest("Mary", new string('b', 101)) })
+        {
+            using var invalid = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{person.Id}", input);
+            await Assert.That(invalid.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        }
+        using var unchanged = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/{person.Id}");
+        await Assert.That(await TrackerReadAsync<PersonResponse>(unchanged)).IsEqualTo(person);
+        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{person.Id}", new PersonRequest("  Mary Jane  ", " "));
+        var result = await TrackerReadAsync<PersonResponse>(updated);
+        await Assert.That(result.FirstName).IsEqualTo("Mary Jane");
+        await Assert.That(result.LastName).IsNull();
+        await Assert.That(result.Name).IsEqualTo("Mary Jane");
+    }
+
+    [Test]
+    [Arguments(null, "Beta", "The Beta Family")]
+    [Arguments("   ", "Beta", "The Beta Family")]
+    [Arguments("  Custom label  ", "Beta", "Custom label")]
+    [Arguments(null, null, null)]
+    public async Task CreateHousehold_FirstSubmittedMemberAndExplicitLabel_UsesAgreedDefault(string? label, string? firstSurname, string? expectedLabel)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var earlier = new Person { FirstName = "Earlier", LastName = "Alpha" };
+        var submittedFirst = new Person { FirstName = "Submitted first", LastName = firstSurname };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.People.AddRange(earlier, submittedFirst);
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest(label, [submittedFirst.Id, earlier.Id]));
+        var household = await TrackerReadAsync<HouseholdResponse>(created, HttpStatusCode.Created);
+        await Assert.That(household.Label).IsEqualTo(expectedLabel);
+        await Assert.That(household.Members.Select(p => p.FirstName)).IsEquivalentTo([earlier.FirstName, submittedFirst.FirstName]);
+        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest(null, [earlier.Id, submittedFirst.Id]));
+        await Assert.That((await TrackerReadAsync<HouseholdResponse>(updated)).Label).IsEqualTo(expectedLabel ?? "The Alpha Family");
+        using var renamed = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest("Edited label", [earlier.Id, submittedFirst.Id]));
+        await Assert.That((await TrackerReadAsync<HouseholdResponse>(renamed)).Label).IsEqualTo("Edited label");
+        using var preserved = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest(" ", [submittedFirst.Id]));
+        await Assert.That((await TrackerReadAsync<HouseholdResponse>(preserved)).Label).IsEqualTo("Edited label");
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
+        var found = (await TrackerReadAsync<PersonLookupResponse[]>(lookup)).Single(p => p.Id == submittedFirst.Id);
+        await Assert.That(found.HouseholdLabel).IsEqualTo("Edited label");
+        await Assert.That(found.HouseholdFirstNames).IsEquivalentTo([submittedFirst.FirstName]);
+    }
+
+    [Test]
+    public async Task Migrate_PersonNamesWithLegacyRecords_FailsWithoutLosingNames()
+    {
+        await InScopeAsync(async services =>
+        {
+            var source = services.GetRequiredService<ApplicationDbContext>();
+            var connection = new SqlConnectionStringBuilder(source.Database.GetConnectionString())
+            {
+                InitialCatalog = $"SheafNameMigration_{Guid.NewGuid():N}"
+            };
+            var isolatedServices = new ServiceCollection();
+            isolatedServices.AddSheafDatabase(connection.ConnectionString);
+            await using var provider = isolatedServices.BuildServiceProvider();
+            await using var scope = provider.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            try
+            {
+                var migrator = db.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261121203238_TrackerFoundation");
+                var church = new Church { Name = "Migration fixture", Slug = $"migration-{Guid.NewGuid():N}" };
+                db.Churches.Add(church);
+                await db.SaveChangesAsync();
+                await using var sql = new SqlConnection(connection.ConnectionString);
+                await sql.OpenAsync();
+                await using var insert = sql.CreateCommand();
+                insert.CommandText = "INSERT INTO [People] ([ChurchId], [Id], [Name], [GivenName], [IsActive]) VALUES (@church, @id, N'Unsplit Original Name', N'Preferred', 1)";
+                insert.Parameters.AddWithValue("@church", church.Id);
+                insert.Parameters.AddWithValue("@id", Guid.NewGuid());
+                await insert.ExecuteNonQueryAsync();
+                var failure = await Assert.That(async () => await migrator.MigrateAsync()).Throws<SqlException>();
+                await Assert.That(failure?.Number).IsEqualTo(51000);
+                await using var read = sql.CreateCommand();
+                read.CommandText = "SELECT [Name], [GivenName] FROM [People]";
+                await using (var reader = await read.ExecuteReaderAsync())
+                {
+                    await Assert.That(await reader.ReadAsync()).IsTrue();
+                    await Assert.That(reader.GetString(0)).IsEqualTo("Unsplit Original Name");
+                    await Assert.That(reader.GetString(1)).IsEqualTo("Preferred");
+                }
+                await using var clear = sql.CreateCommand();
+                clear.CommandText = "DELETE FROM [People]";
+                await clear.ExecuteNonQueryAsync();
+                await migrator.MigrateAsync();
+                await Assert.That(db.Database.HasPendingModelChanges()).IsFalse();
+                await using var invalid = sql.CreateCommand();
+                invalid.CommandText = "INSERT INTO [People] ([ChurchId], [Id], [FirstName], [IsActive]) VALUES (@church, @id, N'   ', 1)";
+                invalid.Parameters.AddWithValue("@church", church.Id);
+                invalid.Parameters.AddWithValue("@id", Guid.NewGuid());
+                var constraint = await Assert.That(async () => await invalid.ExecuteNonQueryAsync()).Throws<SqlException>();
+                await Assert.That(constraint?.Number).IsEqualTo(547);
+            }
+            finally
+            {
+                await db.Database.EnsureDeletedAsync();
+            }
+        });
+    }
+
+    [Test]
+    public async Task CreateHousehold_EmptyMemberList_LeavesDefaultUnset()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        using var created = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest(null, []));
+        var result = await TrackerReadAsync<HouseholdResponse>(created, HttpStatusCode.Created);
+        await Assert.That(result.Label).IsNull();
+        await Assert.That(result.Members).IsEmpty();
+    }
+
+    [Test]
     public async Task GetPerson_LinkedLeaderAndAssociatedHousehold_EnforcesProfileBoundary()
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user);
         var household = new Household { Label = "Family" };
-        var leader = new Person { Name = "Leader Full Name", UserId = user.Id };
-        var member = new Person { Name = "Member Full Name", GivenName = "Member", HouseholdId = household.Id };
-        var outside = new Person { Name = "Outside Full Name", GivenName = "Outside", Email = "private@example.com", HouseholdId = household.Id };
-        var inactive = new Person { Name = "Inactive", IsActive = false };
+        var leader = new Person { FirstName = "Leader Full Name", UserId = user.Id };
+        var member = new Person { FirstName = "Member", LastName = "Full Name", HouseholdId = household.Id };
+        var outside = new Person { FirstName = "Outside", LastName = "Full Name", Email = "private@example.com", HouseholdId = household.Id };
+        var inactive = new Person { FirstName = "Inactive", IsActive = false };
         var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-5) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
@@ -199,11 +337,11 @@ public partial class ChurchSessionTests
         await Assert.That((await denied.Content.ReadFromJsonAsync<ProblemDetails>())?.Title).IsEqualTo("Resource not found.");
         using var updatedProfile = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{member.Id}", new
         {
-            name = "Updated member",
-            givenName = "Member",
+            firstName = "Member",
+            lastName = "Updated",
             userId = user.Id
         });
-        await Assert.That((await TrackerReadAsync<PersonResponse>(updatedProfile)).Name).IsEqualTo("Updated member");
+        await Assert.That((await TrackerReadAsync<PersonResponse>(updatedProfile)).Name).IsEqualTo("Member Updated");
         using var unassociated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest("Not associated", [outside.Id]));
         await Assert.That(unassociated.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         await Assert.That((await unassociated.Content.ReadFromJsonAsync<ProblemDetails>())?.Title).IsEqualTo("Access denied.");
@@ -215,8 +353,8 @@ public partial class ChurchSessionTests
         var found = await TrackerReadAsync<PersonLookupResponse[]>(lookup);
         await Assert.That(found.Any(p => p.Id == inactive.Id)).IsFalse();
         await Assert.That(found.Single(p => p.Id == member.Id).CurrentGroups).IsEquivalentTo([group.Name]);
-        await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdGivenNames).IsEquivalentTo(["Member", "Outside"]);
-        await Assert.That(found.Single(p => p.Id == leader.Id).HouseholdGivenNames).IsEmpty();
+        await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdFirstNames).IsEquivalentTo(["Member", "Outside"]);
+        await Assert.That(found.Single(p => p.Id == leader.Id).HouseholdFirstNames).IsEmpty();
         await Assert.That(await lookup.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
         using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(_time.GetUtcNow()));
         await Assert.That(ending.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
@@ -234,7 +372,7 @@ public partial class ChurchSessionTests
         var first = await AddMembershipAsync(user);
         var second = await AddMembershipAsync(await CreateUserAsync(), ChurchMembershipRole.Staff);
         var group = new Context { Name = "Unlinked", StartsAt = _time.GetUtcNow().AddDays(-1) };
-        var person = new Person { Name = "Leader" };
+        var person = new Person { FirstName = "Leader" };
         await InChurchAsync(first.ChurchId, async db =>
         {
             db.AddRange(group, person);
@@ -242,7 +380,7 @@ public partial class ChurchSessionTests
             await db.SaveChangesAsync();
         });
         var other = new Context { Name = "Other church", StartsAt = group.StartsAt };
-        var linked = new Person { Name = "Same account other church", UserId = user.Id };
+        var linked = new Person { FirstName = "Same account other church", UserId = user.Id };
         await InChurchAsync(second.ChurchId, async db =>
         {
             db.AddRange(other, linked);
@@ -337,7 +475,7 @@ public partial class ChurchSessionTests
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
-        var person = new Person { Name = "Person" };
+        var person = new Person { FirstName = "Person" };
         var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-4) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
@@ -370,7 +508,7 @@ public partial class ChurchSessionTests
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user);
-        var person = new Person { Name = "Linked", UserId = user.Id };
+        var person = new Person { FirstName = "Linked", UserId = user.Id };
         var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-3) };
         var leadership = new ContextLeader { ContextId = group.Id, PersonId = person.Id, StartsAt = _time.GetUtcNow().AddDays(1) };
         await InChurchAsync(membership.ChurchId, async db =>
@@ -413,7 +551,7 @@ public partial class ChurchSessionTests
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
         var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-3) };
-        var person = new Person { Name = "Person" };
+        var person = new Person { FirstName = "Person" };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(person, group);
@@ -448,17 +586,17 @@ public partial class ChurchSessionTests
         var second = await AddMembershipAsync(await CreateUserAsync());
         await InChurchAsync(first.ChurchId, async db =>
         {
-            db.People.AddRange(new Person { Name = "One" }, new Person { Name = "Two" }, new Person { Name = "Linked", UserId = user.Id });
+            db.People.AddRange(new Person { FirstName = "One" }, new Person { FirstName = "Two" }, new Person { FirstName = "Linked", UserId = user.Id });
             await db.SaveChangesAsync();
         });
         await InChurchAsync(second.ChurchId, async db =>
         {
-            db.People.Add(new Person { Name = "Other church", UserId = user.Id });
+            db.People.Add(new Person { FirstName = "Other church", UserId = user.Id });
             await db.SaveChangesAsync();
         });
         await InChurchAsync(first.ChurchId, async db =>
         {
-            db.People.Add(new Person { Name = "Duplicate link", UserId = user.Id });
+            db.People.Add(new Person { FirstName = "Duplicate link", UserId = user.Id });
             await Assert.That(async () => await db.SaveChangesAsync()).Throws<DbUpdateException>();
         });
     }

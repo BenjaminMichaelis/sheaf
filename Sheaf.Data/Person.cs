@@ -12,10 +12,12 @@ public sealed class Person : ITenanted
 
     public Guid ChurchId { get; set; }
 
-    [MaxLength(200)]
-    public required string Name { get; set; }
     [MaxLength(100)]
-    public string? GivenName { get; set; }
+    public required string FirstName { get; set; }
+    [MaxLength(100)]
+    public string? LastName { get; set; }
+    [NotMapped]
+    public string Name => FirstName + (LastName == null ? string.Empty : " " + LastName);
     [MaxLength(320)]
     public string? Email { get; set; }
     [MaxLength(50)]

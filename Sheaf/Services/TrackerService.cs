@@ -61,9 +61,9 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
         return await AccessibleGroups(actor).SingleOrDefaultAsync(g => g.Id == id, ct) ?? throw Missing();
     }
 
-    private static string RequiredName(string? value)
+    private static string RequiredName(string? value, int length = 200)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 200)
+        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > length)
             throw Invalid();
         return value.Trim();
     }
@@ -79,8 +79,8 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
 
     private static void SetPerson(Person person, PersonRequest request)
     {
-        person.Name = RequiredName(request.Name);
-        person.GivenName = Optional(request.GivenName, 100);
+        person.FirstName = RequiredName(request.FirstName, 100);
+        person.LastName = Optional(request.LastName, 100);
         person.Email = Optional(request.Email, 320);
         person.Phone = Optional(request.Phone, 50);
         person.IsActive = request.IsActive;
@@ -98,13 +98,13 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
         }
     }
 
-    private static PersonResponse Profile(Person p) => new(p.Id, p.Name, p.GivenName, p.Email, p.Phone, p.HouseholdId, p.IsActive);
+    private static PersonResponse Profile(Person p) => new(p.Id, p.Name, p.FirstName, p.LastName, p.Email, p.Phone, p.HouseholdId, p.IsActive);
     private static GroupResponse Group(Context g) => new(g.Id, g.Name, g.StartsAt, g.EndsAt, g.GroupTypeId);
 
     public async Task<PersonResponse> CreatePersonAsync(PersonRequest request, CancellationToken ct)
     {
         await StaffAsync(ct);
-        var person = new Person { Name = RequiredName(request.Name) };
+        var person = new Person { FirstName = RequiredName(request.FirstName, 100) };
         SetPerson(person, request);
         db.People.Add(person);
         await SaveAsync(ct);
@@ -131,7 +131,13 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
         await ActorAsync(ct);
         var term = Optional(name, 200);
         var now = clock.GetUtcNow();
-        return await db.People.Where(p => p.IsActive && (term == null || p.Name.Contains(term)))
+        return await db.People.Select(p => new
+            {
+                p.Id,
+                p.IsActive,
+                p.HouseholdId,
+                Name = p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName)
+            }).Where(p => p.IsActive && (term == null || p.Name.Contains(term)))
             .OrderBy(p => p.Name).ThenBy(p => p.Id).Take(50)
             .Select(p => new PersonLookupResponse(p.Id, p.Name,
                 db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
@@ -139,8 +145,8 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
                         || db.ContextLeaders.Any(l => l.PersonId == p.Id && l.ContextId == g.Id && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now))))
                     .OrderBy(g => g.Name).Select(g => g.Name).ToArray(),
                 db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault(),
-                db.People.Where(member => p.HouseholdId != null && member.HouseholdId == p.HouseholdId && member.GivenName != null)
-                    .OrderBy(member => member.Id).Select(member => member.GivenName ?? string.Empty).ToArray()))
+                db.People.Where(member => p.HouseholdId != null && member.HouseholdId == p.HouseholdId)
+                    .OrderBy(member => member.Id).Select(member => member.FirstName).ToArray()))
             .ToArrayAsync(ct);
     }
 
@@ -316,7 +322,7 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
 
     private async Task<HouseholdResponse> HouseholdResponseAsync(Household household, CancellationToken ct) => new(household.Id, household.Label,
         await db.People.Where(p => p.HouseholdId == household.Id).OrderBy(p => p.Id)
-            .Select(p => new HouseholdMemberResponse(p.Id, p.GivenName)).ToArrayAsync(ct));
+            .Select(p => new HouseholdMemberResponse(p.Id, p.FirstName)).ToArrayAsync(ct));
 
     public async Task<HouseholdResponse> GetHouseholdAsync(Guid id, CancellationToken ct)
     {
@@ -363,6 +369,9 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
             person.HouseholdId = null;
         foreach (var person in members)
             person.HouseholdId = household.Id;
-        household.Label = Optional(request.Label, 200);
+        var suppliedLabel = Optional(request.Label, 200);
+        var firstMember = request.MemberIds.Length == 0 ? null : members.Single(p => p.Id == request.MemberIds[0]);
+        household.Label = suppliedLabel ?? household.Label
+            ?? (firstMember?.LastName is { } surname ? $"The {surname} Family" : null);
     }
 }
