@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -21,7 +22,8 @@ public class TenancyArchitectureTests
         typeof(IdentityUserRole<string>),
         typeof(IdentityUserToken<string>),
         typeof(IdentityRoleClaim<string>),
-        typeof(IdentityUserPasskey<string>)
+        typeof(IdentityUserPasskey<string>),
+        typeof(DataProtectionKey)
     ];
 
     [Test]
