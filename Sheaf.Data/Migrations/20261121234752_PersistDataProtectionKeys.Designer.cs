@@ -14,7 +14,7 @@ namespace Sheaf.Data.Migrations;
 
 [DbContext(typeof(ApplicationDbContext))]
 [Migration("20261121234752_PersistDataProtectionKeys")]
-partial class _20261121234752_PersistDataProtectionKeys
+partial class PersistDataProtectionKeys
 {
     /// <inheritdoc />
     protected override void BuildTargetModel(ModelBuilder modelBuilder)

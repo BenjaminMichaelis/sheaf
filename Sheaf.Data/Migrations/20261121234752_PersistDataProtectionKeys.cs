@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sheaf.Data.Migrations;
 
 /// <inheritdoc />
-public partial class _20261121234752_PersistDataProtectionKeys : Migration
+public partial class PersistDataProtectionKeys : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
