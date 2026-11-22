@@ -343,13 +343,16 @@ public class ProductionSecurityStartupTests
         protected override void ConfigureStartupConfiguration(IConfigurationBuilder configurationBuilder)
         {
             base.ConfigureStartupConfiguration(configurationBuilder);
+            Dictionary<string, string?> settings = new()
+            {
+                ["DataProtection:KeyVaultKeyIdentifier"] = "https://vault.example/keys/test"
+            };
             if (configureOrigins)
             {
-                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["AllowedOrigins:0"] = "https://client.example"
-                });
+                settings["AllowedOrigins:0"] = "https://client.example";
             }
+
+            configurationBuilder.AddInMemoryCollection(settings);
         }
     }
 }

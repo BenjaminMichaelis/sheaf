@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -5,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Sheaf.Data;
 
-public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext, IDataProtectionKeyContext
 {
     private readonly ICurrentChurch _currentChurch;
 
@@ -25,6 +26,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
     public DbSet<Church> Churches => Set<Church>();
 
     public DbSet<ChurchMembership> ChurchMemberships => Set<ChurchMembership>();
+
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
