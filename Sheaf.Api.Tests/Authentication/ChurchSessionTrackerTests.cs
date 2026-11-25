@@ -628,4 +628,52 @@ public partial class ChurchSessionTests
             await Assert.That(async () => await db.SaveChangesAsync()).Throws<DbUpdateException>();
         });
     }
+
+    [Test]
+    public async Task AddAssignmentAsync_LeaderAddsPersonOutsideTheirGroups_ReturnsNotFoundAndDoesNotAssign()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        var leader = new Person { FirstName = "Leader", UserId = user.Id };
+        var outside = new Person { FirstName = "Outside", Email = "private@example.com" };
+        var group = new Context { Name = "Led", StartsAt = _time.GetUtcNow().AddDays(-5) };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(leader, outside, group);
+            db.ContextLeaders.Add(new ContextLeader { ContextId = group.Id, PersonId = leader.Id, StartsAt = group.StartsAt });
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var add = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/members", new AssignmentRequest(outside.Id, group.StartsAt));
+        await Assert.That(add.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+        using var profile = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/{outside.Id}");
+        await Assert.That(profile.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task CreateHousehold_LeaderIncludesAccessibleAndInaccessiblePeople_ReturnsForbidden()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        var leader = new Person { FirstName = "Leader", UserId = user.Id };
+        var member = new Person { FirstName = "Member" };
+        var outside = new Person { FirstName = "Outside" };
+        var group = new Context { Name = "Led", StartsAt = _time.GetUtcNow().AddDays(-5) };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(leader, member, outside, group);
+            db.ContextLeaders.Add(new ContextLeader { ContextId = group.Id, PersonId = leader.Id, StartsAt = group.StartsAt });
+            db.ContextMembers.Add(new ContextMember { ContextId = group.Id, PersonId = member.Id, JoinedAt = group.StartsAt });
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var create = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/households", new HouseholdRequest([member.Id, outside.Id]));
+        await Assert.That(create.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        await InChurchAsync(membership.ChurchId, async db =>
+            await Assert.That((await db.People.SingleAsync(p => p.Id == outside.Id)).HouseholdId).IsNull());
+    }
 }

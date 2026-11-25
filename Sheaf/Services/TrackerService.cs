@@ -268,6 +268,11 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
             throw Conflict();
         if (request.StartsAt < group.StartsAt || !await db.People.AnyAsync(p => p.Id == request.PersonId, ct))
             throw Invalid();
+        // Non-staff may only assign people they can already access; otherwise adding someone would unlock their profile.
+        var actor = await ActorAsync(ct);
+        if (actor.Role != ChurchMembershipRole.Staff
+            && !await AccessiblePeople(actor).AnyAsync(p => p.Id == request.PersonId, ct))
+            throw Missing();
         group.Version = Guid.NewGuid();
         AssignmentResponse result;
         if (leaders)
@@ -361,6 +366,13 @@ public sealed class TrackerService(ApplicationDbContext db, ICurrentChurchActor 
         var members = await db.People.Where(p => request.MemberIds.Contains(p.Id)).ToArrayAsync(ct);
         if (members.Length != request.MemberIds.Length)
             throw Invalid();
+        if (actor.Role != ChurchMembershipRole.Staff)
+        {
+            var accessibleIds = await AccessiblePeople(actor).Where(p => request.MemberIds.Contains(p.Id)).Select(p => p.Id).ToArrayAsync(ct);
+            // Non-staff may only submit people they can already access, or people already in the household being updated.
+            if (members.Any(p => !accessibleIds.Contains(p.Id) && (creating || p.HouseholdId != household.Id)))
+                throw Denied();
+        }
         foreach (var previousId in members.Where(p => p.HouseholdId != null && p.HouseholdId != household.Id).Select(p => p.HouseholdId).Distinct())
             if (previousId is { } id)
                 await HouseholdAccessAsync(id, actor, ct);
