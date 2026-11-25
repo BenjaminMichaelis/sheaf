@@ -23,12 +23,11 @@ public interface IAssignmentService
 
 /// <summary>
 /// Dated membership and leadership intervals. Members may be managed by the group's current Leaders;
-/// leadership is Staff-only. Every write bumps the group's version so it serializes against ending the group.
+/// leadership writes require <see cref="Sheaf.Authorization.Permission.TrackerManage"/>, declared on their endpoints.
+/// Every write bumps the group's version so it serializes against ending the group.
 /// </summary>
 public sealed class AssignmentService(ApplicationDbContext db, TrackerScope scope) : IAssignmentService
 {
-    private static bool StaffOnly(AssignmentKind kind) => kind == AssignmentKind.Leader;
-
     // Filters are applied to the entities before projecting, so EF can translate them.
     private IQueryable<AssignmentResponse> Query(Guid groupId, AssignmentKind kind, Guid? assignmentId = null) => kind == AssignmentKind.Leader
         ? db.ContextLeaders.Where(l => l.ContextId == groupId && (assignmentId == null || l.Id == assignmentId))
@@ -40,19 +39,19 @@ public sealed class AssignmentService(ApplicationDbContext db, TrackerScope scop
 
     public async Task<PagedResponse<AssignmentResponse>> GetAssignmentsAsync(Guid groupId, AssignmentKind kind, PageRequest page, CancellationToken ct)
     {
-        await scope.GroupAsync(groupId, false, ct);
+        await scope.GroupAsync(groupId, ct);
         return await Query(groupId, kind).PageAsync(page, ct);
     }
 
     public async Task<AssignmentResponse> GetAssignmentAsync(Guid groupId, Guid assignmentId, AssignmentKind kind, CancellationToken ct)
     {
-        await scope.GroupAsync(groupId, false, ct);
+        await scope.GroupAsync(groupId, ct);
         return await Query(groupId, kind, assignmentId).SingleOrDefaultAsync(ct) ?? throw Missing();
     }
 
     public async Task<AssignmentResponse> AddAssignmentAsync(Guid groupId, AssignmentRequest request, AssignmentKind kind, CancellationToken ct)
     {
-        var (actor, group) = await scope.GroupAsync(groupId, StaffOnly(kind), ct);
+        var (actor, group) = await scope.GroupAsync(groupId, ct);
         if (group.EndsAt != null)
             throw Conflict();
         if (request.StartsAt < group.StartsAt || !await db.People.AnyAsync(p => p.Id == request.PersonId, ct))
@@ -80,7 +79,7 @@ public sealed class AssignmentService(ApplicationDbContext db, TrackerScope scop
 
     public async Task<AssignmentResponse> EndAssignmentAsync(Guid groupId, Guid assignmentId, EndRequest request, AssignmentKind kind, CancellationToken ct)
     {
-        var (_, group) = await scope.GroupAsync(groupId, StaffOnly(kind), ct);
+        var (_, group) = await scope.GroupAsync(groupId, ct);
         if (group.EndsAt is { } end && request.EndsAt > end)
             throw Invalid();
         group.Version = Guid.NewGuid();

@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 using Sheaf.Authorization;
@@ -7,39 +6,25 @@ using Sheaf.Data;
 namespace Sheaf.Services;
 
 /// <summary>
-/// Resolves the current tracker actor from persisted membership and owns the row-level visibility rules
-/// (which groups and people an actor may see). Every tracker service goes through this type so the rules live in one place.
+/// Owns the row-level visibility rules: which groups, people, and households an actor may see. Which operations a role
+/// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/> and <see cref="Permission.TrackerManage"/>);
+/// this type only answers questions that need the data loaded, so every tracker service goes through it.
 /// </summary>
-public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, IAuthorizationService authorization, TimeProvider clock)
+public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock)
 {
     public DateTimeOffset Now => clock.GetUtcNow();
 
-    /// <summary>Returns the current actor, re-validated against persisted membership, or throws Forbidden.</summary>
-    public async Task<ChurchActor> ActorAsync(CancellationToken ct)
-    {
-        var actor = await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
-        await AuthorizeAsync(actor, SheafPolicies.TrackerActor);
-        return actor;
-    }
+    /// <summary>Returns the current actor from persisted membership, or throws Forbidden if it no longer exists.</summary>
+    public async Task<ChurchActor> ActorAsync(CancellationToken ct) =>
+        await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
 
-    /// <summary>Returns the current actor if they are Staff, or throws Forbidden.</summary>
-    public async Task<ChurchActor> StaffAsync(CancellationToken ct)
-    {
-        var actor = await ActorAsync(ct);
-        await AuthorizeAsync(actor, SheafPolicies.TrackerStaff);
-        return actor;
-    }
+    /// <summary>Whether the actor manages the whole tracker rather than only what their own assignments reach.</summary>
+    public static bool ManagesAll(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.TrackerManage);
 
-    private async Task AuthorizeAsync(ChurchActor actor, string policy)
-    {
-        if (!(await authorization.AuthorizeAsync(actor.Principal, actor, policy)).Succeeded)
-            throw TrackerRules.Denied();
-    }
-
-    /// <summary>Staff see every group; Leaders see only active groups they currently lead.</summary>
+    /// <summary>Managers see every group; everyone else sees only active groups they currently lead.</summary>
     public IQueryable<Context> Groups(ChurchActor actor)
     {
-        if (actor.Role == ChurchMembershipRole.Staff)
+        if (ManagesAll(actor))
             return db.Contexts;
         var now = Now;
         return db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
@@ -47,10 +32,10 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
                 && db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId)));
     }
 
-    /// <summary>Staff see every person; Leaders see current members and leaders of the groups they lead.</summary>
+    /// <summary>Managers see every person; everyone else sees current members and leaders of the groups they lead.</summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
-        if (actor.Role == ChurchMembershipRole.Staff)
+        if (ManagesAll(actor))
             return db.People;
         var groups = Groups(actor).Select(g => g.Id);
         var now = Now;
@@ -60,18 +45,18 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
                 && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)));
     }
 
-    /// <summary>Loads a group visible to the actor (optionally requiring Staff), or throws NotFound.</summary>
-    public async Task<(ChurchActor Actor, Context Group)> GroupAsync(Guid id, bool staffOnly, CancellationToken ct)
+    /// <summary>Loads a group visible to the actor, or throws NotFound.</summary>
+    public async Task<(ChurchActor Actor, Context Group)> GroupAsync(Guid id, CancellationToken ct)
     {
-        var actor = staffOnly ? await StaffAsync(ct) : await ActorAsync(ct);
+        var actor = await ActorAsync(ct);
         var group = await Groups(actor).SingleOrDefaultAsync(g => g.Id == id, ct) ?? throw TrackerRules.Missing();
         return (actor, group);
     }
 
-    /// <summary>Throws NotFound unless the actor is Staff or can see at least one person in the household.</summary>
+    /// <summary>Throws NotFound unless the actor manages all or can see at least one person in the household.</summary>
     public async Task RequireHouseholdAsync(Guid id, ChurchActor actor, CancellationToken ct)
     {
-        if (actor.Role != ChurchMembershipRole.Staff
+        if (!ManagesAll(actor)
             && !await People(actor).AnyAsync(p => p.HouseholdId == id, ct))
             throw TrackerRules.Missing();
     }

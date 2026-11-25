@@ -30,7 +30,6 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
 
     public async Task<PersonResponse> CreatePersonAsync(PersonRequest request, CancellationToken ct)
     {
-        await scope.StaffAsync(ct);
         var person = new Person { FirstName = RequiredName(request.FirstName, 100) };
         SetPerson(person, request);
         db.People.Add(person);
@@ -50,8 +49,9 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
         var person = await scope.People(actor).SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing();
         RequireVersion(person.Version, expectedVersion);
         // Leaders may correct names and contacts; activating or deactivating a person is a Staff decision.
-        if (request.IsActive is { } isActive && isActive != person.IsActive)
-            await scope.StaffAsync(ct);
+        // This depends on the stored value, so it is checked here rather than on the endpoint.
+        if (request.IsActive is { } isActive && isActive != person.IsActive && !TrackerScope.ManagesAll(actor))
+            throw Denied();
         SetPerson(person, request);
         person.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);

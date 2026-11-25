@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using Sheaf.Core.Authentication;
 
@@ -20,16 +21,12 @@ public static class AuthorizationExtensions
 
             options.AddPolicy(SheafPolicies.Authenticated, authenticated);
             options.AddPolicy(SheafPolicies.ChurchMember, churchMember);
-            options.AddPolicy(SheafPolicies.TrackerActor, policy => policy.RequireAuthenticatedUser()
-                .AddRequirements(new TrackerRoleRequirement(StaffOnly: false)));
-            options.AddPolicy(SheafPolicies.TrackerStaff, policy => policy.RequireAuthenticatedUser()
-                .AddRequirements(new TrackerRoleRequirement(StaffOnly: true)));
             options.DefaultPolicy = authenticated;
             options.FallbackPolicy = churchMember;
         });
         services.AddSingleton<IAuthorizationPolicyProvider, SheafAuthorizationPolicyProvider>();
-        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
-        services.AddScoped<IAuthorizationHandler, TrackerRoleAuthorizationHandler>();
+        services.TryAddScoped<IChurchMembershipRoles, ChurchMembershipRoles>();
+        services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         return services;
     }
 

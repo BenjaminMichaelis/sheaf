@@ -8,7 +8,10 @@ namespace Sheaf.Authorization;
 public enum Permission
 {
     ManageMemberships,
-    TrackerAccess
+    /// <summary>Use the tracker, limited to the groups and people the caller's own assignments reach.</summary>
+    TrackerAccess,
+    /// <summary>Manage the whole tracker: every group and person, group lifecycle, group types, and leadership.</summary>
+    TrackerManage
 }
 
 public static class RolePermissions
@@ -17,7 +20,7 @@ public static class RolePermissions
         new Dictionary<ChurchMembershipRole, FrozenSet<Permission>>
         {
             [ChurchMembershipRole.Admin] = new[] { Permission.ManageMemberships }.ToFrozenSet(),
-            [ChurchMembershipRole.Staff] = new[] { Permission.TrackerAccess }.ToFrozenSet(),
+            [ChurchMembershipRole.Staff] = new[] { Permission.TrackerAccess, Permission.TrackerManage }.ToFrozenSet(),
             [ChurchMembershipRole.Leader] = new[] { Permission.TrackerAccess }.ToFrozenSet()
         }.ToFrozenDictionary();
 

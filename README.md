@@ -169,14 +169,18 @@ matches. **Leader access is not operational until signup integration creates an
 explicit link.** Unlinked leaders fail closed for scoped resources. Access additionally
 requires the account's persisted membership in that same church; a link alone or a
 link in another church never grants access. Existing account/church role lifecycle
-and cookie switching remain unchanged. A typed current-church actor boundary resolves
-HTTP identity against persisted membership afresh for each tracker operation; actor
-snapshots are not durable authorization grants. The route-level `TrackerAccess`
-permission is a cheap gate on cookie claims; the service re-checks the persisted role
-because claims can be up to five minutes stale. ASP.NET Core resource policies enforce
-tracker role eligibility and Staff-only operations. SQL-translatable group/person scopes,
-household rules, and history/concurrency protections remain in application operations;
-HTTP problem responses are translated at the endpoint boundary.
+and cookie switching remain unchanged.
+
+Authorization is split the way ASP.NET Core recommends. Which operations a role may
+call is declared on the endpoints: every tracker route requires `TrackerAccess` (Staff
+and Leader), and Staff-only routes — creating people, group types and groups, updating
+or ending groups, and adding or ending leadership — also require `TrackerManage`. Every
+permission check reads the selected membership's persisted role, not the role claim,
+so a demotion or revocation applies on the next request rather than after the cookie's
+five-minute revalidation. Which rows a caller reaches depends on loaded data, so it stays
+in `TrackerScope`: SQL-translatable group/person scopes, household rules, and the
+Staff-only `IsActive` change on a Person. History/concurrency protections remain in
+application operations; HTTP problem responses are translated at the endpoint boundary.
 
 Staff and leaders may manage whole households associated with accessible people,
 including members outside their groups. A Leader may keep or remove a household's

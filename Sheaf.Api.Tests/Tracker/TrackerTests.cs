@@ -37,55 +37,35 @@ public class TrackerTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task GetAsync_PersistedRoleChangedAndMembershipRevoked_RefreshesActorAndDeniesMutation()
+    public async Task CreatePerson_PersistedRoleDemotedThenRevoked_DeniesBeforeCookieRevalidation()
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
         using var client = CreateClient();
         var (_, cookie) = await LoginAsync(client, user);
-        await InScopeAsync(async services =>
+        using var before = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("Before demotion"));
+        await Assert.That(before.StatusCode).IsEqualTo(HttpStatusCode.Created);
+
+        // The cookie still carries the Staff role claim; authorization must follow the stored role instead.
+        await InChurchAsync(membership.ChurchId, async db =>
         {
-            services.GetRequiredService<ITenantContextInitializer>().Initialize(membership.ChurchId, membership.Id);
-            var accessor = services.GetRequiredService<IHttpContextAccessor>();
-            var previous = accessor.HttpContext;
-            var http = CreateHttpContext(services);
-            http.User = ReadTicket(cookie).Principal;
-            accessor.HttpContext = http;
-            try
-            {
-                var currentActor = services.GetRequiredService<ICurrentChurchActor>();
-                var people = services.GetRequiredService<IPeopleService>();
-                var groups = services.GetRequiredService<IGroupService>();
-                var actor = await currentActor.GetAsync(default);
-                await Assert.That(actor?.Role).IsEqualTo(ChurchMembershipRole.Staff);
-                await people.CreatePersonAsync(new PersonRequest("Before revocation"), default);
-                await InChurchAsync(membership.ChurchId, async db =>
-                {
-                    var persisted = await db.ChurchMemberships.SingleAsync(m => m.Id == membership.Id);
-                    persisted.Role = ChurchMembershipRole.Leader;
-                    await db.SaveChangesAsync();
-                });
-                actor = await currentActor.GetAsync(default);
-                await Assert.That(actor?.Role).IsEqualTo(ChurchMembershipRole.Leader);
-                var denied = await Assert.That(async () => await people.CreatePersonAsync(new PersonRequest("Denied"), default))
-                    .Throws<TrackerException>();
-                await Assert.That(denied?.Failure).IsEqualTo(TrackerFailure.Forbidden);
-                await InChurchAsync(membership.ChurchId, async db =>
-                {
-                    db.ChurchMemberships.Remove(await db.ChurchMemberships.SingleAsync(m => m.Id == membership.Id));
-                    await db.SaveChangesAsync();
-                });
-                await Assert.That(await currentActor.GetAsync(default)).IsNull();
-                var revoked = await Assert.That(async () => await groups.GetTypesAsync(PageRequest.From(null, null), default)).Throws<TrackerException>();
-                await Assert.That(revoked?.Failure).IsEqualTo(TrackerFailure.Forbidden);
-                var names = await services.GetRequiredService<ApplicationDbContext>().People.Select(p => p.FirstName).ToArrayAsync();
-                await Assert.That(names).IsEquivalentTo(["Before revocation"]);
-            }
-            finally
-            {
-                accessor.HttpContext = previous;
-            }
+            (await db.ChurchMemberships.SingleAsync(m => m.Id == membership.Id)).Role = ChurchMembershipRole.Leader;
+            await db.SaveChangesAsync();
         });
+        using var demoted = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("Denied"));
+        await Assert.That(demoted.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        using var leaderRead = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/group-types");
+        await Assert.That(leaderRead.StatusCode).IsEqualTo(HttpStatusCode.OK);
+
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.ChurchMemberships.Remove(await db.ChurchMemberships.SingleAsync(m => m.Id == membership.Id));
+            await db.SaveChangesAsync();
+        });
+        using var revoked = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/group-types");
+        await Assert.That(revoked.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        await InChurchAsync(membership.ChurchId, async db =>
+            await Assert.That(await db.People.Select(p => p.FirstName).ToArrayAsync()).IsEquivalentTo(["Before demotion"]));
     }
 
     [Test]
@@ -123,37 +103,49 @@ public class TrackerTests : ChurchApiTestBase
     }
 
     [Test]
-    [Arguments(ChurchMembershipRole.Staff, true)]
-    [Arguments(ChurchMembershipRole.Leader, false)]
-    [Arguments(ChurchMembershipRole.Admin, false)]
-    public async Task CreatePerson_TypedActorWithoutHttp_EnforcesStaffResourcePolicy(ChurchMembershipRole role, bool allowed)
+    [Arguments(ChurchMembershipRole.Staff, HttpStatusCode.Created)]
+    [Arguments(ChurchMembershipRole.Leader, HttpStatusCode.Forbidden)]
+    [Arguments(ChurchMembershipRole.Admin, HttpStatusCode.Forbidden)]
+    public async Task CreatePerson_ByRole_AllowsOnlyTrackerManagers(ChurchMembershipRole role, HttpStatusCode expected)
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, role);
-        await InScopeAsync(async services =>
-        {
-            services.GetRequiredService<ITenantContextInitializer>().Initialize(membership.ChurchId, membership.Id);
-            var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id)], "fixture"));
-            var actor = new ChurchActor(principal, membership.ChurchId, membership.Id, user.Id, role);
-            var db = services.GetRequiredService<ApplicationDbContext>();
-            var tracker = new PeopleService(db, new TrackerScope(db, new FixtureChurchActor(actor), services.GetRequiredService<IAuthorizationService>(), TimeProvider.System));
-            if (allowed)
-            {
-                var person = await tracker.CreatePersonAsync(new PersonRequest("Typed actor"), default);
-                await Assert.That((await db.People.SingleAsync()).Name).IsEqualTo(person.Name);
-            }
-            else
-            {
-                var failure = await Assert.That(async () => await tracker.CreatePersonAsync(new PersonRequest("Denied"), default)).Throws<TrackerException>();
-                await Assert.That(failure?.Failure).IsEqualTo(TrackerFailure.Forbidden);
-                await Assert.That(await db.People.ToArrayAsync()).IsEmpty();
-            }
-        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("Typed actor"));
+
+        await Assert.That(response.StatusCode).IsEqualTo(expected);
+        await InChurchAsync(membership.ChurchId, async db =>
+            await Assert.That(await db.People.CountAsync()).IsEqualTo(expected == HttpStatusCode.Created ? 1 : 0));
     }
 
-    private sealed class FixtureChurchActor(ChurchActor actor) : ICurrentChurchActor
+    public static IEnumerable<(string Method, string Path)> ManageRoutes()
     {
-        public Task<ChurchActor?> GetAsync(CancellationToken ct) => Task.FromResult<ChurchActor?>(actor);
+        var id = Guid.NewGuid();
+        yield return ("POST", "/people");
+        yield return ("POST", "/group-types");
+        yield return ("PUT", $"/group-types/{id}");
+        yield return ("POST", "/groups");
+        yield return ("PUT", $"/groups/{id}");
+        yield return ("POST", $"/groups/{id}/end");
+        yield return ("POST", $"/groups/{id}/leaders");
+        yield return ("POST", $"/groups/{id}/leaders/{id}/end");
+    }
+
+    [Test]
+    [MethodDataSource(nameof(ManageRoutes))]
+    public async Task ManageRoute_LeaderCaller_ForbiddenAtEndpoint(string method, string path)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Leader);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        // The route ids do not exist, so a 403 rather than 404 shows the endpoint policy denied before any lookup.
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, new HttpMethod(method), path, new { }, Guid.NewGuid());
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
     }
 
     [Test]

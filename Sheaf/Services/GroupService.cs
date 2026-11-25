@@ -25,21 +25,18 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<PagedResponse<GroupTypeResponse>> GetTypesAsync(PageRequest page, CancellationToken ct)
     {
-        await scope.ActorAsync(ct);
         return await db.GroupTypes.OrderBy(t => t.Name).ThenBy(t => t.Id)
             .Select(t => new GroupTypeResponse(t.Id, t.Name)).PageAsync(page, ct);
     }
 
     public async Task<GroupTypeResponse> GetTypeAsync(Guid id, CancellationToken ct)
     {
-        await scope.ActorAsync(ct);
         return await db.GroupTypes.Where(t => t.Id == id).Select(t => new GroupTypeResponse(t.Id, t.Name))
             .SingleOrDefaultAsync(ct) ?? throw Missing();
     }
 
     public async Task<GroupTypeResponse> CreateTypeAsync(GroupTypeRequest request, CancellationToken ct)
     {
-        await scope.StaffAsync(ct);
         var type = new GroupType { Name = RequiredName(request.Name) };
         db.GroupTypes.Add(type);
         await scope.SaveAsync(ct);
@@ -48,7 +45,6 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<GroupTypeResponse> UpdateTypeAsync(Guid id, GroupTypeRequest request, CancellationToken ct)
     {
-        await scope.StaffAsync(ct);
         var type = await db.GroupTypes.SingleOrDefaultAsync(t => t.Id == id, ct) ?? throw Missing();
         type.Name = RequiredName(request.Name);
         await scope.SaveAsync(ct);
@@ -62,7 +58,7 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
             .Select(g => new GroupResponse(g.Id, g.Name, g.StartsAt, g.EndsAt, g.GroupTypeId, g.Version)).PageAsync(page, ct);
     }
 
-    public async Task<GroupResponse> GetGroupAsync(Guid id, CancellationToken ct) => Group((await scope.GroupAsync(id, false, ct)).Group);
+    public async Task<GroupResponse> GetGroupAsync(Guid id, CancellationToken ct) => Group((await scope.GroupAsync(id, ct)).Group);
 
     private async Task SetGroupAsync(Context group, GroupRequest request, CancellationToken ct)
     {
@@ -78,7 +74,6 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<GroupResponse> CreateGroupAsync(GroupRequest request, CancellationToken ct)
     {
-        await scope.StaffAsync(ct);
         var group = new Context { Name = RequiredName(request.Name) };
         await SetGroupAsync(group, request, ct);
         db.Contexts.Add(group);
@@ -88,7 +83,7 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<GroupResponse> UpdateGroupAsync(Guid id, Guid expectedVersion, GroupRequest request, CancellationToken ct)
     {
-        var (_, group) = await scope.GroupAsync(id, true, ct);
+        var (_, group) = await scope.GroupAsync(id, ct);
         RequireVersion(group.Version, expectedVersion);
         if (group.EndsAt != null)
             throw Conflict();
@@ -103,7 +98,7 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<GroupResponse> EndGroupAsync(Guid id, Guid expectedVersion, EndRequest request, CancellationToken ct)
     {
-        var (_, group) = await scope.GroupAsync(id, true, ct);
+        var (_, group) = await scope.GroupAsync(id, ct);
         RequireVersion(group.Version, expectedVersion);
         if (group.EndsAt != null)
             throw Conflict();
