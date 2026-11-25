@@ -145,12 +145,22 @@ A Leader can add only people they can already see; adding a person to a group wo
 otherwise unlock that person's profile, so bringing someone new into a group is a Staff
 action. Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
 group retains it and all assignment intervals; group end bounds their effective
-activity without rewriting history. Every assignment write bumps the group's version,
-so a write that races another change to the same group (including ending it) is
-rejected with 409 and should be retried. Other write races and constraint failures
-also return 409. Requests do not yet carry a client version or `If-Match`, so this does
-not protect against a client overwriting an edit it never saw. There are no tracker
-delete or automatic-merge endpoints.
+activity without rewriting history. There are no tracker delete or automatic-merge
+endpoints.
+
+People, households and groups carry a `version`, returned in the body and as a strong
+`ETag`. Updating a person, household or group, and ending a group, require that version
+in `If-Match`: a missing header returns 428 and a version that is no longer current
+returns 412, so a client cannot overwrite an edit it never saw; reload and retry.
+A person's version also changes when they move household, a household's when it gains
+or loses a member, and a group's when assignments are added or ended. Assignment
+writes need no `If-Match`, but because they bump the group's version, two writes that
+race on the same group (including ending it) are serialized and the loser gets 409.
+Other write races and constraint failures also return 409.
+
+Lookup and every list (`group-types`, `groups`, members and leaders history) are paged
+in a stable order: pass `limit` (1–200, default 50) and `offset`, and read the next page
+from `nextOffset`, which is null on the last page.
 
 Leadership belongs to a Person, not a separate account access assignment. The optional
 `Person.UserId` is only a future signup-link placeholder: non-null links are unique

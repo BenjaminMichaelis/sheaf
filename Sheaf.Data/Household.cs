@@ -14,4 +14,7 @@ public sealed class Household : ITenanted
 
     [MaxLength(200)]
     public string? Label { get; set; }
+    /// <summary>Changes whenever the label or membership changes; clients send it back as If-Match.</summary>
+    [ConcurrencyCheck]
+    public Guid Version { get; set; } = Guid.NewGuid();
 }

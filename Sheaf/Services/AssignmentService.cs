@@ -15,7 +15,7 @@ public enum AssignmentKind
 
 public interface IAssignmentService
 {
-    Task<AssignmentResponse[]> GetAssignmentsAsync(Guid groupId, AssignmentKind kind, CancellationToken ct);
+    Task<PagedResponse<AssignmentResponse>> GetAssignmentsAsync(Guid groupId, AssignmentKind kind, PageRequest page, CancellationToken ct);
     Task<AssignmentResponse> GetAssignmentAsync(Guid groupId, Guid assignmentId, AssignmentKind kind, CancellationToken ct);
     Task<AssignmentResponse> AddAssignmentAsync(Guid groupId, AssignmentRequest request, AssignmentKind kind, CancellationToken ct);
     Task<AssignmentResponse> EndAssignmentAsync(Guid groupId, Guid assignmentId, EndRequest request, AssignmentKind kind, CancellationToken ct);
@@ -38,10 +38,10 @@ public sealed class AssignmentService(ApplicationDbContext db, TrackerScope scop
             .OrderBy(m => m.JoinedAt).ThenBy(m => m.Id)
             .Select(m => new AssignmentResponse(m.Id, m.PersonId, m.JoinedAt, m.LeftAt));
 
-    public async Task<AssignmentResponse[]> GetAssignmentsAsync(Guid groupId, AssignmentKind kind, CancellationToken ct)
+    public async Task<PagedResponse<AssignmentResponse>> GetAssignmentsAsync(Guid groupId, AssignmentKind kind, PageRequest page, CancellationToken ct)
     {
         await scope.GroupAsync(groupId, false, ct);
-        return await Query(groupId, kind).ToArrayAsync(ct);
+        return await Query(groupId, kind).PageAsync(page, ct);
     }
 
     public async Task<AssignmentResponse> GetAssignmentAsync(Guid groupId, Guid assignmentId, AssignmentKind kind, CancellationToken ct)

@@ -450,6 +450,8 @@ export interface components {
             endsAt: null | string;
             /** Format: uuid */
             groupTypeId: null | string;
+            /** Format: uuid */
+            version: string;
         };
         GroupTypeRequest: {
             name: string;
@@ -473,6 +475,8 @@ export interface components {
             id: string;
             label: null | string;
             members: components["schemas"]["HouseholdMemberResponse"][];
+            /** Format: uuid */
+            version: string;
         };
         HttpValidationProblemDetails: {
             type?: null | string;
@@ -489,6 +493,26 @@ export interface components {
             email: string;
             password: string;
             rememberMe?: null | boolean;
+        };
+        PagedResponseOfAssignmentResponse: {
+            items: components["schemas"]["AssignmentResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
+        };
+        PagedResponseOfGroupResponse: {
+            items: components["schemas"]["GroupResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
+        };
+        PagedResponseOfGroupTypeResponse: {
+            items: components["schemas"]["GroupTypeResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
+        };
+        PagedResponseOfPersonLookupResponse: {
+            items: components["schemas"]["PersonLookupResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
         };
         PersonLookupResponse: {
             /** Format: uuid */
@@ -517,6 +541,8 @@ export interface components {
             /** Format: uuid */
             householdId: null | string;
             isActive: boolean;
+            /** Format: uuid */
+            version: string;
         };
         ProblemDetails: {
             type?: null | string;
@@ -740,6 +766,8 @@ export interface operations {
         parameters: {
             query?: {
                 name?: string;
+                offset?: number | string;
+                limit?: number | string;
             };
             header?: never;
             path?: never;
@@ -753,7 +781,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PersonLookupResponse"][];
+                    "application/json": components["schemas"]["PagedResponseOfPersonLookupResponse"];
                 };
             };
             /** @description Bad Request */
@@ -855,7 +883,9 @@ export interface operations {
     UpdatePerson: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
@@ -905,6 +935,24 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -976,7 +1024,10 @@ export interface operations {
     };
     GetGroupTypes: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -989,7 +1040,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GroupTypeResponse"][];
+                    "application/json": components["schemas"]["PagedResponseOfGroupTypeResponse"];
                 };
             };
             /** @description Bad Request */
@@ -1212,7 +1263,10 @@ export interface operations {
     };
     GetGroups: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1225,7 +1279,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GroupResponse"][];
+                    "application/json": components["schemas"]["PagedResponseOfGroupResponse"];
                 };
             };
             /** @description Bad Request */
@@ -1387,7 +1441,9 @@ export interface operations {
     UpdateGroup: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
@@ -1444,12 +1500,32 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     EndGroup: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
@@ -1499,6 +1575,24 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1569,7 +1663,9 @@ export interface operations {
     UpdateHousehold: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path: {
                 id: string;
             };
@@ -1619,6 +1715,24 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1690,7 +1804,10 @@ export interface operations {
     };
     GetGroupMembers: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
             header?: never;
             path: {
                 groupId: string;
@@ -1705,7 +1822,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssignmentResponse"][];
+                    "application/json": components["schemas"]["PagedResponseOfAssignmentResponse"];
                 };
             };
             /** @description Bad Request */
@@ -1932,7 +2049,10 @@ export interface operations {
     };
     GetGroupLeaders: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
             header?: never;
             path: {
                 groupId: string;
@@ -1947,7 +2067,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssignmentResponse"][];
+                    "application/json": components["schemas"]["PagedResponseOfAssignmentResponse"];
                 };
             };
             /** @description Bad Request */

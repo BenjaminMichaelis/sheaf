@@ -76,19 +76,60 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
             throw TrackerRules.Missing();
     }
 
-    /// <summary>Saves changes, translating write races and constraint failures into Conflict.</summary>
-    public async Task SaveAsync(CancellationToken ct)
+    /// <summary>
+    /// Saves changes. A stale concurrency token becomes <paramref name="staleFailure"/> (PreconditionFailed for If-Match
+    /// writes, Conflict otherwise); any other write failure, such as a constraint race, becomes Conflict.
+    /// </summary>
+    public async Task SaveAsync(CancellationToken ct, TrackerFailure staleFailure = TrackerFailure.Conflict)
     {
         try
         {
             await db.SaveChangesAsync(ct);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new TrackerException(staleFailure);
+        }
         catch (DbUpdateException)
         {
-            // DbUpdateConcurrencyException is a DbUpdateException: stale versions and constraint races both mean
-            // the stored state changed underneath this request.
             throw TrackerRules.Conflict();
         }
+    }
+}
+
+/// <summary>An offset page request, validated at the API boundary.</summary>
+public readonly record struct PageRequest(int Offset, int Limit)
+{
+    public const int DefaultLimit = 50;
+    public const int MaxLimit = 200;
+
+    public static PageRequest From(int? offset, int? limit)
+    {
+        var page = new PageRequest(offset ?? 0, limit ?? DefaultLimit);
+        if (page.Offset < 0 || page.Limit < 1 || page.Limit > MaxLimit)
+            throw TrackerRules.Invalid();
+        return page;
+    }
+}
+
+/// <summary>Parses and formats the entity tags carried by <see cref="IVersioned"/> resources.</summary>
+public static class EntityTag
+{
+    /// <summary>Formats a version as a strong entity tag.</summary>
+    public static string Format(Guid version) => $"\"{version:D}\"";
+
+    /// <summary>
+    /// Reads the version a client expects from If-Match. A missing header is PreconditionRequired; a weak, wildcard
+    /// or malformed tag can never match a strong version, so it is PreconditionFailed.
+    /// </summary>
+    public static Guid ParseIfMatch(string? header)
+    {
+        if (string.IsNullOrWhiteSpace(header))
+            throw new TrackerException(TrackerFailure.PreconditionRequired);
+        var value = header.Trim();
+        if (value.Length < 2 || value[0] != '"' || value[^1] != '"' || !Guid.TryParseExact(value[1..^1], "D", out var version))
+            throw new TrackerException(TrackerFailure.PreconditionFailed);
+        return version;
     }
 }
 
@@ -114,5 +155,21 @@ internal static class TrackerRules
         if (value.Trim().Length > length)
             throw Invalid();
         return value.Trim();
+    }
+
+    /// <summary>Throws PreconditionFailed unless the loaded version is the one the client read.</summary>
+    public static void RequireVersion(Guid current, Guid expected)
+    {
+        if (current != expected)
+            throw new TrackerException(TrackerFailure.PreconditionFailed);
+    }
+
+    /// <summary>Reads one page from an already-ordered query, fetching one extra row to know whether more remain.</summary>
+    public static async Task<PagedResponse<T>> PageAsync<T>(this IQueryable<T> ordered, PageRequest page, CancellationToken ct)
+    {
+        var rows = await ordered.Skip(page.Offset).Take(page.Limit + 1).ToArrayAsync(ct);
+        return rows.Length > page.Limit
+            ? new(rows[..page.Limit], page.Offset + page.Limit)
+            : new(rows, null);
     }
 }

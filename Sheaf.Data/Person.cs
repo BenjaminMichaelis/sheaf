@@ -26,4 +26,7 @@ public sealed class Person : ITenanted
     [MaxLength(450)]
     public string? UserId { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>Changes on every write to this row, including household moves; clients send it back as If-Match.</summary>
+    [ConcurrencyCheck]
+    public Guid Version { get; set; } = Guid.NewGuid();
 }

@@ -92,20 +92,28 @@ describe('apiClient', () => {
 
   it('POST_HouseholdOmittedLabel_SerializesMemberIdsOnly', async () => {
     const memberIds = ['019a0000-0000-7000-8000-000000000001']
+    const version = '019a0000-0000-7000-8000-0000000000ff'
+
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify({ id: 'household-1', label: null, members: [] }), { status: 201 }),
+      new Response(JSON.stringify({ id: 'household-1', label: null, members: [], version }), { status: 201 }),
     )
 
     await apiClient.POST('/api/church/households', { body: { memberIds } })
+
     await apiClient.PUT('/api/church/households/{id}', {
-      params: { path: { id: 'household-1' } },
+      params: { path: { id: 'household-1' }, header: { 'If-Match': `"${version}"` } },
       body: { memberIds },
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    for (const [request] of fetchMock.mock.calls) {
-      expect(await new Request(request).json()).toEqual({ memberIds })
+
+    const requests = fetchMock.mock.calls.map(([request]) => new Request(request))
+
+    for (const request of requests) {
+      expect(await request.json()).toEqual({ memberIds })
     }
+
+    expect(requests.map((request) => request.headers.get('If-Match'))).toEqual([null, `"${version}"`])
   })
 
   it('POST_LogoutNoContent_ReturnsUndefined', async () => {

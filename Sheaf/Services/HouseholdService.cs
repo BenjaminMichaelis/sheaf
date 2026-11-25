@@ -11,14 +11,15 @@ public interface IHouseholdService
 {
     Task<HouseholdResponse> GetHouseholdAsync(Guid id, CancellationToken ct);
     Task<HouseholdResponse> CreateHouseholdAsync(HouseholdRequest request, CancellationToken ct);
-    Task<HouseholdResponse> UpdateHouseholdAsync(Guid id, HouseholdRequest request, CancellationToken ct);
+    Task<HouseholdResponse> UpdateHouseholdAsync(Guid id, Guid expectedVersion, HouseholdRequest request, CancellationToken ct);
 }
 
 public sealed class HouseholdService(ApplicationDbContext db, TrackerScope scope) : IHouseholdService
 {
     private async Task<HouseholdResponse> ResponseAsync(Household household, CancellationToken ct) => new(household.Id, household.Label,
         await db.People.Where(p => p.HouseholdId == household.Id).OrderBy(p => p.Id)
-            .Select(p => new HouseholdMemberResponse(p.Id, p.FirstName)).ToArrayAsync(ct));
+            .Select(p => new HouseholdMemberResponse(p.Id, p.FirstName)).ToArrayAsync(ct),
+        household.Version);
 
     public async Task<HouseholdResponse> GetHouseholdAsync(Guid id, CancellationToken ct)
     {
@@ -38,13 +39,15 @@ public sealed class HouseholdService(ApplicationDbContext db, TrackerScope scope
         return await ResponseAsync(household, ct);
     }
 
-    public async Task<HouseholdResponse> UpdateHouseholdAsync(Guid id, HouseholdRequest request, CancellationToken ct)
+    public async Task<HouseholdResponse> UpdateHouseholdAsync(Guid id, Guid expectedVersion, HouseholdRequest request, CancellationToken ct)
     {
         var actor = await scope.ActorAsync(ct);
         await scope.RequireHouseholdAsync(id, actor, ct);
         var household = await db.Households.SingleOrDefaultAsync(h => h.Id == id, ct) ?? throw Missing();
+        RequireVersion(household.Version, expectedVersion);
         await SetMembersAsync(household, request, actor, creating: false, ct);
-        await scope.SaveAsync(ct);
+        household.Version = Guid.NewGuid();
+        await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
         return await ResponseAsync(household, ct);
     }
 
@@ -64,14 +67,27 @@ public sealed class HouseholdService(ApplicationDbContext db, TrackerScope scope
                 || members.Any(p => !accessibleIds.Contains(p.Id) && (creating || p.HouseholdId != household.Id)))
                 throw Denied();
         }
-        foreach (var previousId in members.Where(p => p.HouseholdId != null && p.HouseholdId != household.Id).Select(p => p.HouseholdId).Distinct())
-            if (previousId is { } id)
-                await scope.RequireHouseholdAsync(id, actor, ct);
+        var otherHouseholdIds = members.Where(p => p.HouseholdId != null && p.HouseholdId != household.Id)
+            .Select(p => p.HouseholdId.GetValueOrDefault()).Distinct().ToArray();
+        foreach (var id in otherHouseholdIds)
+            await scope.RequireHouseholdAsync(id, actor, ct);
+        // Households losing a member change too, so their versions move and a concurrent edit of them is rejected.
+        foreach (var other in await db.Households.Where(h => otherHouseholdIds.Contains(h.Id)).ToArrayAsync(ct))
+            other.Version = Guid.NewGuid();
+
         var previous = creating ? [] : await db.People.Where(p => p.HouseholdId == household.Id).ToArrayAsync(ct);
+        var originalHousehold = previous.Concat(members).DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.HouseholdId);
         foreach (var person in previous)
             person.HouseholdId = null;
         foreach (var person in members)
             person.HouseholdId = household.Id;
+        // A person's profile includes HouseholdId, so moving them changes their version too.
+        foreach (var (personId, before) in originalHousehold)
+        {
+            var person = members.FirstOrDefault(p => p.Id == personId) ?? previous.First(p => p.Id == personId);
+            if (person.HouseholdId != before)
+                person.Version = Guid.NewGuid();
+        }
         var suppliedLabel = Optional(request.Label, 200);
         var firstMember = request.MemberIds.Length == 0 ? null : members.Single(p => p.Id == request.MemberIds[0]);
         household.Label = suppliedLabel ?? household.Label

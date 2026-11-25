@@ -10,8 +10,8 @@ public interface IPeopleService
 {
     Task<PersonResponse> CreatePersonAsync(PersonRequest request, CancellationToken ct);
     Task<PersonResponse> GetPersonAsync(Guid id, CancellationToken ct);
-    Task<PersonResponse> UpdatePersonAsync(Guid id, PersonRequest request, CancellationToken ct);
-    Task<PersonLookupResponse[]> LookupAsync(string? name, CancellationToken ct);
+    Task<PersonResponse> UpdatePersonAsync(Guid id, Guid expectedVersion, PersonRequest request, CancellationToken ct);
+    Task<PagedResponse<PersonLookupResponse>> LookupAsync(string? name, PageRequest page, CancellationToken ct);
 }
 
 public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) : IPeopleService
@@ -25,7 +25,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
         person.IsActive = request.IsActive;
     }
 
-    private static PersonResponse Profile(Person p) => new(p.Id, p.Name, p.FirstName, p.LastName, p.Email, p.Phone, p.HouseholdId, p.IsActive);
+    private static PersonResponse Profile(Person p) => new(p.Id, p.Name, p.FirstName, p.LastName, p.Email, p.Phone, p.HouseholdId, p.IsActive, p.Version);
 
     public async Task<PersonResponse> CreatePersonAsync(PersonRequest request, CancellationToken ct)
     {
@@ -43,16 +43,18 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
         return Profile(await scope.People(actor).AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing());
     }
 
-    public async Task<PersonResponse> UpdatePersonAsync(Guid id, PersonRequest request, CancellationToken ct)
+    public async Task<PersonResponse> UpdatePersonAsync(Guid id, Guid expectedVersion, PersonRequest request, CancellationToken ct)
     {
         var actor = await scope.ActorAsync(ct);
         var person = await scope.People(actor).SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing();
+        RequireVersion(person.Version, expectedVersion);
         SetPerson(person, request);
-        await scope.SaveAsync(ct);
+        person.Version = Guid.NewGuid();
+        await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
         return Profile(person);
     }
 
-    public async Task<PersonLookupResponse[]> LookupAsync(string? name, CancellationToken ct)
+    public async Task<PagedResponse<PersonLookupResponse>> LookupAsync(string? name, PageRequest page, CancellationToken ct)
     {
         await scope.ActorAsync(ct);
         var term = Optional(name, 200);
@@ -64,7 +66,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
                 p.HouseholdId,
                 Name = p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName)
             }).Where(p => p.IsActive && (term == null || p.Name.Contains(term)))
-            .OrderBy(p => p.Name).ThenBy(p => p.Id).Take(50)
+            .OrderBy(p => p.Name).ThenBy(p => p.Id)
             .Select(p => new PersonLookupResponse(p.Id, p.Name,
                 db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
                     && (db.ContextMembers.Any(m => m.PersonId == p.Id && m.ContextId == g.Id && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
@@ -73,6 +75,6 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
                 db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault(),
                 db.People.Where(member => p.HouseholdId != null && member.HouseholdId == p.HouseholdId)
                     .OrderBy(member => member.Id).Select(member => member.FirstName).ToArray()))
-            .ToArrayAsync(ct);
+            .PageAsync(page, ct);
     }
 }

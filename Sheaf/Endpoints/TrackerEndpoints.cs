@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
 
 using Sheaf.Authorization;
 using Sheaf.Services;
@@ -10,7 +11,7 @@ public static class TrackerEndpoints
     public static void MapTracker(this IEndpointRouteBuilder app)
     {
         var api = app.MapChurchGroup().RequirePermission(Permission.TrackerAccess).WithTags("Tracker")
-            .AddEndpointFilter<TrackerErrorFilter>();
+            .AddEndpointFilter<TrackerEndpointFilter>();
         MapPeople(api);
         MapGroups(api);
         MapHouseholds(api);
@@ -20,8 +21,8 @@ public static class TrackerEndpoints
 
     private static void MapPeople(RouteGroupBuilder api)
     {
-        api.MapGet("/people/lookup", async Task<Ok<PersonLookupResponse[]>> (string? name, IPeopleService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.LookupAsync(name, ct)))
+        api.MapGet("/people/lookup", async Task<Ok<PagedResponse<PersonLookupResponse>>> (string? name, int? offset, int? limit, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.LookupAsync(name, PageRequest.From(offset, limit), ct)))
             .Tracker("LookupPeople", "Look up active people with limited identity only");
         api.MapGet("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetPersonAsync(id, ct)))
@@ -32,15 +33,15 @@ public static class TrackerEndpoints
                 return TypedResults.Created($"/api/church/people/{result.Id}", result);
             })
             .Tracker("CreatePerson", "Staff create a Person without required contacts or household");
-        api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, PersonRequest request, IPeopleService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.UpdatePersonAsync(id, request, ct)))
-            .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links");
+        api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonRequest request, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdatePersonAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links").RequiresIfMatch();
     }
 
     private static void MapGroups(RouteGroupBuilder api)
     {
-        api.MapGet("/group-types", async Task<Ok<GroupTypeResponse[]>> (IGroupService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.GetTypesAsync(ct)))
+        api.MapGet("/group-types", async Task<Ok<PagedResponse<GroupTypeResponse>>> (int? offset, int? limit, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetTypesAsync(PageRequest.From(offset, limit), ct)))
             .Tracker("GetGroupTypes", "List church-local group types");
         api.MapGet("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, IGroupService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetTypeAsync(id, ct)))
@@ -54,8 +55,8 @@ public static class TrackerEndpoints
         api.MapPut("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, GroupTypeRequest request, IGroupService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdateTypeAsync(id, request, ct)))
             .Tracker("UpdateGroupType", "Staff rename a group type");
-        api.MapGet("/groups", async Task<Ok<GroupResponse[]>> (IGroupService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.GetGroupsAsync(ct)))
+        api.MapGet("/groups", async Task<Ok<PagedResponse<GroupResponse>>> (int? offset, int? limit, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetGroupsAsync(PageRequest.From(offset, limit), ct)))
             .Tracker("GetGroups", "List accessible groups, including retained ended groups for Staff");
         api.MapGet("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, IGroupService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetGroupAsync(id, ct)))
@@ -66,12 +67,12 @@ public static class TrackerEndpoints
                 return TypedResults.Created($"/api/church/groups/{result.Id}", result);
             })
             .Tracker("CreateGroup", "Staff create a named group with a start instant and optional type");
-        api.MapPut("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, GroupRequest request, IGroupService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.UpdateGroupAsync(id, request, ct)))
-            .Tracker("UpdateGroup", "Staff update a group before ending it");
-        api.MapPost("/groups/{id:guid}/end", async Task<Ok<GroupResponse>> (Guid id, EndRequest request, IGroupService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.EndGroupAsync(id, request, ct)))
-            .Tracker("EndGroup", "Staff end a group without deleting assignment history");
+        api.MapPut("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, GroupRequest request, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateGroupAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("UpdateGroup", "Staff update a group before ending it").RequiresIfMatch();
+        api.MapPost("/groups/{id:guid}/end", async Task<Ok<GroupResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, EndRequest request, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.EndGroupAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("EndGroup", "Staff end a group without deleting assignment history").RequiresIfMatch();
     }
 
     private static void MapHouseholds(RouteGroupBuilder api)
@@ -85,9 +86,9 @@ public static class TrackerEndpoints
                 return TypedResults.Created($"/api/church/households/{result.Id}", result);
             })
             .Tracker("CreateHousehold", "Create an associated household structure");
-        api.MapPut("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, HouseholdRequest request, IHouseholdService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.UpdateHouseholdAsync(id, request, ct)))
-            .Tracker("UpdateHousehold", "Manage whole associated households without granting Person profile rights");
+        api.MapPut("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, HouseholdRequest request, IHouseholdService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateHouseholdAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("UpdateHousehold", "Manage whole associated households without granting Person profile rights").RequiresIfMatch();
     }
 
     private static void MapAssignments(RouteGroupBuilder api, string segment, AssignmentKind kind)
@@ -100,8 +101,8 @@ public static class TrackerEndpoints
         var intervalNoun = kind == AssignmentKind.Leader ? "Person leadership" : "group membership";
         var addNoun = kind == AssignmentKind.Leader ? "Person leadership" : "Person membership";
 
-        api.MapGet($"/groups/{{groupId:guid}}/{segment}", async Task<Ok<AssignmentResponse[]>> (Guid groupId, IAssignmentService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.GetAssignmentsAsync(groupId, kind, ct)))
+        api.MapGet($"/groups/{{groupId:guid}}/{segment}", async Task<Ok<PagedResponse<AssignmentResponse>>> (Guid groupId, int? offset, int? limit, IAssignmentService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetAssignmentsAsync(groupId, kind, PageRequest.From(offset, limit), ct)))
             .Tracker($"Get{plural}", $"Get retained group {historyNoun} history");
         api.MapGet($"/groups/{{groupId:guid}}/{segment}/{{assignmentId:guid}}", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, IAssignmentService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetAssignmentAsync(groupId, assignmentId, kind, ct)))
@@ -117,6 +118,8 @@ public static class TrackerEndpoints
             .Tracker($"End{singular}", $"End a dated {noun} assignment without deleting history");
     }
 
+    internal const string IfMatchHeader = "If-Match";
+
     /// <summary>Names, summarizes, and declares the ProblemDetails responses shared by every tracker endpoint.</summary>
     private static RouteHandlerBuilder Tracker(this RouteHandlerBuilder builder, string name, string summary) =>
         builder.WithName(name).WithSummary(summary)
@@ -124,15 +127,24 @@ public static class TrackerEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+    /// <summary>Declares the responses of a write that must send the resource's Version in If-Match.</summary>
+    private static RouteHandlerBuilder RequiresIfMatch(this RouteHandlerBuilder builder) =>
+        builder.ProducesProblem(StatusCodes.Status412PreconditionFailed)
+            .ProducesProblem(StatusCodes.Status428PreconditionRequired);
 }
 
-internal sealed class TrackerErrorFilter : IEndpointFilter
+/// <summary>Translates tracker failures to ProblemDetails and stamps an ETag on versioned responses.</summary>
+internal sealed class TrackerEndpointFilter : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         try
         {
-            return await next(context);
+            var result = await next(context);
+            if (result is IValueHttpResult { Value: IVersioned versioned })
+                context.HttpContext.Response.Headers.ETag = EntityTag.Format(versioned.Version);
+            return result;
         }
         catch (TrackerException exception)
         {
@@ -142,6 +154,8 @@ internal sealed class TrackerErrorFilter : IEndpointFilter
                 TrackerFailure.Forbidden => (StatusCodes.Status403Forbidden, "Access denied."),
                 TrackerFailure.InvalidInput => (StatusCodes.Status400BadRequest, "Invalid tracker input."),
                 TrackerFailure.Conflict => (StatusCodes.Status409Conflict, "The resource changed or the group has ended."),
+                TrackerFailure.PreconditionFailed => (StatusCodes.Status412PreconditionFailed, "The resource changed since it was read. Reload it and retry."),
+                TrackerFailure.PreconditionRequired => (StatusCodes.Status428PreconditionRequired, "Send the resource's version in an If-Match header."),
                 _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
             };
             return TypedResults.Problem(statusCode: status, title: title);
