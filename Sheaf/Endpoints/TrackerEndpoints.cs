@@ -11,133 +11,119 @@ public static class TrackerEndpoints
     {
         var api = app.MapChurchGroup().RequirePermission(Permission.TrackerAccess).WithTags("Tracker")
             .AddEndpointFilter<TrackerErrorFilter>();
-        api.MapGet("/people/lookup", async Task<Ok<PersonLookupResponse[]>> (string? name, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.LookupAsync(name, ct));
-        }).WithName("LookupPeople").WithSummary("Look up active people with limited identity only")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetPersonAsync(id, ct));
-        }).WithName("GetPerson").WithSummary("Get a scoped Person profile")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/people", async Task<Created<PersonResponse>> (PersonRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.CreatePersonAsync(request, ct);
-            return TypedResults.Created($"/api/church/people/{result.Id}", result);
-        }).WithName("CreatePerson").WithSummary("Staff create a Person without required contacts or household")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, PersonRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.UpdatePersonAsync(id, request, ct));
-        }).WithName("UpdatePerson").WithSummary("Update a scoped Person profile without changing account links")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/group-types", async Task<Ok<GroupTypeResponse[]>> (ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetTypesAsync(ct));
-        }).WithName("GetGroupTypes").WithSummary("List church-local group types")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetTypeAsync(id, ct));
-        }).WithName("GetGroupType").WithSummary("Get a church-local group type")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/group-types", async Task<Created<GroupTypeResponse>> (GroupTypeRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.CreateTypeAsync(request, ct);
-            return TypedResults.Created($"/api/church/group-types/{result.Id}", result);
-        }).WithName("CreateGroupType").WithSummary("Staff create a group type")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPut("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, GroupTypeRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.UpdateTypeAsync(id, request, ct));
-        }).WithName("UpdateGroupType").WithSummary("Staff rename a group type")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups", async Task<Ok<GroupResponse[]>> (ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetGroupsAsync(ct));
-        }).WithName("GetGroups").WithSummary("List accessible groups, including retained ended groups for Staff")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetGroupAsync(id, ct));
-        }).WithName("GetGroup").WithSummary("Get an accessible group")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups", async Task<Created<GroupResponse>> (GroupRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.CreateGroupAsync(request, ct);
-            return TypedResults.Created($"/api/church/groups/{result.Id}", result);
-        }).WithName("CreateGroup").WithSummary("Staff create a named group with a start instant and optional type")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPut("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, GroupRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.UpdateGroupAsync(id, request, ct));
-        }).WithName("UpdateGroup").WithSummary("Staff update a group before ending it")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups/{id:guid}/end", async Task<Ok<GroupResponse>> (Guid id, EndRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.EndGroupAsync(id, request, ct));
-        }).WithName("EndGroup").WithSummary("Staff end a group without deleting assignment history")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetHouseholdAsync(id, ct));
-        }).WithName("GetHousehold").WithSummary("Get an associated household without full Person profiles")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/households", async Task<Created<HouseholdResponse>> (HouseholdRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.CreateHouseholdAsync(request, ct);
-            return TypedResults.Created($"/api/church/households/{result.Id}", result);
-        }).WithName("CreateHousehold").WithSummary("Create an associated household structure")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPut("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, HouseholdRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.UpdateHouseholdAsync(id, request, ct));
-        }).WithName("UpdateHousehold").WithSummary("Manage whole associated households without granting Person profile rights")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups/{groupId:guid}/members", async Task<Ok<AssignmentResponse[]>> (Guid groupId, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetAssignmentsAsync(groupId, false, ct));
-        }).WithName("GetGroupMembers").WithSummary("Get retained group members history")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups/{groupId:guid}/members/{assignmentId:guid}", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetAssignmentAsync(groupId, assignmentId, false, ct));
-        }).WithName("GetGroupMember").WithSummary("Get a retained group membership interval")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups/{groupId:guid}/members", async Task<Created<AssignmentResponse>> (Guid groupId, AssignmentRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.AddAssignmentAsync(groupId, request, false, ct);
-            return TypedResults.Created($"/api/church/groups/{groupId}/members/{result.Id}", result);
-        }).WithName("AddGroupMember").WithSummary("Add a dated Person membership assignment")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups/{groupId:guid}/members/{assignmentId:guid}/end", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, EndRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.EndAssignmentAsync(groupId, assignmentId, request, false, ct));
-        }).WithName("EndGroupMember").WithSummary("End a dated membership assignment without deleting history")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups/{groupId:guid}/leaders", async Task<Ok<AssignmentResponse[]>> (Guid groupId, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetAssignmentsAsync(groupId, true, ct));
-        }).WithName("GetGroupLeaders").WithSummary("Get retained group leaders history")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapGet("/groups/{groupId:guid}/leaders/{assignmentId:guid}", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.GetAssignmentAsync(groupId, assignmentId, true, ct));
-        }).WithName("GetGroupLeader").WithSummary("Get a retained Person leadership interval")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups/{groupId:guid}/leaders", async Task<Created<AssignmentResponse>> (Guid groupId, AssignmentRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            var result = await s.AddAssignmentAsync(groupId, request, true, ct);
-            return TypedResults.Created($"/api/church/groups/{groupId}/leaders/{result.Id}", result);
-        }).WithName("AddGroupLeader").WithSummary("Add a dated Person leadership assignment")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
-        api.MapPost("/groups/{groupId:guid}/leaders/{assignmentId:guid}/end", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, EndRequest request, ITrackerService s, CancellationToken ct) =>
-        {
-            return TypedResults.Ok(await s.EndAssignmentAsync(groupId, assignmentId, request, true, ct));
-        }).WithName("EndGroupLeader").WithSummary("End a dated leadership assignment without deleting history")
-            .ProducesProblem(400).ProducesProblem(403).ProducesProblem(404).ProducesProblem(409);
+        MapPeople(api);
+        MapGroups(api);
+        MapHouseholds(api);
+        MapAssignments(api, "members", AssignmentKind.Member);
+        MapAssignments(api, "leaders", AssignmentKind.Leader);
     }
+
+    private static void MapPeople(RouteGroupBuilder api)
+    {
+        api.MapGet("/people/lookup", async Task<Ok<PersonLookupResponse[]>> (string? name, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.LookupAsync(name, ct)))
+            .Tracker("LookupPeople", "Look up active people with limited identity only");
+        api.MapGet("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetPersonAsync(id, ct)))
+            .Tracker("GetPerson", "Get a scoped Person profile");
+        api.MapPost("/people", async Task<Created<PersonResponse>> (PersonRequest request, IPeopleService s, CancellationToken ct) =>
+            {
+                var result = await s.CreatePersonAsync(request, ct);
+                return TypedResults.Created($"/api/church/people/{result.Id}", result);
+            })
+            .Tracker("CreatePerson", "Staff create a Person without required contacts or household");
+        api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, PersonRequest request, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdatePersonAsync(id, request, ct)))
+            .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links");
+    }
+
+    private static void MapGroups(RouteGroupBuilder api)
+    {
+        api.MapGet("/group-types", async Task<Ok<GroupTypeResponse[]>> (IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetTypesAsync(ct)))
+            .Tracker("GetGroupTypes", "List church-local group types");
+        api.MapGet("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetTypeAsync(id, ct)))
+            .Tracker("GetGroupType", "Get a church-local group type");
+        api.MapPost("/group-types", async Task<Created<GroupTypeResponse>> (GroupTypeRequest request, IGroupService s, CancellationToken ct) =>
+            {
+                var result = await s.CreateTypeAsync(request, ct);
+                return TypedResults.Created($"/api/church/group-types/{result.Id}", result);
+            })
+            .Tracker("CreateGroupType", "Staff create a group type");
+        api.MapPut("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, GroupTypeRequest request, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateTypeAsync(id, request, ct)))
+            .Tracker("UpdateGroupType", "Staff rename a group type");
+        api.MapGet("/groups", async Task<Ok<GroupResponse[]>> (IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetGroupsAsync(ct)))
+            .Tracker("GetGroups", "List accessible groups, including retained ended groups for Staff");
+        api.MapGet("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetGroupAsync(id, ct)))
+            .Tracker("GetGroup", "Get an accessible group");
+        api.MapPost("/groups", async Task<Created<GroupResponse>> (GroupRequest request, IGroupService s, CancellationToken ct) =>
+            {
+                var result = await s.CreateGroupAsync(request, ct);
+                return TypedResults.Created($"/api/church/groups/{result.Id}", result);
+            })
+            .Tracker("CreateGroup", "Staff create a named group with a start instant and optional type");
+        api.MapPut("/groups/{id:guid}", async Task<Ok<GroupResponse>> (Guid id, GroupRequest request, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateGroupAsync(id, request, ct)))
+            .Tracker("UpdateGroup", "Staff update a group before ending it");
+        api.MapPost("/groups/{id:guid}/end", async Task<Ok<GroupResponse>> (Guid id, EndRequest request, IGroupService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.EndGroupAsync(id, request, ct)))
+            .Tracker("EndGroup", "Staff end a group without deleting assignment history");
+    }
+
+    private static void MapHouseholds(RouteGroupBuilder api)
+    {
+        api.MapGet("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, IHouseholdService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetHouseholdAsync(id, ct)))
+            .Tracker("GetHousehold", "Get an associated household without full Person profiles");
+        api.MapPost("/households", async Task<Created<HouseholdResponse>> (HouseholdRequest request, IHouseholdService s, CancellationToken ct) =>
+            {
+                var result = await s.CreateHouseholdAsync(request, ct);
+                return TypedResults.Created($"/api/church/households/{result.Id}", result);
+            })
+            .Tracker("CreateHousehold", "Create an associated household structure");
+        api.MapPut("/households/{id:guid}", async Task<Ok<HouseholdResponse>> (Guid id, HouseholdRequest request, IHouseholdService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateHouseholdAsync(id, request, ct)))
+            .Tracker("UpdateHousehold", "Manage whole associated households without granting Person profile rights");
+    }
+
+    private static void MapAssignments(RouteGroupBuilder api, string segment, AssignmentKind kind)
+    {
+        // Operation names and summaries are kept identical to the published OpenAPI contract.
+        var (plural, singular, noun) = kind == AssignmentKind.Leader
+            ? ("GroupLeaders", "GroupLeader", "leadership")
+            : ("GroupMembers", "GroupMember", "membership");
+        var historyNoun = kind == AssignmentKind.Leader ? "leaders" : "members";
+        var intervalNoun = kind == AssignmentKind.Leader ? "Person leadership" : "group membership";
+        var addNoun = kind == AssignmentKind.Leader ? "Person leadership" : "Person membership";
+
+        api.MapGet($"/groups/{{groupId:guid}}/{segment}", async Task<Ok<AssignmentResponse[]>> (Guid groupId, IAssignmentService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetAssignmentsAsync(groupId, kind, ct)))
+            .Tracker($"Get{plural}", $"Get retained group {historyNoun} history");
+        api.MapGet($"/groups/{{groupId:guid}}/{segment}/{{assignmentId:guid}}", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, IAssignmentService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetAssignmentAsync(groupId, assignmentId, kind, ct)))
+            .Tracker($"Get{singular}", $"Get a retained {intervalNoun} interval");
+        api.MapPost($"/groups/{{groupId:guid}}/{segment}", async Task<Created<AssignmentResponse>> (Guid groupId, AssignmentRequest request, IAssignmentService s, CancellationToken ct) =>
+            {
+                var result = await s.AddAssignmentAsync(groupId, request, kind, ct);
+                return TypedResults.Created($"/api/church/groups/{groupId}/{segment}/{result.Id}", result);
+            })
+            .Tracker($"Add{singular}", $"Add a dated {addNoun} assignment");
+        api.MapPost($"/groups/{{groupId:guid}}/{segment}/{{assignmentId:guid}}/end", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, EndRequest request, IAssignmentService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.EndAssignmentAsync(groupId, assignmentId, request, kind, ct)))
+            .Tracker($"End{singular}", $"End a dated {noun} assignment without deleting history");
+    }
+
+    /// <summary>Names, summarizes, and declares the ProblemDetails responses shared by every tracker endpoint.</summary>
+    private static RouteHandlerBuilder Tracker(this RouteHandlerBuilder builder, string name, string summary) =>
+        builder.WithName(name).WithSummary(summary)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 }
 
 internal sealed class TrackerErrorFilter : IEndpointFilter
@@ -152,11 +138,11 @@ internal sealed class TrackerErrorFilter : IEndpointFilter
         {
             var (status, title) = exception.Failure switch
             {
-                TrackerFailure.NotFound => (404, "Resource not found."),
-                TrackerFailure.Forbidden => (403, "Access denied."),
-                TrackerFailure.InvalidInput => (400, "Invalid tracker input."),
-                TrackerFailure.Conflict => (409, "The resource changed or the group has ended."),
-                _ => (500, "An unexpected error occurred.")
+                TrackerFailure.NotFound => (StatusCodes.Status404NotFound, "Resource not found."),
+                TrackerFailure.Forbidden => (StatusCodes.Status403Forbidden, "Access denied."),
+                TrackerFailure.InvalidInput => (StatusCodes.Status400BadRequest, "Invalid tracker input."),
+                TrackerFailure.Conflict => (StatusCodes.Status409Conflict, "The resource changed or the group has ended."),
+                _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
             };
             return TypedResults.Problem(statusCode: status, title: title);
         }

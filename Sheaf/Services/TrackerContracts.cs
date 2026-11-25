@@ -26,27 +26,3 @@ public sealed record HouseholdRequest(Guid[] MemberIds, string? Label = null);
 public sealed record HouseholdResponse(Guid Id, string? Label, HouseholdMemberResponse[] Members);
 /// <summary>A household member's limited identity.</summary>
 public sealed record HouseholdMemberResponse(Guid Id, string FirstName);
-
-public interface ITrackerService
-{
-    Task<PersonResponse> CreatePersonAsync(PersonRequest request, CancellationToken ct);
-    Task<PersonResponse> GetPersonAsync(Guid id, CancellationToken ct);
-    Task<PersonResponse> UpdatePersonAsync(Guid id, PersonRequest request, CancellationToken ct);
-    Task<PersonLookupResponse[]> LookupAsync(string? name, CancellationToken ct);
-    Task<GroupTypeResponse[]> GetTypesAsync(CancellationToken ct);
-    Task<GroupTypeResponse> GetTypeAsync(Guid id, CancellationToken ct);
-    Task<GroupTypeResponse> CreateTypeAsync(GroupTypeRequest request, CancellationToken ct);
-    Task<GroupTypeResponse> UpdateTypeAsync(Guid id, GroupTypeRequest request, CancellationToken ct);
-    Task<GroupResponse[]> GetGroupsAsync(CancellationToken ct);
-    Task<GroupResponse> GetGroupAsync(Guid id, CancellationToken ct);
-    Task<GroupResponse> CreateGroupAsync(GroupRequest request, CancellationToken ct);
-    Task<GroupResponse> UpdateGroupAsync(Guid id, GroupRequest request, CancellationToken ct);
-    Task<GroupResponse> EndGroupAsync(Guid id, EndRequest request, CancellationToken ct);
-    Task<AssignmentResponse[]> GetAssignmentsAsync(Guid groupId, bool leaders, CancellationToken ct);
-    Task<AssignmentResponse> GetAssignmentAsync(Guid groupId, Guid assignmentId, bool leaders, CancellationToken ct);
-    Task<AssignmentResponse> AddAssignmentAsync(Guid groupId, AssignmentRequest request, bool leaders, CancellationToken ct);
-    Task<AssignmentResponse> EndAssignmentAsync(Guid groupId, Guid assignmentId, EndRequest request, bool leaders, CancellationToken ct);
-    Task<HouseholdResponse> GetHouseholdAsync(Guid id, CancellationToken ct);
-    Task<HouseholdResponse> CreateHouseholdAsync(HouseholdRequest request, CancellationToken ct);
-    Task<HouseholdResponse> UpdateHouseholdAsync(Guid id, HouseholdRequest request, CancellationToken ct);
-}

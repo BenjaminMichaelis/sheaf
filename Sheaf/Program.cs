@@ -113,7 +113,11 @@ builder.Services.AddCors(options =>
 builder.Services.AddSheafAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentChurchActor, HttpCurrentChurchActor>();
-builder.Services.AddScoped<Sheaf.Services.ITrackerService, Sheaf.Services.TrackerService>();
+builder.Services.AddScoped<Sheaf.Services.TrackerScope>();
+builder.Services.AddScoped<Sheaf.Services.IPeopleService, Sheaf.Services.PeopleService>();
+builder.Services.AddScoped<Sheaf.Services.IGroupService, Sheaf.Services.GroupService>();
+builder.Services.AddScoped<Sheaf.Services.IAssignmentService, Sheaf.Services.AssignmentService>();
+builder.Services.AddScoped<Sheaf.Services.IHouseholdService, Sheaf.Services.HouseholdService>();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {

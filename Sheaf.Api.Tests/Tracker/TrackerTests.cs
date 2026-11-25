@@ -18,7 +18,7 @@ using Context = Sheaf.Data.Context;
 
 namespace Sheaf.Api.Tests;
 
-public partial class ChurchSessionTests
+public class TrackerTests : ChurchApiTestBase
 {
     private static async Task<HttpResponseMessage> TrackerRequestAsync(HttpClient client, string cookie, Guid churchId, HttpMethod method, string path, object? body = null)
     {
@@ -54,10 +54,11 @@ public partial class ChurchSessionTests
             try
             {
                 var currentActor = services.GetRequiredService<ICurrentChurchActor>();
-                var tracker = services.GetRequiredService<ITrackerService>();
+                var people = services.GetRequiredService<IPeopleService>();
+                var groups = services.GetRequiredService<IGroupService>();
                 var actor = await currentActor.GetAsync(default);
                 await Assert.That(actor?.Role).IsEqualTo(ChurchMembershipRole.Staff);
-                await tracker.CreatePersonAsync(new PersonRequest("Before revocation"), default);
+                await people.CreatePersonAsync(new PersonRequest("Before revocation"), default);
                 await InChurchAsync(membership.ChurchId, async db =>
                 {
                     var persisted = await db.ChurchMemberships.SingleAsync(m => m.Id == membership.Id);
@@ -66,7 +67,7 @@ public partial class ChurchSessionTests
                 });
                 actor = await currentActor.GetAsync(default);
                 await Assert.That(actor?.Role).IsEqualTo(ChurchMembershipRole.Leader);
-                var denied = await Assert.That(async () => await tracker.CreatePersonAsync(new PersonRequest("Denied"), default))
+                var denied = await Assert.That(async () => await people.CreatePersonAsync(new PersonRequest("Denied"), default))
                     .Throws<TrackerException>();
                 await Assert.That(denied?.Failure).IsEqualTo(TrackerFailure.Forbidden);
                 await InChurchAsync(membership.ChurchId, async db =>
@@ -75,7 +76,7 @@ public partial class ChurchSessionTests
                     await db.SaveChangesAsync();
                 });
                 await Assert.That(await currentActor.GetAsync(default)).IsNull();
-                var revoked = await Assert.That(async () => await tracker.GetTypesAsync(default)).Throws<TrackerException>();
+                var revoked = await Assert.That(async () => await groups.GetTypesAsync(default)).Throws<TrackerException>();
                 await Assert.That(revoked?.Failure).IsEqualTo(TrackerFailure.Forbidden);
                 await Assert.That(await services.GetRequiredService<ApplicationDbContext>().People.CountAsync()).IsEqualTo(1);
             }
@@ -134,7 +135,7 @@ public partial class ChurchSessionTests
             var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id)], "fixture"));
             var actor = new ChurchActor(principal, membership.ChurchId, membership.Id, user.Id, role);
             var db = services.GetRequiredService<ApplicationDbContext>();
-            var tracker = new TrackerService(db, new FixtureChurchActor(actor), services.GetRequiredService<IAuthorizationService>(), TimeProvider.System);
+            var tracker = new PeopleService(db, new TrackerScope(db, new FixtureChurchActor(actor), services.GetRequiredService<IAuthorizationService>(), TimeProvider.System));
             if (allowed)
             {
                 var person = await tracker.CreatePersonAsync(new PersonRequest("Typed actor"), default);
@@ -348,7 +349,7 @@ public partial class ChurchSessionTests
         var member = new Person { FirstName = "Member", LastName = "Full Name", HouseholdId = household.Id };
         var outside = new Person { FirstName = "Outside", LastName = "Full Name", Email = "private@example.com", HouseholdId = household.Id };
         var inactive = new Person { FirstName = "Inactive", IsActive = false };
-        var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-5) };
+        var group = new Context { Name = "Group", StartsAt = Time.GetUtcNow().AddDays(-5) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(household, leader, member, outside, inactive, group);
@@ -384,7 +385,7 @@ public partial class ChurchSessionTests
         await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdFirstNames).IsEquivalentTo(["Member", "Outside"]);
         await Assert.That(found.Single(p => p.Id == leader.Id).HouseholdFirstNames).IsEmpty();
         await Assert.That(await lookup.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
-        using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(_time.GetUtcNow()));
+        using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(Time.GetUtcNow()));
         await Assert.That(ending.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         await InChurchAsync(membership.ChurchId, async db =>
         {
@@ -399,7 +400,7 @@ public partial class ChurchSessionTests
         var user = await CreateUserAsync();
         var first = await AddMembershipAsync(user);
         var second = await AddMembershipAsync(await CreateUserAsync(), ChurchMembershipRole.Staff);
-        var group = new Context { Name = "Unlinked", StartsAt = _time.GetUtcNow().AddDays(-1) };
+        var group = new Context { Name = "Unlinked", StartsAt = Time.GetUtcNow().AddDays(-1) };
         var person = new Person { FirstName = "Leader" };
         await InChurchAsync(first.ChurchId, async db =>
         {
@@ -435,7 +436,7 @@ public partial class ChurchSessionTests
         var (_, cookie) = await LoginAsync(client, user);
         using var personResult = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/people", new PersonRequest("Person"));
         var person = await TrackerReadAsync<PersonResponse>(personResult, HttpStatusCode.Created);
-        var start = _time.GetUtcNow().AddDays(-3);
+        var start = Time.GetUtcNow().AddDays(-3);
         using var firstResult = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/groups", new GroupRequest("First", start));
         using var secondResult = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/groups", new GroupRequest("Second", start));
         var first = await TrackerReadAsync<GroupResponse>(firstResult, HttpStatusCode.Created);
@@ -449,8 +450,8 @@ public partial class ChurchSessionTests
                 await TrackerReadAsync<AssignmentResponse>(added, HttpStatusCode.Created);
             }
         }
-        using var ended = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{first.Id}/end", new EndRequest(_time.GetUtcNow()));
-        await Assert.That((await TrackerReadAsync<GroupResponse>(ended)).EndsAt).IsEqualTo(_time.GetUtcNow());
+        using var ended = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{first.Id}/end", new EndRequest(Time.GetUtcNow()));
+        await Assert.That((await TrackerReadAsync<GroupResponse>(ended)).EndsAt).IsEqualTo(Time.GetUtcNow());
         foreach (var segment in new[] { "members", "leaders" })
         {
             using var history = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/groups/{first.Id}/{segment}");
@@ -478,7 +479,7 @@ public partial class ChurchSessionTests
         });
         using var client = CreateClient();
         var (_, cookie) = await LoginAsync(client, user);
-        var start = _time.GetUtcNow().AddDays(-2);
+        var start = Time.GetUtcNow().AddDays(-2);
         foreach (var input in new[] { new GroupRequest(" ", start), new GroupRequest("Group", default) })
         {
             using var invalid = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, "/groups", input);
@@ -504,7 +505,7 @@ public partial class ChurchSessionTests
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
         var person = new Person { FirstName = "Person" };
-        var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-4) };
+        var group = new Context { Name = "Group", StartsAt = Time.GetUtcNow().AddDays(-4) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(person, group);
@@ -537,8 +538,8 @@ public partial class ChurchSessionTests
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user);
         var person = new Person { FirstName = "Linked", UserId = user.Id };
-        var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-3) };
-        var leadership = new ContextLeader { ContextId = group.Id, PersonId = person.Id, StartsAt = _time.GetUtcNow().AddDays(1) };
+        var group = new Context { Name = "Group", StartsAt = Time.GetUtcNow().AddDays(-3) };
+        var leadership = new ContextLeader { ContextId = group.Id, PersonId = person.Id, StartsAt = Time.GetUtcNow().AddDays(1) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(person, group, leadership);
@@ -558,7 +559,7 @@ public partial class ChurchSessionTests
         await TrackerReadAsync<GroupResponse>(active);
         await InChurchAsync(membership.ChurchId, async db =>
         {
-            (await db.ContextLeaders.SingleAsync()).EndsAt = _time.GetUtcNow();
+            (await db.ContextLeaders.SingleAsync()).EndsAt = Time.GetUtcNow();
             await db.SaveChangesAsync();
         });
         using var ended = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/groups/{group.Id}");
@@ -578,7 +579,7 @@ public partial class ChurchSessionTests
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
-        var group = new Context { Name = "Group", StartsAt = _time.GetUtcNow().AddDays(-3) };
+        var group = new Context { Name = "Group", StartsAt = Time.GetUtcNow().AddDays(-3) };
         var person = new Person { FirstName = "Person" };
         await InChurchAsync(membership.ChurchId, async db =>
         {
@@ -593,7 +594,7 @@ public partial class ChurchSessionTests
             await InChurchAsync(membership.ChurchId, async endingDb =>
             {
                 var ending = await endingDb.Contexts.SingleAsync();
-                ending.EndsAt = _time.GetUtcNow();
+                ending.EndsAt = Time.GetUtcNow();
                 ending.Version = Guid.NewGuid();
                 await endingDb.SaveChangesAsync();
             });
@@ -602,7 +603,7 @@ public partial class ChurchSessionTests
         await InChurchAsync(membership.ChurchId, async db =>
         {
             await Assert.That(await db.ContextMembers.CountAsync()).IsEqualTo(0);
-            await Assert.That((await db.Contexts.SingleAsync()).EndsAt).IsEqualTo(_time.GetUtcNow());
+            await Assert.That((await db.Contexts.SingleAsync()).EndsAt).IsEqualTo(Time.GetUtcNow());
         });
     }
 
@@ -636,7 +637,7 @@ public partial class ChurchSessionTests
         var membership = await AddMembershipAsync(user);
         var leader = new Person { FirstName = "Leader", UserId = user.Id };
         var outside = new Person { FirstName = "Outside", Email = "private@example.com" };
-        var group = new Context { Name = "Led", StartsAt = _time.GetUtcNow().AddDays(-5) };
+        var group = new Context { Name = "Led", StartsAt = Time.GetUtcNow().AddDays(-5) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(leader, outside, group);
@@ -660,7 +661,7 @@ public partial class ChurchSessionTests
         var leader = new Person { FirstName = "Leader", UserId = user.Id };
         var member = new Person { FirstName = "Member" };
         var outside = new Person { FirstName = "Outside" };
-        var group = new Context { Name = "Led", StartsAt = _time.GetUtcNow().AddDays(-5) };
+        var group = new Context { Name = "Led", StartsAt = Time.GetUtcNow().AddDays(-5) };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(leader, member, outside, group);
