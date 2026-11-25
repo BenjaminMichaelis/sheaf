@@ -81,10 +81,16 @@ rather than discard unexpected legacy records; it is not a deployed-data convers
 
 Staff create People, manage group types, create/update/end groups, and assign leaders.
 Leaders manage membership and edit profiles only within their currently led groups.
-Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
+A Leader can add only people they can already see; adding a person to a group would
+otherwise unlock that person's profile, so bringing someone new into a group is a Staff
+action. Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
 group retains it and all assignment intervals; group end bounds their effective
-activity without rewriting history. Optimistic concurrency rejects stale group/history
-writes with 409. There are no tracker delete or automatic-merge endpoints.
+activity without rewriting history. Every assignment write bumps the group's version,
+so a write that races another change to the same group (including ending it) is
+rejected with 409 and should be retried. Other write races and constraint failures
+also return 409. Requests do not yet carry a client version or `If-Match`, so this does
+not protect against a client overwriting an edit it never saw. There are no tracker
+delete or automatic-merge endpoints.
 
 Leadership belongs to a Person, not a separate account access assignment. The optional
 `Person.UserId` is only a future signup-link placeholder: non-null links are unique
@@ -95,13 +101,17 @@ requires the account's persisted membership in that same church; a link alone or
 link in another church never grants access. Existing account/church role lifecycle
 and cookie switching remain unchanged. A typed current-church actor boundary resolves
 HTTP identity against persisted membership afresh for each tracker operation; actor
-snapshots are not durable authorization grants. ASP.NET Core resource policies enforce
+snapshots are not durable authorization grants. The route-level `TrackerAccess`
+permission is a cheap gate on cookie claims; the service re-checks the persisted role
+because claims can be up to five minutes stale. ASP.NET Core resource policies enforce
 tracker role eligibility and Staff-only operations. SQL-translatable group/person scopes,
 household rules, and history/concurrency protections remain in application operations;
 HTTP problem responses are translated at the endpoint boundary.
 
 Staff and leaders may manage whole households associated with accessible people,
-including members outside their groups. Household responses expose identifiers and
+including members outside their groups. A Leader may keep or remove a household's
+existing members, but may add only people they can already see; a new household must
+include at least one such person. Household responses expose identifiers and
 first names, not full profiles or contacts; household authority does not grant
 outside-group profile rights. An omitted/blank household label preserves the existing
 label, or defaults to `The {LastName} Family` using the first submitted `MemberIds`
