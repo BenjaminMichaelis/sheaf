@@ -1,8 +1,12 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 
+using Azure.Core;
+using Azure.Identity;
+
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.OpenApi;
@@ -19,6 +23,7 @@ using Sheaf.Middleware;
 var builder = WebApplication.CreateBuilder(args);
 var isOpenApiGeneration = Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
 
+builder.AddRequestSecurity(isOpenApiGeneration);
 builder.AddServiceDefaults();
 
 if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database") is null)
@@ -30,6 +35,28 @@ if (isOpenApiGeneration && builder.Configuration.GetConnectionString("Database")
 }
 
 builder.AddDatabase();
+IDataProtectionBuilder dataProtectionBuilder = builder.Services.AddDataProtection()
+    .SetApplicationName("Sheaf")
+    .PersistKeysToDbContext<ApplicationDbContext>();
+
+if (!isOpenApiGeneration
+    && !builder.Environment.IsDevelopment()
+    && !builder.Environment.IsEnvironment("Testing"))
+{
+    string? keyIdentifier = builder.Configuration["DataProtection:KeyVaultKeyIdentifier"];
+    if (!Uri.TryCreate(keyIdentifier, UriKind.Absolute, out Uri? keyVaultKeyIdentifier)
+        || keyVaultKeyIdentifier is null
+        || keyVaultKeyIdentifier.Scheme != Uri.UriSchemeHttps)
+    {
+        throw new InvalidOperationException(
+            "DataProtection:KeyVaultKeyIdentifier must be configured as an absolute HTTPS URI outside Development and Testing.");
+    }
+
+    builder.Services.AddSingleton<TokenCredential>(_ => new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned));
+    dataProtectionBuilder.ProtectKeysWithAzureKeyVault(
+        keyVaultKeyIdentifier, services => services.GetRequiredService<TokenCredential>());
+}
+
 builder.Services.AddScoped<ChurchClaimsPrincipalFactory>();
 builder.Services.AddScoped<IUserClaimsPrincipalFactory<ApplicationUser>>(services =>
     services.GetRequiredService<ChurchClaimsPrincipalFactory>());
@@ -62,7 +89,7 @@ builder.Services.AddOpenApi(options =>
         {
             Type = SecuritySchemeType.ApiKey,
             In = ParameterLocation.Cookie,
-            Name = ".AspNetCore.Identity.Application",
+            Name = "__Host-sheaf",
             Description = "ASP.NET Core Identity application cookie."
         };
 
@@ -81,32 +108,6 @@ builder.Services.AddOpenApi(options =>
         }
 
         return Task.CompletedTask;
-    });
-});
-
-// Add CORS for cross-origin clients
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowedOrigins", policy =>
-    {
-        if (builder.Environment.IsDevelopment())
-        {
-            // In development, allow any localhost origin
-            policy.SetIsOriginAllowed(origin => new Uri(origin).Host == "localhost")
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-        else
-        {
-            // In production, restrict to specific origins from configuration
-            var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-                ?? ["https://yourdomain.com"];
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
     });
 });
 
@@ -129,8 +130,13 @@ authBuilder.AddIdentityCookies(options =>
 {
     options.ApplicationCookie?.Configure(cookieOptions =>
     {
-        cookieOptions.Cookie.Name = ".AspNetCore.Identity.Application";
+        cookieOptions.Cookie.Name = "__Host-sheaf";
         cookieOptions.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        cookieOptions.Cookie.HttpOnly = true;
+        cookieOptions.Cookie.Path = "/";
+        cookieOptions.Cookie.Domain = null;
+        cookieOptions.ExpireTimeSpan = TimeSpan.FromDays(14);
+        cookieOptions.SlidingExpiration = true;
 
         if (builder.Environment.IsDevelopment())
         {
@@ -153,10 +159,12 @@ builder.Services.AddScoped<IEmailSender<ApplicationUser>>(sp =>
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.MapDefaultEndpoints();
 
 // Configure the HTTP request pipeline.
 app.UseExceptionHandler();
+app.UseRouting();
 
 // Enable CORS
 app.UseCors("AllowedOrigins");
@@ -176,6 +184,8 @@ else
 // Add exception handling middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+app.UseMiddleware<CsrfOriginCheck>();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261122011357_PersonNames";
+    public override string LastMigrationId => "20261125205411_ZzSnapshotRegen";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -27,6 +27,25 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
             .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
         SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+
+        modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+            {
+                var id = b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("int");
+
+                SqlServerPropertyBuilderExtensions.UseIdentityColumn(id);
+
+                b.Property<string>("FriendlyName")
+                    .HasColumnType("nvarchar(max)");
+
+                b.Property<string>("Xml")
+                    .HasColumnType("nvarchar(max)");
+
+                b.HasKey("Id");
+
+                b.ToTable("DataProtectionKeys");
+            });
 
         modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
             {
@@ -312,6 +331,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasColumnType("uniqueidentifier");
 
                 b.Property<int>("Role")
+                    .IsConcurrencyToken()
                     .HasColumnType("int");
 
                 b.Property<string>("UserId")

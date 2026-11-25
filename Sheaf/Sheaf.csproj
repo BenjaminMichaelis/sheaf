@@ -12,6 +12,8 @@
     <ProjectReference Include="..\Sheaf.Data\Sheaf.Data.csproj" />
     <ProjectReference Include="..\Sheaf.ServiceDefaults\Sheaf.ServiceDefaults.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" />
+    <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" PrivateAssets="all" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>

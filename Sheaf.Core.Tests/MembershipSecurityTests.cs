@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -71,6 +72,105 @@ public sealed class MembershipSecurityTests : IDisposable
         string[] after = await StampsAsync();
         await Assert.That(after[0]).IsNotEqualTo(before[0]);
         await Assert.That(after[1]).IsEqualTo(before[1]);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SaveChanges_DetachedMembershipRoleChanged_RotatesUsersStamp(bool useAsync)
+    {
+        Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        string[] before = await StampsAsync();
+
+        await using ApplicationDbContext db = CreateContext();
+        ChurchMembership membership = await db.ChurchMemberships.AsNoTracking()
+            .SingleAsync(m => m.Id == membershipId);
+        membership.Role = ChurchMembershipRole.Admin;
+        db.ChurchMemberships.Update(membership);
+        await SaveAsync(db, useAsync);
+
+        string[] after = await StampsAsync();
+        await Assert.That(after[0]).IsNotEqualTo(before[0]);
+        await Assert.That(after[1]).IsEqualTo(before[1]);
+        await using ApplicationDbContext verify = CreateContext();
+        await Assert.That((await verify.ChurchMemberships.AsNoTracking().SingleAsync()).Role)
+            .IsEqualTo(ChurchMembershipRole.Admin);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task SaveChanges_DetachedMembershipRoleUnchanged_DoesNotRotateUsersStamp(bool useAsync)
+    {
+        Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        string[] before = await StampsAsync();
+
+        await using ApplicationDbContext db = CreateContext();
+        ChurchMembership membership = await db.ChurchMemberships.AsNoTracking()
+            .SingleAsync(m => m.Id == membershipId);
+        db.ChurchMemberships.Update(membership);
+        await SaveAsync(db, useAsync);
+
+        await Assert.That(await StampsAsync()).IsEquivalentTo(before);
+    }
+
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    public async Task SaveChanges_StaleDetachedMembershipRole_ThrowsConcurrencyExceptionWithoutOverwritingRole(
+        bool useAsync, bool changeDetachedRole)
+    {
+        Guid membershipId = await SeedMembershipAsync(UserId, ChurchMembershipRole.Staff);
+        ChurchMembership staleMembership;
+        await using (ApplicationDbContext staleContext = CreateContext())
+        {
+            staleMembership = await staleContext.ChurchMemberships.AsNoTracking()
+                .SingleAsync(membership => membership.Id == membershipId);
+        }
+
+        string[] stampBeforeConcurrentChange = await StampsAsync();
+        string[] stampAfterConcurrentChange = [];
+        void ChangeRoleSynchronously()
+        {
+            using ApplicationDbContext concurrentContext = CreateContext();
+            concurrentContext.ChurchMemberships.Single(membership => membership.Id == membershipId).Role =
+                ChurchMembershipRole.Admin;
+            concurrentContext.SaveChanges();
+            stampAfterConcurrentChange = Stamps();
+        }
+
+        async Task ChangeRoleAsynchronously()
+        {
+            await using ApplicationDbContext concurrentContext = CreateContext();
+            (await concurrentContext.ChurchMemberships.SingleAsync(membership => membership.Id == membershipId)).Role =
+                ChurchMembershipRole.Admin;
+            await concurrentContext.SaveChangesAsync();
+            stampAfterConcurrentChange = await StampsAsync();
+        }
+
+        await using (ApplicationDbContext staleContext = CreateContext(
+            new ChangeMembershipRoleBeforeSaveInterceptor(
+                ChangeRoleSynchronously,
+                ChangeRoleAsynchronously)))
+        {
+            if (changeDetachedRole)
+            {
+                staleMembership.Role = ChurchMembershipRole.Admin;
+            }
+
+            staleContext.ChurchMemberships.Update(staleMembership);
+
+            await Assert.That(async () => await SaveAsync(staleContext, useAsync))
+                .Throws<DbUpdateConcurrencyException>();
+        }
+
+        await using ApplicationDbContext verify = CreateContext();
+        await Assert.That((await verify.ChurchMemberships.AsNoTracking().SingleAsync()).Role)
+            .IsEqualTo(ChurchMembershipRole.Admin);
+        await Assert.That(stampAfterConcurrentChange[0]).IsNotEqualTo(stampBeforeConcurrentChange[0]);
+        await Assert.That(await StampsAsync()).IsEquivalentTo(stampAfterConcurrentChange);
     }
 
     [Test]
@@ -258,11 +358,17 @@ public sealed class MembershipSecurityTests : IDisposable
             .WithMessageContaining("ChurchMembership.Role");
     }
 
-    private ApplicationDbContext CreateContext()
+    private ApplicationDbContext CreateContext(params IInterceptor[] additionalInterceptors)
     {
         DbContextOptionsBuilder<ApplicationDbContext> builder = new();
         builder.UseSqlite(_connection).UseLoggerFactory(_loggerFactory);
-        ((DbContextOptionsBuilder)builder).UseMultiTenancy().UseMembershipSecurity();
+        DbContextOptionsBuilder optionsBuilder = builder;
+        optionsBuilder.UseMultiTenancy().UseMembershipSecurity();
+        if (additionalInterceptors.Length > 0)
+        {
+            optionsBuilder.AddInterceptors(additionalInterceptors);
+        }
+
         return new ApplicationDbContext(builder.Options, new FixedChurch(_church.Id));
     }
 
@@ -280,6 +386,13 @@ public sealed class MembershipSecurityTests : IDisposable
         await using ApplicationDbContext db = CreateContext();
         return await db.Users.AsNoTracking().OrderByDescending(u => u.Id == UserId)
             .Select(u => u.SecurityStamp ?? string.Empty).ToArrayAsync();
+    }
+
+    private string[] Stamps()
+    {
+        using ApplicationDbContext db = CreateContext();
+        return db.Users.AsNoTracking().OrderByDescending(u => u.Id == UserId)
+            .Select(u => u.SecurityStamp ?? string.Empty).ToArray();
     }
 
     private static async Task SaveAsync(ApplicationDbContext db, bool useAsync)
@@ -302,6 +415,28 @@ public sealed class MembershipSecurityTests : IDisposable
         public Guid? ChurchId { get; } = churchId;
 
         public Guid? LeaderId => null;
+    }
+
+    private sealed class ChangeMembershipRoleBeforeSaveInterceptor(
+        Action changeRole,
+        Func<Task> changeRoleAsync) : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(
+            DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            changeRole();
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            await changeRoleAsync();
+            return result;
+        }
     }
 
     private sealed record CapturedLog(EventId Id, IReadOnlyDictionary<string, object?> State);

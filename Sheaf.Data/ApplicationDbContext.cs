@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -5,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Sheaf.Data;
 
-public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.ITenantContext, IDataProtectionKeyContext
 {
     private readonly ICurrentChurch _currentChurch;
 
@@ -38,6 +39,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<ContextLeader> ContextLeaders => Set<ContextLeader>();
 
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
 
@@ -58,6 +61,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
         builder.Entity<ChurchMembership>(entity =>
         {
+            entity.Property(membership => membership.Role).IsConcurrencyToken();
             entity.HasOne<Church>()
                 .WithMany()
                 .HasForeignKey(membership => membership.ChurchId)

@@ -27,7 +27,7 @@ namespace Sheaf.Api.Tests;
 public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFactory, Program>
 {
     protected const string Password = "Church-session-Password1!";
-    protected const string CookieName = ".AspNetCore.Identity.Application";
+    protected const string CookieName = "__Host-sheaf";
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter<ChurchMembershipRole>() }
@@ -40,13 +40,20 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
 
     protected ControlledTimeProvider Time { get; } = new();
 
-    protected override Task SetupAsync()
+    protected override async Task SetupAsync()
     {
         _connectionString = new SqlConnectionStringBuilder(Sql.ConnectionString)
         {
             InitialCatalog = $"Sheaf{GetType().Name}_{Guid.NewGuid():N}"
         }.ConnectionString;
-        return Task.CompletedTask;
+
+        // Create the catalog before the host starts. The host loads Data Protection keys from the database at startup;
+        // if the catalog does not exist yet, every test waits out EF's connection-retry backoff.
+        ServiceCollection services = new();
+        services.AddSheafDatabase(_connectionString);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.MigrateAsync();
     }
 
     protected override void ConfigureTestConfiguration(IConfigurationBuilder config) =>
@@ -64,13 +71,6 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     /// <summary>Lets a derived fixture add interceptors or options to the test database.</summary>
     protected virtual void ConfigureDatabase(DbContextOptionsBuilder options)
     {
-    }
-
-    [Before(Test)]
-    public async Task MigrateAsync()
-    {
-        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.MigrateAsync();
     }
 
     protected CookieAuthenticationOptions CookieOptions =>
