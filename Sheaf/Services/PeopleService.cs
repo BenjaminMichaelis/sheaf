@@ -22,7 +22,8 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
         person.LastName = Optional(request.LastName, 100);
         person.Email = Optional(request.Email, 320);
         person.Phone = Optional(request.Phone, 50);
-        person.IsActive = request.IsActive;
+        // An omitted IsActive keeps the current value, so a partial client cannot silently reactivate someone.
+        person.IsActive = request.IsActive ?? person.IsActive;
     }
 
     private static PersonResponse Profile(Person p) => new(p.Id, p.Name, p.FirstName, p.LastName, p.Email, p.Phone, p.HouseholdId, p.IsActive, p.Version);
@@ -48,6 +49,9 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
         var actor = await scope.ActorAsync(ct);
         var person = await scope.People(actor).SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing();
         RequireVersion(person.Version, expectedVersion);
+        // Leaders may correct names and contacts; activating or deactivating a person is a Staff decision.
+        if (request.IsActive is { } isActive && isActive != person.IsActive)
+            await scope.StaffAsync(ct);
         SetPerson(person, request);
         person.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
@@ -56,10 +60,13 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
 
     public async Task<PagedResponse<PersonLookupResponse>> LookupAsync(string? name, PageRequest page, CancellationToken ct)
     {
-        await scope.ActorAsync(ct);
+        // Leaders look up only people they can already see, and only the names of groups they can see.
+        var actor = await scope.ActorAsync(ct);
+        var people = scope.People(actor);
+        var groups = scope.Groups(actor);
         var term = Optional(name, 200);
         var now = scope.Now;
-        return await db.People.Select(p => new
+        return await people.Select(p => new
             {
                 p.Id,
                 p.IsActive,
@@ -68,7 +75,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
             }).Where(p => p.IsActive && (term == null || p.Name.Contains(term)))
             .OrderBy(p => p.Name).ThenBy(p => p.Id)
             .Select(p => new PersonLookupResponse(p.Id, p.Name,
-                db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
+                groups.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
                     && (db.ContextMembers.Any(m => m.PersonId == p.Id && m.ContextId == g.Id && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
                         || db.ContextLeaders.Any(l => l.PersonId == p.Id && l.ContextId == g.Id && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now))))
                     .OrderBy(g => g.Name).Select(g => g.Name).ToArray(),

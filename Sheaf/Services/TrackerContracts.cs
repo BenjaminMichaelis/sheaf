@@ -10,7 +10,7 @@ public interface IVersioned
 public sealed record PagedResponse<T>(T[] Items, int? NextOffset);
 
 /// <summary>Creates or updates a church-owned Person; account linking is not accepted.</summary>
-public sealed record PersonRequest(string FirstName, string? LastName = null, string? Email = null, string? Phone = null, bool IsActive = true);
+public sealed record PersonRequest(string FirstName, string? LastName = null, string? Email = null, string? Phone = null, bool? IsActive = null);
 /// <summary>A scoped Person profile.</summary>
 public sealed record PersonResponse(Guid Id, string Name, string FirstName, string? LastName, string? Email, string? Phone, Guid? HouseholdId, bool IsActive, Guid Version) : IVersioned;
 /// <summary>A limited same-church active Person lookup result.</summary>

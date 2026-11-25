@@ -6,8 +6,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 
 using Sheaf.Authorization;
@@ -80,7 +78,8 @@ public class TrackerTests : ChurchApiTestBase
                 await Assert.That(await currentActor.GetAsync(default)).IsNull();
                 var revoked = await Assert.That(async () => await groups.GetTypesAsync(PageRequest.From(null, null), default)).Throws<TrackerException>();
                 await Assert.That(revoked?.Failure).IsEqualTo(TrackerFailure.Forbidden);
-                await Assert.That(await services.GetRequiredService<ApplicationDbContext>().People.CountAsync()).IsEqualTo(1);
+                var names = await services.GetRequiredService<ApplicationDbContext>().People.Select(p => p.FirstName).ToArrayAsync();
+                await Assert.That(names).IsEquivalentTo(["Before revocation"]);
             }
             finally
             {
@@ -147,7 +146,7 @@ public class TrackerTests : ChurchApiTestBase
             {
                 var failure = await Assert.That(async () => await tracker.CreatePersonAsync(new PersonRequest("Denied"), default)).Throws<TrackerException>();
                 await Assert.That(failure?.Failure).IsEqualTo(TrackerFailure.Forbidden);
-                await Assert.That(await db.People.CountAsync()).IsEqualTo(0);
+                await Assert.That(await db.People.ToArrayAsync()).IsEmpty();
             }
         });
     }
@@ -177,7 +176,8 @@ public class TrackerTests : ChurchApiTestBase
         await Assert.That((await invalid.Content.ReadFromJsonAsync<ProblemDetails>())?.Title).IsEqualTo("Invalid tracker input.");
         using var stale = await TrackerRequestAsync(client, cookie, Guid.NewGuid(), HttpMethod.Post, "/people", new PersonRequest("Blocked"));
         await Assert.That(stale.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-        await InChurchAsync(membership.ChurchId, async db => await Assert.That(await db.People.CountAsync()).IsEqualTo(1));
+        await InChurchAsync(membership.ChurchId, async db =>
+            await Assert.That(await db.People.Select(p => p.Id).ToArrayAsync()).IsEquivalentTo([person.Id]));
     }
 
     [Test]
@@ -273,64 +273,6 @@ public class TrackerTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task Migrate_PersonNamesWithLegacyRecords_FailsWithoutLosingNames()
-    {
-        await InScopeAsync(async services =>
-        {
-            var source = services.GetRequiredService<ApplicationDbContext>();
-            var connection = new SqlConnectionStringBuilder(source.Database.GetConnectionString())
-            {
-                InitialCatalog = $"SheafNameMigration_{Guid.NewGuid():N}"
-            };
-            var isolatedServices = new ServiceCollection();
-            isolatedServices.AddSheafDatabase(connection.ConnectionString);
-            await using var provider = isolatedServices.BuildServiceProvider();
-            await using var scope = provider.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            try
-            {
-                var migrator = db.GetService<IMigrator>();
-                await migrator.MigrateAsync("20261121203238_TrackerFoundation");
-                var church = new Church { Name = "Migration fixture", Slug = $"migration-{Guid.NewGuid():N}" };
-                db.Churches.Add(church);
-                await db.SaveChangesAsync();
-                await using var sql = new SqlConnection(connection.ConnectionString);
-                await sql.OpenAsync();
-                await using var insert = sql.CreateCommand();
-                insert.CommandText = "INSERT INTO [People] ([ChurchId], [Id], [Name], [GivenName], [IsActive]) VALUES (@church, @id, N'Unsplit Original Name', N'Preferred', 1)";
-                insert.Parameters.AddWithValue("@church", church.Id);
-                insert.Parameters.AddWithValue("@id", Guid.NewGuid());
-                await insert.ExecuteNonQueryAsync();
-                var failure = await Assert.That(async () => await migrator.MigrateAsync()).Throws<SqlException>();
-                await Assert.That(failure?.Number).IsEqualTo(51000);
-                await using var read = sql.CreateCommand();
-                read.CommandText = "SELECT [Name], [GivenName] FROM [People]";
-                await using (var reader = await read.ExecuteReaderAsync())
-                {
-                    await Assert.That(await reader.ReadAsync()).IsTrue();
-                    await Assert.That(reader.GetString(0)).IsEqualTo("Unsplit Original Name");
-                    await Assert.That(reader.GetString(1)).IsEqualTo("Preferred");
-                }
-                await using var clear = sql.CreateCommand();
-                clear.CommandText = "DELETE FROM [People]";
-                await clear.ExecuteNonQueryAsync();
-                await migrator.MigrateAsync();
-                await Assert.That(db.Database.HasPendingModelChanges()).IsFalse();
-                await using var invalid = sql.CreateCommand();
-                invalid.CommandText = "INSERT INTO [People] ([ChurchId], [Id], [FirstName], [IsActive]) VALUES (@church, @id, N'   ', 1)";
-                invalid.Parameters.AddWithValue("@church", church.Id);
-                invalid.Parameters.AddWithValue("@id", Guid.NewGuid());
-                var constraint = await Assert.That(async () => await invalid.ExecuteNonQueryAsync()).Throws<SqlException>();
-                await Assert.That(constraint?.Number).IsEqualTo(547);
-            }
-            finally
-            {
-                await db.Database.EnsureDeletedAsync();
-            }
-        });
-    }
-
-    [Test]
     public async Task CreateHousehold_EmptyMemberList_LeavesDefaultUnset()
     {
         var user = await CreateUserAsync();
@@ -384,9 +326,10 @@ public class TrackerTests : ChurchApiTestBase
         await Assert.That(await structure.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
         using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
         var found = (await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items;
-        await Assert.That(found.Any(p => p.Id == inactive.Id)).IsFalse();
+        // A Leader's lookup is limited to people they can already see, even when an outsider shares a household.
+        await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, member.Id]);
         await Assert.That(found.Single(p => p.Id == member.Id).CurrentGroups).IsEquivalentTo([group.Name]);
-        await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdFirstNames).IsEquivalentTo(["Member", "Outside"]);
+        await Assert.That(found.Single(p => p.Id == member.Id).HouseholdFirstNames).IsEquivalentTo(["Member", "Outside"]);
         await Assert.That(found.Single(p => p.Id == leader.Id).HouseholdFirstNames).IsEmpty();
         await Assert.That(await lookup.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
         using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(Time.GetUtcNow()), group.Version);
@@ -428,7 +371,7 @@ public class TrackerTests : ChurchApiTestBase
             await Assert.That(denied.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         }
         using var lookup = await TrackerRequestAsync(client, cookie, first.ChurchId, HttpMethod.Get, "/people/lookup");
-        await Assert.That((await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items.Select(p => p.Id)).IsEquivalentTo([person.Id]);
+        await Assert.That((await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items).IsEmpty();
     }
 
     [Test]
@@ -609,7 +552,7 @@ public class TrackerTests : ChurchApiTestBase
         });
         await InChurchAsync(membership.ChurchId, async db =>
         {
-            await Assert.That(await db.ContextMembers.CountAsync()).IsEqualTo(0);
+            await Assert.That(await db.ContextMembers.ToArrayAsync()).IsEmpty();
             await Assert.That((await db.Contexts.SingleAsync()).EndsAt).IsEqualTo(Time.GetUtcNow());
         });
     }
@@ -767,5 +710,98 @@ public class TrackerTests : ChurchApiTestBase
             using var invalid = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/lookup?{query}");
             await Assert.That(invalid.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         }
+    }
+
+    [Test]
+    public async Task LookupAsync_Leader_ReturnsOnlyAccessiblePeopleAndVisibleGroupNames()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        var leader = new Person { FirstName = "Leader", UserId = user.Id };
+        var member = new Person { FirstName = "Member" };
+        var outside = new Person { FirstName = "Outside" };
+        var led = new Context { Name = "Led", StartsAt = Time.GetUtcNow().AddDays(-5) };
+        var unled = new Context { Name = "Unled", StartsAt = led.StartsAt };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(leader, member, outside, led, unled);
+            db.ContextLeaders.Add(new ContextLeader { ContextId = led.Id, PersonId = leader.Id, StartsAt = led.StartsAt });
+            db.ContextMembers.AddRange(
+                new ContextMember { ContextId = led.Id, PersonId = member.Id, JoinedAt = led.StartsAt },
+                new ContextMember { ContextId = unled.Id, PersonId = member.Id, JoinedAt = led.StartsAt },
+                new ContextMember { ContextId = unled.Id, PersonId = outside.Id, JoinedAt = led.StartsAt });
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
+        var found = (await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items;
+
+        await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, member.Id]);
+        await Assert.That(found.Single(p => p.Id == member.Id).CurrentGroups).IsEquivalentTo([led.Name]);
+    }
+
+    [Test]
+    public async Task UpdatePerson_LeaderChangesActiveState_ReturnsForbiddenAndKeepsPerson()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        var leader = new Person { FirstName = "Leader", UserId = user.Id };
+        var member = new Person { FirstName = "Member" };
+        var group = new Context { Name = "Led", StartsAt = Time.GetUtcNow().AddDays(-5) };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(leader, member, group);
+            db.ContextLeaders.Add(new ContextLeader { ContextId = group.Id, PersonId = leader.Id, StartsAt = group.StartsAt });
+            db.ContextMembers.Add(new ContextMember { ContextId = group.Id, PersonId = member.Id, JoinedAt = group.StartsAt });
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var deactivate = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{member.Id}",
+            new PersonRequest("Member", IsActive: false), member.Version);
+        await Assert.That(deactivate.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        using var unchanged = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{member.Id}",
+            new PersonRequest("Member", Phone: "555-0100", IsActive: true), member.Version);
+        var updated = await TrackerReadAsync<PersonResponse>(unchanged);
+
+        await Assert.That(updated.Phone).IsEqualTo("555-0100");
+        await Assert.That(updated.IsActive).IsTrue();
+    }
+
+    [Test]
+    public async Task UpdatePerson_OmittedIsActive_KeepsInactivePersonInactive()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var inactive = new Person { FirstName = "Inactive", IsActive = false };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.People.Add(inactive);
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{inactive.Id}",
+            new { firstName = "Renamed" }, inactive.Version);
+
+        await Assert.That((await TrackerReadAsync<PersonResponse>(updated)).IsActive).IsFalse();
+    }
+
+    [Test]
+    public async Task SaveChangesAsync_BlankFirstNameWrittenDirectly_RejectedByCheckConstraint()
+    {
+        var membership = await AddMembershipAsync(await CreateUserAsync(), ChurchMembershipRole.Staff);
+
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            var constraint = await Assert.That(async () => await db.Database.ExecuteSqlAsync(
+                    $"INSERT INTO [People] ([ChurchId], [Id], [FirstName], [IsActive], [Version]) VALUES ({membership.ChurchId}, {Guid.NewGuid()}, N'   ', 1, {Guid.NewGuid()})"))
+                .Throws<SqlException>();
+            await Assert.That(constraint?.Number).IsEqualTo(547);
+        });
     }
 }

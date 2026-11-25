@@ -2866,8 +2866,10 @@
             ]
           },
           "isActive": {
-            "type": "boolean",
-            "default": true
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         }
       },

@@ -527,8 +527,7 @@ export interface components {
             lastName?: null | string;
             email?: null | string;
             phone?: null | string;
-            /** @default true */
-            isActive: boolean;
+            isActive?: null | boolean;
         };
         PersonResponse: {
             /** Format: uuid */

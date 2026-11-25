@@ -135,12 +135,12 @@ Person membership/leadership intervals. See `Sheaf/Tracker.http` for requests.
 Person `FirstName` and group names/starting instants are required; `LastName`,
 contacts, households, and group types are optional. Display `Name` is the supplied
 first name followed by the optional surname; names are never guessed or split.
-`IsActive` is explicit lookup eligibility, not automatic inactivity or erasure.
-The unreleased name-schema migration requires an empty People table and fails
-rather than discard unexpected legacy records; it is not a deployed-data conversion.
+`IsActive` is explicit lookup eligibility, not automatic inactivity or erasure. An
+update that omits `IsActive` keeps the current value, and only Staff may change it.
 
 Staff create People, manage group types, create/update/end groups, and assign leaders.
-Leaders manage membership and edit profiles only within their currently led groups.
+Leaders manage membership and edit names and contacts only for people in their currently
+led groups.
 A Leader can add only people they can already see; adding a person to a group would
 otherwise unlock that person's profile, so bringing someone new into a group is a Staff
 action. Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
@@ -187,8 +187,10 @@ outside-group profile rights. An omitted/blank household label preserves the exi
 label, or defaults to `The {LastName} Family` using the first submitted `MemberIds`
 entry. If that person has no surname (or the list is empty), the label stays unset;
 other members' surnames are not substituted. Explicit labels are editable and take
-precedence. Same-church active lookup returns only display name, current group names,
-optional household label and household first names.
+precedence. Active-person lookup returns only display name, current group names,
+optional household label and household first names. Staff search the whole church; a
+Leader finds only people they can already see, with only the names of groups they lead,
+so an unlinked Leader finds no one.
 Unsafe tracker requests retain the `X-Sheaf-Church` stale-tab check.
 
 Attendance and discipleship are deferred. Future attendance infers absence when a

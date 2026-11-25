@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sheaf.Data.Migrations;
 
 /// <inheritdoc />
-public partial class _20261121203238_TrackerFoundation : Migration
+public partial class _20261125232104_TrackerFoundation : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
@@ -37,7 +37,8 @@ public partial class _20261121203238_TrackerFoundation : Migration
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Label = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true)
+                Label = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
+                Version = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
             },
             constraints: table =>
             {
@@ -89,18 +90,19 @@ public partial class _20261121203238_TrackerFoundation : Migration
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                GivenName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                FirstName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                LastName = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
                 Email = table.Column<string>(type: "nvarchar(320)", maxLength: 320, nullable: true),
                 Phone = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
                 HouseholdId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                 UserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
-                IsActive = table.Column<bool>(type: "bit", nullable: false)
+                IsActive = table.Column<bool>(type: "bit", nullable: false),
+                Version = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
             },
             constraints: table =>
             {
                 table.PrimaryKey("PK_People", x => new { x.ChurchId, x.Id });
-                table.CheckConstraint("CK_People_Name", "TRIM([Name]) <> ''");
+                table.CheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''");
                 table.ForeignKey(
                     name: "FK_People_AspNetUsers_UserId",
                     column: x => x.UserId,

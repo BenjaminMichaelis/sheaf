@@ -13,8 +13,8 @@ using Sheaf.Data;
 namespace Sheaf.Data.Migrations;
 
 [DbContext(typeof(ApplicationDbContext))]
-[Migration("20261125213919_TrackerVersions")]
-partial class _20261125213919_TrackerVersions
+[Migration("20261125232104_TrackerFoundation")]
+partial class _20261125232104_TrackerFoundation
 {
     /// <inheritdoc />
     protected override void BuildTargetModel(ModelBuilder modelBuilder)
