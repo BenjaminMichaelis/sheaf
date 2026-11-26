@@ -117,6 +117,59 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
+    [Arguments(ChurchMembershipRole.Leader, ChurchMembershipRole.Coordinator)]
+    [Arguments(ChurchMembershipRole.Coordinator, ChurchMembershipRole.Staff)]
+    [Arguments(ChurchMembershipRole.Staff, ChurchMembershipRole.Admin)]
+    public async Task HasPermission_HigherRole_IncludesEveryLowerRolePermission(ChurchMembershipRole lower, ChurchMembershipRole higher)
+    {
+        Permission[] missing = [.. Enum.GetValues<Permission>()
+            .Where(permission => RolePermissions.HasPermission(lower, permission) && !RolePermissions.HasPermission(higher, permission))];
+
+        await Assert.That(missing).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(ChurchMembershipRole.Leader, false)]
+    [Arguments(ChurchMembershipRole.Coordinator, false)]
+    [Arguments(ChurchMembershipRole.Staff, true)]
+    [Arguments(ChurchMembershipRole.Admin, true)]
+    public async Task HasPermission_PeopleManage_MatchesExpectedRoles(ChurchMembershipRole role, bool expected) =>
+        await Assert.That(RolePermissions.HasPermission(role, Permission.PeopleManage)).IsEqualTo(expected);
+
+    [Test]
+    public async Task HandleAsync_StoredRoleLosesPermission_FailsDespiteRoleClaim()
+    {
+        IAuthorizationService authorization = CreateAuthorizationService(new StoredRoles(_ => ChurchMembershipRole.Leader));
+
+        AuthorizationResult result = await authorization.AuthorizeAsync(
+            CreatePrincipal(ChurchMembershipRole.Admin), null, new PermissionRequirement(Permission.ManageMemberships));
+
+        await Assert.That(result.Succeeded).IsFalse();
+    }
+
+    [Test]
+    public async Task HandleAsync_MembershipNoLongerStored_Fails()
+    {
+        IAuthorizationService authorization = CreateAuthorizationService(new StoredRoles(_ => null));
+
+        AuthorizationResult result = await authorization.AuthorizeAsync(
+            CreatePrincipal(ChurchMembershipRole.Admin), null, new PermissionRequirement(Permission.ManageMemberships));
+
+        await Assert.That(result.Succeeded).IsFalse();
+    }
+
+    [Test]
+    public async Task HandleAsync_MissingUserId_Fails()
+    {
+        IAuthorizationService authorization = CreateAuthorizationService();
+
+        AuthorizationResult result = await authorization.AuthorizeAsync(
+            With(CreatePrincipal(ChurchMembershipRole.Admin), ClaimTypes.NameIdentifier), null, new PermissionRequirement(Permission.ManageMemberships));
+
+        await Assert.That(result.Succeeded).IsFalse();
+    }
+
+    [Test]
     public async Task HandleAsync_InvalidChurchClaims_Fails()
     {
         IAuthorizationService authorization = CreateAuthorizationService();
@@ -215,16 +268,17 @@ public class AuthorizationPolicyTests
     }
 
     private static IAuthorizationPolicyProvider CreateProvider() =>
-        new ServiceCollection().AddLogging().AddSheafAuthorization().BuildServiceProvider()
+        new ServiceCollection().AddLogging().AddSingleton<IChurchMembershipRoles>(new StoredRoles()).AddSheafAuthorization().BuildServiceProvider()
             .GetRequiredService<IAuthorizationPolicyProvider>();
 
-    private static IAuthorizationService CreateAuthorizationService() =>
-        new ServiceCollection().AddLogging().AddSheafAuthorization().BuildServiceProvider()
+    private static IAuthorizationService CreateAuthorizationService(StoredRoles? stored = null) =>
+        new ServiceCollection().AddLogging().AddSingleton<IChurchMembershipRoles>(stored ?? new StoredRoles()).AddSheafAuthorization().BuildServiceProvider()
             .GetRequiredService<IAuthorizationService>();
 
     private static ClaimsPrincipal CreatePrincipal(ChurchMembershipRole role) =>
         new(new ClaimsIdentity(
         [
+            new Claim(ClaimTypes.NameIdentifier, "user-id"),
             new Claim(SheafClaimTypes.ChurchId, Guid.NewGuid().ToString("D")),
             new Claim(SheafClaimTypes.ChurchMembershipId, Guid.NewGuid().ToString("D")),
             new Claim(SheafClaimTypes.Role, role.ToString())
@@ -246,6 +300,7 @@ public class AuthorizationPolicyTests
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IChurchMembershipRoles>(new StoredRoles());
         builder.Services.AddSheafAuthorization();
         if (withoutFallback)
         {
@@ -268,6 +323,13 @@ public class AuthorizationPolicyTests
 
         await app.StartAsync();
         return app;
+    }
+
+    /// <summary>Stands in for persisted memberships; by default the stored role matches the role claim.</summary>
+    private sealed class StoredRoles(Func<ChurchSelection, ChurchMembershipRole?>? lookup = null) : IChurchMembershipRoles
+    {
+        public Task<ChurchMembershipRole?> GetRoleAsync(string userId, ChurchSelection selection, CancellationToken ct) =>
+            Task.FromResult(lookup is null ? selection.Role : lookup(selection));
     }
 
     private sealed class HeaderAuthenticationHandler(

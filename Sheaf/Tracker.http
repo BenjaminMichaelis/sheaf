@@ -1,0 +1,175 @@
+@baseUrl = http://localhost:5285
+@churchId = 00000000-0000-0000-0000-000000000000
+@personId = 00000000-0000-0000-0000-000000000000
+@typeId = 00000000-0000-0000-0000-000000000000
+@groupId = 00000000-0000-0000-0000-000000000000
+@householdId = 00000000-0000-0000-0000-000000000000
+@memberId = 00000000-0000-0000-0000-000000000000
+@leaderId = 00000000-0000-0000-0000-000000000000
+# Copy the version (or ETag) from the latest GET of the resource you are changing.
+@version = 00000000-0000-0000-0000-000000000000
+@cookie = REPLACE_WITH_EXISTING_IDENTITY_COOKIE
+
+### Active same-church limited lookup; use an authenticated selected church. Lists are paged: pass nextOffset back as offset
+GET {{baseUrl}}/api/church/people/lookup?name=Ada
+Cookie: {{cookie}}
+
+### Scoped profile
+GET {{baseUrl}}/api/church/people/{{personId}}
+Cookie: {{cookie}}
+
+### Staff create; contacts and household optional, account link not accepted
+POST {{baseUrl}}/api/church/people
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"firstName":"Ada","lastName":"Lovelace"}
+
+### Scoped profile update; a missing If-Match returns 428, a stale one 412
+PUT {{baseUrl}}/api/church/people/{{personId}}
+If-Match: "{{version}}"
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"firstName":"Ada","lastName":"Lovelace","email":null,"phone":null,"isActive":true}
+
+### Group types
+GET {{baseUrl}}/api/church/group-types
+Cookie: {{cookie}}
+
+### Single group type
+GET {{baseUrl}}/api/church/group-types/{{typeId}}
+Cookie: {{cookie}}
+
+### Staff create type
+POST {{baseUrl}}/api/church/group-types
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"name":"Community"}
+
+### Staff rename type
+PUT {{baseUrl}}/api/church/group-types/{{typeId}}
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"name":"Community group"}
+
+### Accessible groups; Staff can read ended groups
+GET {{baseUrl}}/api/church/groups
+Cookie: {{cookie}}
+
+### Single group
+GET {{baseUrl}}/api/church/groups/{{groupId}}
+Cookie: {{cookie}}
+
+### Staff create group; type optional
+POST {{baseUrl}}/api/church/groups
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"name":"Tuesday community","startsAt":"2026-11-01T00:00:00Z","groupTypeId":null}
+
+### Staff update group
+PUT {{baseUrl}}/api/church/groups/{{groupId}}
+If-Match: "{{version}}"
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"name":"Tuesday community","startsAt":"2026-11-01T00:00:00Z","groupTypeId":"{{typeId}}"}
+
+### Membership history
+GET {{baseUrl}}/api/church/groups/{{groupId}}/members
+Cookie: {{cookie}}
+
+### Single membership interval
+GET {{baseUrl}}/api/church/groups/{{groupId}}/members/{{memberId}}
+Cookie: {{cookie}}
+
+### Join; repeat to create another independent interval
+POST {{baseUrl}}/api/church/groups/{{groupId}}/members
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"personId":"{{personId}}","startsAt":"2026-11-02T00:00:00Z"}
+
+### Leave without deleting history
+POST {{baseUrl}}/api/church/groups/{{groupId}}/members/{{memberId}}/end
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"endsAt":"2026-11-20T00:00:00Z"}
+
+### Person leadership history
+GET {{baseUrl}}/api/church/groups/{{groupId}}/leaders
+Cookie: {{cookie}}
+
+### Single leadership interval
+GET {{baseUrl}}/api/church/groups/{{groupId}}/leaders/{{leaderId}}
+Cookie: {{cookie}}
+
+### Staff assign Person leadership; does not link an account
+POST {{baseUrl}}/api/church/groups/{{groupId}}/leaders
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"personId":"{{personId}}","startsAt":"2026-11-02T00:00:00Z"}
+
+### Staff end leadership without deleting history
+POST {{baseUrl}}/api/church/groups/{{groupId}}/leaders/{{leaderId}}/end
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"endsAt":"2026-11-20T00:00:00Z"}
+
+### Associated household structure only
+GET {{baseUrl}}/api/church/households/{{householdId}}
+Cookie: {{cookie}}
+
+### Create optional household; omitted label defaults from the first member's LastName
+POST {{baseUrl}}/api/church/households
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"memberIds":["{{personId}}"]}
+
+### Replace whole household membership, without editing Person profiles
+PUT {{baseUrl}}/api/church/households/{{householdId}}
+If-Match: "{{version}}"
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"label":"Lovelace household","memberIds":["{{personId}}"]}
+
+### Staff end group; retains all history
+POST {{baseUrl}}/api/church/groups/{{groupId}}/end
+If-Match: "{{version}}"
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"endsAt":"2026-11-21T00:00:00Z"}
+
+### Invalid required name returns 400; a missing/mismatched church header returns 409
+POST {{baseUrl}}/api/church/people
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"name":" "}
+
+### Unknown scoped resource returns 404
+GET {{baseUrl}}/api/church/people/00000000-0000-0000-0000-000000000000
+Cookie: {{cookie}}

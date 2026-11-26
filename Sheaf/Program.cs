@@ -112,6 +112,13 @@ builder.Services.AddOpenApi(options =>
 });
 
 builder.Services.AddSheafAuthorization();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentChurchActor, HttpCurrentChurchActor>();
+builder.Services.AddScoped<Sheaf.Services.TrackerScope>();
+builder.Services.AddScoped<Sheaf.Services.IPeopleService, Sheaf.Services.PeopleService>();
+builder.Services.AddScoped<Sheaf.Services.IGroupService, Sheaf.Services.GroupService>();
+builder.Services.AddScoped<Sheaf.Services.IAssignmentService, Sheaf.Services.AssignmentService>();
+builder.Services.AddScoped<Sheaf.Services.IHouseholdService, Sheaf.Services.HouseholdService>();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
@@ -178,13 +185,15 @@ else
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseMiddleware<CsrfOriginCheck>();
-app.UseRateLimiter();
 app.UseAuthentication();
+// After authentication so per-account limits (tracker lookup) can read the user; login limits remain per IP.
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapGet("/", () => "API is running.").AllowAnonymous();
 
 app.MapAuthEndpoints();
+app.MapTracker();
 
 app.Run();
 

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using Sheaf.Core.Authentication;
 
@@ -24,7 +25,8 @@ public static class AuthorizationExtensions
             options.FallbackPolicy = churchMember;
         });
         services.AddSingleton<IAuthorizationPolicyProvider, SheafAuthorizationPolicyProvider>();
-        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.TryAddScoped<IChurchMembershipRoles, ChurchMembershipRoles>();
+        services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         return services;
     }
 

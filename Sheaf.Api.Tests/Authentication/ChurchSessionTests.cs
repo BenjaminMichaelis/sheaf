@@ -34,55 +34,21 @@ using TUnit.AspNetCore;
 
 namespace Sheaf.Api.Tests;
 
-public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, Program>
+public class ChurchSessionTests : ChurchApiTestBase
 {
-    private const string Password = "Church-session-Password1!";
-    private const string CookieName = "__Host-sheaf";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>() }
-    };
-
-    private readonly ControlledTimeProvider _time = new();
     private readonly ConcurrentQueue<DirectoryRead> _auditReads = new();
     private readonly ConcurrentQueue<RequestChurchContext> _requestChurchContexts = new();
     private readonly ConcurrentQueue<bool> _trackSwitchRequests = new();
     private readonly QueryRecorder _queries = new();
-    private string _connectionString = "";
-
-    [ClassDataSource<SqlServerFixture>(Shared = SharedType.PerAssembly)]
-    public required SqlServerFixture Sql { get; init; }
-
-    protected override Task SetupAsync()
-    {
-        _connectionString = new SqlConnectionStringBuilder(Sql.ConnectionString)
-        {
-            InitialCatalog = $"SheafChurchSessions_{Guid.NewGuid():N}"
-        }.ConnectionString;
-        return Task.CompletedTask;
-    }
-
-    protected override void ConfigureTestConfiguration(IConfigurationBuilder config) =>
-        config.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["ConnectionStrings:Database"] = _connectionString
-        });
 
     protected override void ConfigureTestServices(IServiceCollection services)
     {
-        services.AddSingleton<TimeProvider>(_time);
+        base.ConfigureTestServices(services);
         services.AddSingleton<ILoggerProvider>(new DirectoryAuditProvider(_auditReads));
         services.AddSingleton<IStartupFilter>(new ChurchContextObserver(_requestChurchContexts, _trackSwitchRequests));
-        services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseAzureSql(_connectionString).AddInterceptors(_queries));
     }
 
-    [Before(Test)]
-    public async Task MigrateAsync()
-    {
-        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.MigrateAsync();
-    }
+    protected override void ConfigureDatabase(DbContextOptionsBuilder options) => options.AddInterceptors(_queries);
 
     [Test]
     public async Task Login_MemberOfOneChurch_ReturnsChurchAndRole()
@@ -269,7 +235,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         (_, string cookie) = await LoginAsync(client, user);
         await StoreCasedAuthorityAsync(user, churchIdType, membershipIdType, roleType, roleAliasType);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage renewal = await GetUserAsync(client, cookie);
         string renewedCookie = ReadCookie(renewal);
 
@@ -295,11 +261,11 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             await db.SaveChangesAsync();
         });
 
-        _time.Advance(TimeSpan.FromMinutes(5));
+        Time.Advance(TimeSpan.FromMinutes(5));
         using HttpResponseMessage before = await GetUserAsync(client, cookie);
         await Assert.That(before.Headers.Contains(HeaderNames.SetCookie)).IsFalse();
 
-        _time.Advance(TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromSeconds(1));
         using HttpResponseMessage stale = await GetUserAsync(client, cookie);
         await Assert.That((await ReadUserAsync(stale)).IsAuthenticated).IsFalse();
 
@@ -327,7 +293,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpResponseMessage switchResponse = await client.SendAsync(switchRequest);
         await Assert.That(switchResponse.StatusCode).IsEqualTo(HttpStatusCode.Unauthorized);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage stale = await GetUserAsync(client, cookie);
         await Assert.That((await ReadUserAsync(stale)).IsAuthenticated).IsFalse();
 
@@ -345,7 +311,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         (_, string cookie) = await LoginAsync(client, user);
         await AddMembershipAsync(user, ChurchMembershipRole.Coordinator);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage response = await GetUserAsync(client, cookie);
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
@@ -367,7 +333,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         });
         await RestoreSecurityStampAsync(user, stamp);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage renewal = await GetUserAsync(client, cookie);
         string renewedCookie = ReadCookie(renewal);
         UserInfo info = await ReadUserAsync(renewal);
@@ -377,7 +343,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         await AssertUnselectedAsync(ReadTicket(renewedCookie).Principal, user);
         await Assert.That(ReadTicket(renewedCookie).Principal.FindFirstValue("AspNet.Identity.SecurityStamp")).IsEqualTo(stamp);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage laterRenewal = await GetUserAsync(client, renewedCookie);
         await Assert.That((await ReadUserAsync(laterRenewal)).CurrentChurch).IsNull();
         await AssertUnselectedAsync(ReadTicket(ReadCookie(laterRenewal)).Principal, user);
@@ -394,7 +360,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         (_, string cookie) = await LoginAsync(client, user);
         ChurchMembership membership = await AddMembershipAsync(user);
 
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage response = await GetUserAsync(client, cookie);
         UserInfo info = await ReadUserAsync(response);
 
@@ -436,7 +402,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         }
 
         int auditCount = _auditReads.Count;
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
         using HttpResponseMessage response = await GetUserAsync(client, ProtectTicket(ticket));
         UserInfo info = await ReadUserAsync(response);
 
@@ -474,7 +440,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
                 await Assert.That(result.Succeeded).IsTrue();
             });
         }
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
 
         await InScopeAsync(async services =>
         {
@@ -499,7 +465,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         ChurchMembership membership = await AddMembershipAsync(user);
         using HttpClient client = CreateClient();
         (_, string cookie) = await LoginAsync(client, user);
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
 
         await InScopeAsync(async services =>
         {
@@ -529,7 +495,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         _ = await AddMembershipAsync(user);
         using HttpClient client = CreateClient();
         (_, string cookie) = await LoginAsync(client, user);
-        _time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
 
         await InScopeAsync(async services =>
         {
@@ -713,7 +679,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         using HttpClient client = CreateClient();
         (_, string accountCookie) = await LoginAsync(client, user, rememberMe: rememberMe);
         AuthenticationTicket accountTicket = ReadTicket(accountCookie);
-        _time.Advance(TimeSpan.FromSeconds(1));
+        Time.Advance(TimeSpan.FromSeconds(1));
 
         (UserInfo firstInfo, string firstCookie, IdentityCookieWrite firstWrite) =
             await SwitchChurchAsync(client, accountCookie, first.ChurchId);
@@ -731,7 +697,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         await Assert.That(secondWrite).IsEqualTo(IdentityCookieWrite.AuthenticatedTicket);
         DateTimeOffset initialIssuedUtc = accountTicket.Properties.IssuedUtc
             ?? throw new InvalidOperationException("The login ticket has no issue time.");
-        await Assert.That(_time.GetUtcNow() > initialIssuedUtc).IsTrue();
+        await Assert.That(Time.GetUtcNow() > initialIssuedUtc).IsTrue();
         DateTimeOffset switchedIssuedUtc = ReadTicket(secondCookie).Properties.IssuedUtc
             ?? throw new InvalidOperationException("The switched ticket has no issue time.");
         await Assert.That(switchedIssuedUtc).IsEqualTo(initialIssuedUtc);
@@ -834,7 +800,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         TimeSpan elapsed = securityStampValidationDue
             ? TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1)
             : TimeSpan.FromTicks(CookieOptions.ExpireTimeSpan.Ticks / 2) + TimeSpan.FromSeconds(1);
-        _time.Advance(elapsed);
+        Time.Advance(elapsed);
 
         using HttpResponseMessage control = await GetUserAsync(client, cookie);
         await Assert.That(ClassifyIdentityCookieWrites(control)).IsEqualTo(IdentityCookieWrite.AuthenticatedTicket);
@@ -855,7 +821,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         ChurchMembership inaccessible = await AddMembershipAsync(otherUser);
         using HttpClient client = CreateClient();
         (_, string cookie) = await LoginAsync(client, user);
-        _time.Advance(TimeSpan.FromMinutes(1));
+        Time.Advance(TimeSpan.FromMinutes(1));
         await InScopeAsync(async services =>
         {
             UserManager<ApplicationUser> manager = services.GetRequiredService<UserManager<ApplicationUser>>();
@@ -1137,29 +1103,8 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         });
     }
 
-    private CookieAuthenticationOptions CookieOptions =>
-        Factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(IdentityConstants.ApplicationScheme);
-
     private static AuthenticationScheme Scheme { get; } =
         new(IdentityConstants.ApplicationScheme, null, typeof(CookieAuthenticationHandler));
-
-    private HttpClient CreateClient() => Factory.CreateDefaultClient(new Uri("https://localhost"));
-
-    private async Task<ApplicationUser> CreateUserAsync()
-    {
-        ApplicationUser user = new()
-        {
-            UserName = $"{Guid.NewGuid():N}@example.com",
-            EmailConfirmed = true
-        };
-        user.Email = user.UserName;
-        await InScopeAsync(async services =>
-        {
-            IdentityResult result = await services.GetRequiredService<UserManager<ApplicationUser>>().CreateAsync(user, Password);
-            await Assert.That(result.Succeeded).IsTrue();
-        });
-        return user;
-    }
 
     private Task StoreCasedAuthorityAsync(
         ApplicationUser user, string churchIdType, string membershipIdType, string roleType, string roleAliasType) =>
@@ -1183,43 +1128,6 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         InScopeAsync(services => services.GetRequiredService<ApplicationDbContext>().Users
             .Where(stored => stored.Id == user.Id)
             .ExecuteUpdateAsync(setters => setters.SetProperty(stored => stored.SecurityStamp, stamp)));
-
-    private async Task<ChurchMembership> AddMembershipAsync(
-        ApplicationUser user, ChurchMembershipRole role = ChurchMembershipRole.Leader)
-    {
-        Church church = new() { Name = "Pending", Slug = $"church-{Guid.NewGuid():N}" };
-        church.Name = $"Church {church.Id}";
-        await InScopeAsync(async services =>
-        {
-            ApplicationDbContext db = services.GetRequiredService<ApplicationDbContext>();
-            db.Churches.Add(church);
-            await db.SaveChangesAsync();
-        });
-        ChurchMembership membership = new() { ChurchId = church.Id, UserId = user.Id, Role = role };
-        await InChurchAsync(church.Id, async db =>
-        {
-            db.ChurchMemberships.Add(membership);
-            await db.SaveChangesAsync();
-        });
-        return membership;
-    }
-
-    private static async Task<(UserInfo Info, string Cookie)> LoginAsync(
-        HttpClient client, ApplicationUser user, string? cookie = null, bool rememberMe = false)
-    {
-        using HttpRequestMessage request = new(HttpMethod.Post, "/api/auth/login")
-        {
-            Content = JsonContent.Create(new LoginRequest(
-                user.Email ?? throw new InvalidOperationException("User has no email."), Password, rememberMe))
-        };
-        if (cookie is not null)
-        {
-            request.Headers.Add(HeaderNames.Cookie, cookie);
-        }
-        using HttpResponseMessage response = await client.SendAsync(request);
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        return (await ReadUserAsync(response), ReadCookie(response));
-    }
 
     private static HttpRequestMessage CreateSwitchRequest(string cookie, Guid churchId)
     {
@@ -1298,18 +1206,6 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         return await client.SendAsync(request);
     }
 
-    private static async Task<UserInfo> ReadUserAsync(HttpResponseMessage response)
-    {
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        return await response.Content.ReadFromJsonAsync<UserInfo>(JsonOptions)
-            ?? throw new InvalidOperationException("The API returned no user info.");
-    }
-
-    private static string ReadCookie(HttpResponseMessage response) =>
-        string.Join("; ", response.Headers.GetValues(HeaderNames.SetCookie)
-            .Where(value => value.StartsWith(CookieName, StringComparison.Ordinal))
-            .Select(value => value.Split(';', 2)[0]));
-
     private static async Task AssertProblemTypeAsync(HttpResponseMessage response, string expectedType)
     {
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -1348,39 +1244,7 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
         return value.Length == 0 ? IdentityCookieWrite.Deletion : IdentityCookieWrite.AuthenticatedTicket;
     }
 
-    private AuthenticationTicket ReadTicket(string cookie)
-    {
-        DefaultHttpContext http = new();
-        http.Request.Headers.Cookie = cookie;
-        CookieAuthenticationOptions options = CookieOptions;
-        string value = options.CookieManager.GetRequestCookie(http, CookieName)
-            ?? throw new InvalidOperationException("The response did not contain the Identity cookie.");
-        return options.TicketDataFormat.Unprotect(value)
-            ?? throw new InvalidOperationException("The Identity cookie could not be unprotected.");
-    }
-
     private string ProtectTicket(AuthenticationTicket ticket) => $"{CookieName}={CookieOptions.TicketDataFormat.Protect(ticket)}";
-
-    private async Task InScopeAsync(Func<IServiceProvider, Task> action)
-    {
-        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
-        await action(scope.ServiceProvider);
-    }
-
-    private Task InChurchAsync(Guid churchId, Func<ApplicationDbContext, Task> action) =>
-        InScopeAsync(async services =>
-        {
-            services.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
-            await action(services.GetRequiredService<ApplicationDbContext>());
-        });
-
-    private static DefaultHttpContext CreateHttpContext(IServiceProvider services)
-    {
-        DefaultHttpContext http = new() { RequestServices = services };
-        http.Request.Scheme = "https";
-        services.GetRequiredService<IHttpContextAccessor>().HttpContext = http;
-        return http;
-    }
 
     private static CookieAuthenticationEvents ResolveEvents(IServiceProvider services, CookieAuthenticationOptions options) =>
         services.GetRequiredService(options.EventsType
@@ -1473,13 +1337,6 @@ public class ChurchSessionTests : WebApplicationTest<ApiWebApplicationFactory, P
             });
             next(app);
         };
-    }
-
-    private sealed class ControlledTimeProvider : TimeProvider
-    {
-        private long _utcTicks = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()).UtcTicks;
-        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _utcTicks), TimeSpan.Zero);
-        public void Advance(TimeSpan interval) => Interlocked.Add(ref _utcTicks, interval.Ticks);
     }
 
     private sealed class QueryRecorder : DbCommandInterceptor

@@ -127,6 +127,104 @@ New exemptions require security review.
 SQL-backed tests require a Docker-compatible container runtime and an amd64-capable
 host for SQL Server. They use isolated, migrated catalogs.
 
+### People and groups foundation
+
+The backend tracker endpoints under `/api/church` persist church-owned People,
+optional households, group types, groups (`Context` of kind `Group`), and dated
+Person membership/leadership intervals. See `Sheaf/Tracker.http` for requests.
+Person `FirstName` and group names/starting instants are required; `LastName`,
+contacts, households, and group types are optional. Display `Name` is the supplied
+first name followed by the optional surname; names are never guessed or split.
+`IsActive` is explicit lookup eligibility, not automatic inactivity or erasure. An
+update that omits `IsActive` keeps the current value, and only `PeopleManage` holders
+(Staff and Admin) may change it. Each Person records `CreatedAt` (defaulted by the
+database for imports) and, when created through the API, `CreatedByUserId`. Neither is a
+foreign key, so the audit survives account deletion and later duplicate review can tell
+an original from a copy.
+
+Staff and Admin create People, manage group types, create/update/end groups, and assign
+leaders.
+Leaders manage membership and edit names and contacts only for people in their currently
+led groups.
+A Leader can add only people they can already see; adding a person to a group would
+otherwise unlock that person's profile, so bringing someone new into a group is a Staff
+action. Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
+group retains it and all assignment intervals; group end bounds their effective
+activity without rewriting history. There are no tracker delete or automatic-merge
+endpoints.
+
+People, households and groups carry a `version`, returned in the body and as a strong
+`ETag`. Updating a person, household or group, and ending a group, require that version
+in `If-Match`: a missing header returns 428 and a version that is no longer current
+returns 412, so a client cannot overwrite an edit it never saw; reload and retry.
+A person's version also changes when they move household, a household's when it gains
+or loses a member, and a group's when assignments are added or ended. Assignment
+writes need no `If-Match`, but because they bump the group's version, two writes that
+race on the same group (including ending it) are serialized and the loser gets 409.
+Other write races and constraint failures also return 409.
+
+Every list (`group-types`, `groups`, members and leaders history) is paged
+in a stable order: pass `limit` (1–200, default 50) and `offset`, and read the next page
+from `nextOffset`, which is null on the last page.
+
+Leadership belongs to a Person, not a separate account access assignment. The optional
+`Person.UserId` is only a future signup-link placeholder: non-null links are unique
+per `(ChurchId, UserId)`. No API creates links, invitations, claims, or email/name
+matches. **Leader access is not operational until signup integration creates an
+explicit link.** Unlinked leaders fail closed for scoped resources. Access additionally
+requires the account's persisted membership in that same church; a link alone or a
+link in another church never grants access. Existing account/church role lifecycle
+and cookie switching remain unchanged.
+
+Roles form a ladder. An account holds one role per church, so each role includes
+everything the role below it can do:
+
+| Permission | Leader | Coordinator | Staff | Admin |
+|---|---|---|---|---|
+| `TrackerAccess`: use the tracker within the caller's own groups | ✓ | ✓ | ✓ | ✓ |
+| `TrackerManage`: every group, group types, leadership | | | ✓ | ✓ |
+| `PeopleManage`: every person, active state, resolving duplicates | | | ✓ | ✓ |
+| `ManageMemberships`: which accounts use the church, with which role | | | | ✓ |
+
+Coordinator behaves like a Leader until coordinator-specific scope is defined.
+
+Authorization is split the way ASP.NET Core recommends. Which operations a role may
+call is declared on the endpoints: every tracker route requires `TrackerAccess`,
+creating a Person requires `PeopleManage`, and creating group types and groups,
+updating or ending groups, and adding or ending leadership require `TrackerManage`.
+Every permission check reads the selected membership's persisted role, not the role
+claim, so a demotion or revocation applies on the next request rather than after the
+cookie's five-minute revalidation. That read is shared with the tracker's current
+actor, so each request reads the membership once. Which rows a caller reaches depends on loaded data, so it stays
+in `TrackerScope`: SQL-translatable group/person scopes, household rules, and the
+Staff-only `IsActive` change on a Person. History/concurrency protections remain in
+application operations; HTTP problem responses are translated at the endpoint boundary.
+
+Staff and leaders may manage whole households associated with accessible people,
+including members outside their groups. A Leader may keep or remove a household's
+existing members, but may add only people they can already see; a new household must
+include at least one such person. Household responses expose identifiers and
+first names, not full profiles or contacts; household authority does not grant
+outside-group profile rights. An omitted/blank household label preserves the existing
+label, or defaults to `The {LastName} Family` using the first submitted `MemberIds`
+entry. If that person has no surname (or the list is empty), the label stays unset;
+other members' surnames are not substituted. Explicit labels are editable and take
+precedence.
+
+Name lookup lets any tracker user find any active person in the church, so a Leader
+can record who attended. It returns only the identifier, display name and optional
+household label, never groups, contacts or household members. A search needs at least
+two characters: two-character terms match the start of a first or last name (`Bo`
+finds Bo, Bob and Bolton), and longer terms match anywhere in the full name. At most 20
+results come back, with no paging, and each account may search 60 times a minute
+(`Tracker:LookupRateLimit`) before receiving 429.
+Unsafe tracker requests retain the `X-Sheaf-Church` stale-tab check.
+
+Attendance and discipleship are deferred. Future attendance infers absence when a
+rostered person does not attend; no separate absence workflow or visitor category
+is introduced. Existing consent/trust requirements and Person erasure/anonymization
+policy remain applicable; inactivity does not trigger erasure.
+
 ### Mobile (Avalonia)
 
 `Sheaf.Mobile*` holds the shared app plus Android, iOS, Browser and Desktop heads. Install workloads with `dotnet workload restore`. Android is built locally; iOS requires macOS (built in CI). Mobile apps run separately from Aspire; point them at the API (Android emulator: `http://10.0.2.2:5285`, iOS simulator: `http://localhost:5285`).
