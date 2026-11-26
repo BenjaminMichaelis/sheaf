@@ -45,8 +45,9 @@ public sealed class ChurchCalendar
     {
         var midnight = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
         // Midnight that occurs twice belongs to the day from its first occurrence, which has the larger offset.
-        // Midnight that a clock change skips has no local time; the standard offset maps it to the instant of the
-        // change, which is the first instant of that day.
+        // Midnight that a clock change skips has no local time. GetUtcOffset returns the standard offset in effect on
+        // that date (not today's, if the zone has since changed it), which maps midnight to the instant of the change:
+        // the first instant of that day.
         var offset = _zone.IsAmbiguousTime(midnight)
             ? _zone.GetAmbiguousTimeOffsets(midnight).Max()
             : _zone.GetUtcOffset(midnight);
