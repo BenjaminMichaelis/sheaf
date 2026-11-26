@@ -20,24 +20,6 @@ namespace Sheaf.Api.Tests;
 
 public class TrackerTests : ChurchApiTestBase
 {
-    private static async Task<HttpResponseMessage> TrackerRequestAsync(HttpClient client, string cookie, Guid churchId, HttpMethod method, string path, object? body = null, Guid? ifMatch = null)
-    {
-        using HttpRequestMessage request = new(method, $"/api/church{path}");
-        request.Headers.Add("Cookie", cookie);
-        request.Headers.Add("X-Sheaf-Church", churchId.ToString("D"));
-        if (ifMatch is { } version)
-            request.Headers.TryAddWithoutValidation("If-Match", EntityTag.Format(version));
-        if (body is not null)
-            request.Content = JsonContent.Create(body);
-        return await client.SendAsync(request);
-    }
-
-    private static async Task<T> TrackerReadAsync<T>(HttpResponseMessage response, HttpStatusCode expected = HttpStatusCode.OK)
-    {
-        await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
-        return await response.Content.ReadFromJsonAsync<T>() ?? throw new InvalidOperationException("Missing tracker response.");
-    }
-
     [Test]
     public async Task CreatePerson_PersistedRoleDemotedThenRevoked_DeniesBeforeCookieRevalidation()
     {
@@ -134,6 +116,7 @@ public class TrackerTests : ChurchApiTestBase
         yield return ("POST", $"/groups/{id}/end");
         yield return ("POST", $"/groups/{id}/leaders");
         yield return ("POST", $"/groups/{id}/leaders/{id}/end");
+        yield return ("GET", "/attendance-records");
     }
 
     [Test]

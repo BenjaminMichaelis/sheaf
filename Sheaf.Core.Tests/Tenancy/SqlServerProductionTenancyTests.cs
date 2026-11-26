@@ -221,7 +221,7 @@ public class SqlServerProductionTenancyTests
         TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         await Sql.InDatabaseScopeAsync(null, async db =>
         {
-            db.Churches.Add(new Church { Slug = seed.ChurchA.Slug, Name = "Duplicate" });
+            db.Churches.Add(new Church { Slug = seed.ChurchA.Slug, Name = "Duplicate", TimeZoneId = "America/Chicago" });
 
             await Assert.That(async () => await db.SaveChangesAsync()).Throws<DbUpdateException>();
         });

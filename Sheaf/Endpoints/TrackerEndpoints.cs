@@ -18,6 +18,38 @@ public static class TrackerEndpoints
         MapHouseholds(api);
         MapAssignments(api, "members", AssignmentKind.Member);
         MapAssignments(api, "leaders", AssignmentKind.Leader);
+        MapSessions(api);
+    }
+
+    private static void MapSessions(RouteGroupBuilder api)
+    {
+        api.MapGet("/groups/{groupId:guid}/sessions", async Task<Ok<PagedResponse<SessionSummaryResponse>>> (Guid groupId, int? offset, int? limit, IAttendanceService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetSessionsAsync(groupId, PageRequest.From(offset, limit), ct)))
+            .Tracker("GetGroupSessions", "List a group's meetings, newest first, with how many came");
+        api.MapGet("/groups/{groupId:guid}/sessions/{sessionId:guid}", async Task<Ok<SessionResponse>> (Guid groupId, Guid sessionId, IAttendanceService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetSessionAsync(groupId, sessionId, ct)))
+            .Tracker("GetGroupSession", "Get a meeting with who came and which roster members were absent");
+        // Recording can create people and reports possible duplicates by name, so it shares lookup's per-account limit.
+        api.MapPost("/groups/{groupId:guid}/sessions", async Task<Results<Created<SessionResponse>, Ok<SessionResponse>>> (Guid groupId, SessionRequest request, IAttendanceService s, CancellationToken ct) =>
+            {
+                var (result, created) = await s.CreateSessionAsync(groupId, request, ct);
+                return created
+                    ? TypedResults.Created($"/api/church/groups/{groupId}/sessions/{result.Id}", result)
+                    : TypedResults.Ok(result);
+            })
+            .Tracker("RecordGroupSession", "Record a meeting and who came, creating new people in the same save; a retry with the same id returns the recorded meeting")
+            .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
+            .Produces(StatusCodes.Status429TooManyRequests);
+        api.MapPut("/groups/{groupId:guid}/sessions/{sessionId:guid}", async Task<Ok<SessionResponse>> (Guid groupId, Guid sessionId, [FromHeader(Name = IfMatchHeader)] string? ifMatch, AttendeesRequest request, IAttendanceService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.UpdateAttendeesAsync(groupId, sessionId, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("UpdateGroupSessionAttendees", "Replace who came to a meeting; people taken off the list are kept as history")
+            .RequiresIfMatch()
+            .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
+            .Produces(StatusCodes.Status429TooManyRequests);
+        api.MapGet("/attendance-records", async Task<Ok<PagedResponse<AttendanceRecordResponse>>> (Guid? personId, string? userId, int? offset, int? limit, IAttendanceService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetRecordsAsync(personId, userId, PageRequest.From(offset, limit), ct)))
+            .Tracker("GetAttendanceRecords", "Staff review who marked whom present or took them off a meeting, newest first")
+            .RequirePermission(Permission.PeopleManage);
     }
 
     private static void MapPeople(RouteGroupBuilder api)
@@ -155,7 +187,9 @@ internal sealed class TrackerEndpointFilter : IEndpointFilter
         try
         {
             var result = await next(context);
-            if (result is IValueHttpResult { Value: IVersioned versioned })
+            // A Results<…> union wraps the result that will actually be written.
+            var written = result is INestedHttpResult nested ? nested.Result : result;
+            if (written is IValueHttpResult { Value: IVersioned versioned })
                 context.HttpContext.Response.Headers.ETag = EntityTag.Format(versioned.Version);
             return result;
         }
@@ -169,9 +203,11 @@ internal sealed class TrackerEndpointFilter : IEndpointFilter
                 TrackerFailure.Conflict => (StatusCodes.Status409Conflict, "The resource changed or the group has ended."),
                 TrackerFailure.PreconditionFailed => (StatusCodes.Status412PreconditionFailed, "The resource changed since it was read. Reload it and retry."),
                 TrackerFailure.PreconditionRequired => (StatusCodes.Status428PreconditionRequired, "Send the resource's version in an If-Match header."),
+                TrackerFailure.ConfirmationRequired => (StatusCodes.Status409Conflict, "This looks like a duplicate. Resend with confirm to save anyway."),
                 _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
             };
-            return TypedResults.Problem(statusCode: status, title: title);
+            var type = exception.Failure == TrackerFailure.ConfirmationRequired ? TrackerException.ConfirmationRequiredType : null;
+            return TypedResults.Problem(statusCode: status, title: title, type: type, extensions: exception.Extensions);
         }
     }
 }
