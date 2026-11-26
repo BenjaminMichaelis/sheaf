@@ -1,8 +1,13 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: full SDK image for compiling and publishing
-FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
+# Build stage: full SDK image for compiling and publishing. The tag matches global.json, which pins the SDK and
+# disables roll-forward, so a floating 11.0 tag would break once a newer SDK ships.
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100 AS build
 WORKDIR /src
+
+# global.json also pins the workload set version; install it, as CI does, before anything restores.
+COPY ["global.json", "."]
+RUN dotnet workload update
 
 # Copy project files first for layer-cached restore.
 # Changes to source code won't invalidate the restore layer.
