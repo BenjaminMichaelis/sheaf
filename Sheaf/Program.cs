@@ -185,8 +185,9 @@ else
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseMiddleware<CsrfOriginCheck>();
-app.UseRateLimiter();
 app.UseAuthentication();
+// After authentication so per-account limits (tracker lookup) can read the user; login limits remain per IP.
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapGet("/", () => "API is running.").AllowAnonymous();

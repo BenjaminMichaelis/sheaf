@@ -7,7 +7,7 @@ namespace Sheaf.Services;
 
 /// <summary>
 /// Owns the row-level visibility rules: which groups, people, and households an actor may see. Which operations a role
-/// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/> and <see cref="Permission.TrackerManage"/>);
+/// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/>, <see cref="Permission.TrackerManage"/>, and <see cref="Permission.PeopleManage"/>);
 /// this type only answers questions that need the data loaded, so every tracker service goes through it.
 /// </summary>
 public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock)
@@ -18,13 +18,16 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
     public async Task<ChurchActor> ActorAsync(CancellationToken ct) =>
         await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
 
-    /// <summary>Whether the actor manages the whole tracker rather than only what their own assignments reach.</summary>
-    public static bool ManagesAll(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.TrackerManage);
+    /// <summary>Whether the actor manages every group rather than only the groups they lead.</summary>
+    public static bool ManagesGroups(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.TrackerManage);
+
+    /// <summary>Whether the actor manages every person and household rather than only those their groups reach.</summary>
+    public static bool ManagesPeople(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.PeopleManage);
 
     /// <summary>Managers see every group; everyone else sees only active groups they currently lead.</summary>
     public IQueryable<Context> Groups(ChurchActor actor)
     {
-        if (ManagesAll(actor))
+        if (ManagesGroups(actor))
             return db.Contexts;
         var now = Now;
         return db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
@@ -35,7 +38,7 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
     /// <summary>Managers see every person; everyone else sees current members and leaders of the groups they lead.</summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
-        if (ManagesAll(actor))
+        if (ManagesPeople(actor))
             return db.People;
         var groups = Groups(actor).Select(g => g.Id);
         var now = Now;
@@ -56,7 +59,7 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
     /// <summary>Throws NotFound unless the actor manages all or can see at least one person in the household.</summary>
     public async Task RequireHouseholdAsync(Guid id, ChurchActor actor, CancellationToken ct)
     {
-        if (!ManagesAll(actor)
+        if (!ManagesPeople(actor)
             && !await People(actor).AnyAsync(p => p.HouseholdId == id, ct))
             throw TrackerRules.Missing();
     }

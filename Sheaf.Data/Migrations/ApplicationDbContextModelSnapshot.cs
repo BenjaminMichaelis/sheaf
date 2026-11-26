@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261125232104_TrackerFoundation";
+    public override string LastMigrationId => "20261126001848_TrackerFoundation";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -504,6 +504,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("datetimeoffset")
+                    .HasDefaultValueSql("SYSDATETIMEOFFSET()");
+
+                b.Property<string>("CreatedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
 
                 b.Property<string>("Email")
                     .HasMaxLength(320)

@@ -15,11 +15,24 @@ public interface IChurchMembershipRoles
     Task<ChurchMembershipRole?> GetRoleAsync(string userId, ChurchSelection selection, CancellationToken ct);
 }
 
+/// <summary>
+/// Scoped, so one instance serves one request: the endpoint permission check and the tracker's current actor share a
+/// single read. Nothing is kept beyond the request, so the next request always sees the latest stored role.
+/// </summary>
 public sealed class ChurchMembershipRoles(ApplicationDbContext db) : IChurchMembershipRoles
 {
-    public async Task<ChurchMembershipRole?> GetRoleAsync(string userId, ChurchSelection selection, CancellationToken ct) =>
-        await db.ChurchMemberships.AsNoTracking()
+    private readonly Dictionary<(string UserId, Guid ChurchId, Guid MembershipId), ChurchMembershipRole?> _read = [];
+
+    public async Task<ChurchMembershipRole?> GetRoleAsync(string userId, ChurchSelection selection, CancellationToken ct)
+    {
+        var key = (userId, selection.ChurchId, selection.MembershipId);
+        if (_read.TryGetValue(key, out var role))
+            return role;
+        role = await db.ChurchMemberships.AsNoTracking()
             .Where(m => m.ChurchId == selection.ChurchId && m.Id == selection.MembershipId && m.UserId == userId)
             .Select(m => (ChurchMembershipRole?)m.Role)
             .SingleOrDefaultAsync(ct);
+        _read[key] = role;
+        return role;
+    }
 }

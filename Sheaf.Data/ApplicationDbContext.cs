@@ -83,6 +83,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
         builder.Entity<Person>(entity =>
         {
+            // Imports and direct inserts that omit CreatedAt still get a creation time.
+            entity.Property(person => person.CreatedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
             entity.HasOne<Church>().WithMany().HasForeignKey(person => person.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
             entity.HasOne<Household>().WithMany().HasForeignKey(person => person.HouseholdId)

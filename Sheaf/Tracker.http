@@ -11,7 +11,7 @@
 @cookie = REPLACE_WITH_EXISTING_IDENTITY_COOKIE
 
 ### Active same-church limited lookup; use an authenticated selected church. Lists are paged: pass nextOffset back as offset
-GET {{baseUrl}}/api/church/people/lookup?name=Ada&limit=50&offset=0
+GET {{baseUrl}}/api/church/people/lookup?name=Ada
 Cookie: {{cookie}}
 
 ### Scoped profile

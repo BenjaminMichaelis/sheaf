@@ -7,21 +7,35 @@ namespace Sheaf.Authorization;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix", Justification = "Permission is the required domain name for this enum.")]
 public enum Permission
 {
+    /// <summary>Decide which accounts can use the church and with which role.</summary>
     ManageMemberships,
     /// <summary>Use the tracker, limited to the groups and people the caller's own assignments reach.</summary>
     TrackerAccess,
-    /// <summary>Manage the whole tracker: every group and person, group lifecycle, group types, and leadership.</summary>
-    TrackerManage
+    /// <summary>Manage every group: group lifecycle, group types, and leadership.</summary>
+    TrackerManage,
+    /// <summary>Manage every person: create and edit anyone, activate or deactivate, and resolve duplicates.</summary>
+    PeopleManage
 }
 
+/// <summary>
+/// Maps each role to its permissions. Roles form a ladder: an account holds one role per church, so each role
+/// includes everything the role below it can do.
+/// </summary>
 public static class RolePermissions
 {
+    private static readonly Permission[] Leader = [Permission.TrackerAccess];
+    // Coordinator behaves like a Leader until coordinator-specific scope is defined.
+    private static readonly Permission[] Coordinator = [.. Leader];
+    private static readonly Permission[] Staff = [.. Coordinator, Permission.TrackerManage, Permission.PeopleManage];
+    private static readonly Permission[] Admin = [.. Staff, Permission.ManageMemberships];
+
     private static readonly FrozenDictionary<ChurchMembershipRole, FrozenSet<Permission>> Map =
         new Dictionary<ChurchMembershipRole, FrozenSet<Permission>>
         {
-            [ChurchMembershipRole.Admin] = new[] { Permission.ManageMemberships }.ToFrozenSet(),
-            [ChurchMembershipRole.Staff] = new[] { Permission.TrackerAccess, Permission.TrackerManage }.ToFrozenSet(),
-            [ChurchMembershipRole.Leader] = new[] { Permission.TrackerAccess }.ToFrozenSet()
+            [ChurchMembershipRole.Leader] = Leader.ToFrozenSet(),
+            [ChurchMembershipRole.Coordinator] = Coordinator.ToFrozenSet(),
+            [ChurchMembershipRole.Staff] = Staff.ToFrozenSet(),
+            [ChurchMembershipRole.Admin] = Admin.ToFrozenSet()
         }.ToFrozenDictionary();
 
     public static bool HasPermission(ChurchMembershipRole role, Permission permission) =>

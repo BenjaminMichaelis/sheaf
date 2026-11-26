@@ -58,7 +58,7 @@ public sealed class HouseholdService(ApplicationDbContext db, TrackerScope scope
         var members = await db.People.Where(p => request.MemberIds.Contains(p.Id)).ToArrayAsync(ct);
         if (members.Length != request.MemberIds.Length)
             throw Invalid();
-        if (!TrackerScope.ManagesAll(actor))
+        if (!TrackerScope.ManagesPeople(actor))
         {
             var accessibleIds = await scope.People(actor).Where(p => request.MemberIds.Contains(p.Id)).Select(p => p.Id).ToArrayAsync(ct);
             // A new household must include someone the actor can see. Non-Staff may only submit people they can see,

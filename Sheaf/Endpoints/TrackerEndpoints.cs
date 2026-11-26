@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
+using Sheaf.Authentication;
 using Sheaf.Authorization;
 using Sheaf.Services;
 
@@ -21,9 +22,11 @@ public static class TrackerEndpoints
 
     private static void MapPeople(RouteGroupBuilder api)
     {
-        api.MapGet("/people/lookup", async Task<Ok<PagedResponse<PersonLookupResponse>>> (string? name, int? offset, int? limit, IPeopleService s, CancellationToken ct) =>
-            TypedResults.Ok(await s.LookupAsync(name, PageRequest.From(offset, limit), ct)))
-            .Tracker("LookupPeople", "Look up active people with limited identity only");
+        api.MapGet("/people/lookup", async Task<Ok<PersonLookupResponse[]>> (string? name, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.LookupAsync(name, ct)))
+            .Tracker("LookupPeople", "Find up to 20 active people by name (2+ characters), returning only name and household label")
+            .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
+            .Produces(StatusCodes.Status429TooManyRequests);
         api.MapGet("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetPersonAsync(id, ct)))
             .Tracker("GetPerson", "Get a scoped Person profile");
@@ -32,7 +35,7 @@ public static class TrackerEndpoints
                 var result = await s.CreatePersonAsync(request, ct);
                 return TypedResults.Created($"/api/church/people/{result.Id}", result);
             })
-            .Tracker("CreatePerson", "Staff create a Person without required contacts or household").Manage();
+            .Tracker("CreatePerson", "Staff create a Person without required contacts or household").RequirePermission(Permission.PeopleManage);
         api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonRequest request, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdatePersonAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
             .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links").RequiresIfMatch();

@@ -26,6 +26,14 @@ public sealed class Person : ITenanted
     [MaxLength(450)]
     public string? UserId { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>When the record was created; duplicate review uses it to tell the original from a later copy.</summary>
+    public DateTimeOffset CreatedAt { get; set; }
+    /// <summary>
+    /// The account that created the record, or null for imports and seeds. Not a foreign key, so the audit trail
+    /// survives the account being deleted.
+    /// </summary>
+    [MaxLength(450)]
+    public string? CreatedByUserId { get; set; }
     /// <summary>Changes on every write to this row, including household moves; clients send it back as If-Match.</summary>
     [ConcurrencyCheck]
     public Guid Version { get; set; } = Guid.NewGuid();

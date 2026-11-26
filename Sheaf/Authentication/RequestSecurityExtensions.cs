@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 
 using Microsoft.AspNetCore.HttpOverrides;
@@ -13,6 +14,7 @@ namespace Sheaf.Authentication;
 internal static class RequestSecurityExtensions
 {
     internal const string AuthRateLimitPolicy = "AuthByIp";
+    internal const string LookupRateLimitPolicy = "LookupByUser";
 
     internal static void AddRequestSecurity(this WebApplicationBuilder builder, bool documentGeneration)
     {
@@ -57,6 +59,12 @@ internal static class RequestSecurityExtensions
         {
             throw new InvalidOperationException("Authentication lockout and rate limit settings must be positive.");
         }
+        int lookupPermitLimit = builder.Configuration.GetValue("Tracker:LookupRateLimit:PermitLimit", 60);
+        int lookupWindowSeconds = builder.Configuration.GetValue("Tracker:LookupRateLimit:WindowSeconds", 60);
+        if (lookupPermitLimit <= 0 || lookupWindowSeconds <= 0)
+        {
+            throw new InvalidOperationException("Tracker lookup rate limit settings must be positive.");
+        }
         builder.Services.Configure<IdentityOptions>(options =>
         {
             options.Lockout.AllowedForNewUsers = true;
@@ -72,6 +80,18 @@ internal static class RequestSecurityExtensions
                 {
                     PermitLimit = permitLimit,
                     Window = TimeSpan.FromSeconds(windowSeconds),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            // Name lookup is open to every tracker user, so each account gets its own budget. Partitioning by
+            // account needs authentication to have run first, which is why UseRateLimiter follows UseAuthentication.
+            options.AddPolicy(LookupRateLimitPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = lookupPermitLimit,
+                    Window = TimeSpan.FromSeconds(lookupWindowSeconds),
                     QueueLimit = 0,
                     AutoReplenishment = true
                 }));

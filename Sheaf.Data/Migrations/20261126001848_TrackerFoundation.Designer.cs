@@ -13,8 +13,8 @@ using Sheaf.Data;
 namespace Sheaf.Data.Migrations;
 
 [DbContext(typeof(ApplicationDbContext))]
-[Migration("20261125232104_TrackerFoundation")]
-partial class _20261125232104_TrackerFoundation
+[Migration("20261126001848_TrackerFoundation")]
+partial class _20261126001848_TrackerFoundation
 {
     /// <inheritdoc />
     protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -502,6 +502,15 @@ partial class _20261125232104_TrackerFoundation
 
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("datetimeoffset")
+                    .HasDefaultValueSql("SYSDATETIMEOFFSET()");
+
+                b.Property<string>("CreatedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
 
                 b.Property<string>("Email")
                     .HasMaxLength(320)

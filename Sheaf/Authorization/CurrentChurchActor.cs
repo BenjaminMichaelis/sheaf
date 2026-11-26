@@ -1,7 +1,6 @@
 using System.Security.Claims;
 
-using Microsoft.EntityFrameworkCore;
-
+using Sheaf.Core.Authentication;
 using Sheaf.Data;
 
 namespace Sheaf.Authorization;
@@ -13,18 +12,25 @@ public interface ICurrentChurchActor
     Task<ChurchActor?> GetAsync(CancellationToken ct);
 }
 
-public sealed class HttpCurrentChurchActor(ApplicationDbContext db, ICurrentChurch church, IHttpContextAccessor http) : ICurrentChurchActor
+/// <summary>
+/// The signed-in user's selected membership with its persisted role. It reads through <see cref="IChurchMembershipRoles"/>,
+/// so it reuses the read the endpoint permission check already made in this request.
+/// </summary>
+public sealed class HttpCurrentChurchActor(IChurchMembershipRoles memberships, ICurrentChurch church, IHttpContextAccessor http) : ICurrentChurchActor
 {
     public async Task<ChurchActor?> GetAsync(CancellationToken ct)
     {
         var principal = http.HttpContext?.User;
-        var userId = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (principal?.Identity?.IsAuthenticated != true || userId is null
-            || church.ChurchId is not { } churchId || church.LeaderId is not { } membershipId)
+        if (principal?.Identity?.IsAuthenticated != true
+            || principal.FindFirstValue(ClaimTypes.NameIdentifier) is not { } userId
+            || principal.ReadChurchClaims(out ChurchSelection? selection) != ChurchClaimState.Selected
+            || selection is null
+            // The request's tenant must be the church the claims selected.
+            || church.ChurchId != selection.ChurchId || church.LeaderId != selection.MembershipId)
             return null;
 
-        var membership = await db.ChurchMemberships.AsNoTracking()
-            .SingleOrDefaultAsync(m => m.ChurchId == churchId && m.Id == membershipId && m.UserId == userId, ct);
-        return membership is null ? null : new(principal, churchId, membership.Id, membership.UserId, membership.Role);
+        return await memberships.GetRoleAsync(userId, selection, ct) is { } role
+            ? new(principal, selection.ChurchId, selection.MembershipId, userId, role)
+            : null;
     }
 }

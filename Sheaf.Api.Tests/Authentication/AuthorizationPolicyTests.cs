@@ -117,6 +117,26 @@ public class AuthorizationPolicyTests
     }
 
     [Test]
+    [Arguments(ChurchMembershipRole.Leader, ChurchMembershipRole.Coordinator)]
+    [Arguments(ChurchMembershipRole.Coordinator, ChurchMembershipRole.Staff)]
+    [Arguments(ChurchMembershipRole.Staff, ChurchMembershipRole.Admin)]
+    public async Task HasPermission_HigherRole_IncludesEveryLowerRolePermission(ChurchMembershipRole lower, ChurchMembershipRole higher)
+    {
+        Permission[] missing = [.. Enum.GetValues<Permission>()
+            .Where(permission => RolePermissions.HasPermission(lower, permission) && !RolePermissions.HasPermission(higher, permission))];
+
+        await Assert.That(missing).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(ChurchMembershipRole.Leader, false)]
+    [Arguments(ChurchMembershipRole.Coordinator, false)]
+    [Arguments(ChurchMembershipRole.Staff, true)]
+    [Arguments(ChurchMembershipRole.Admin, true)]
+    public async Task HasPermission_PeopleManage_MatchesExpectedRoles(ChurchMembershipRole role, bool expected) =>
+        await Assert.That(RolePermissions.HasPermission(role, Permission.PeopleManage)).IsEqualTo(expected);
+
+    [Test]
     public async Task HandleAsync_StoredRoleLosesPermission_FailsDespiteRoleClaim()
     {
         IAuthorizationService authorization = CreateAuthorizationService(new StoredRoles(_ => ChurchMembershipRole.Leader));

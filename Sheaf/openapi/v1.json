@@ -230,7 +230,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Look up active people with limited identity only",
+        "summary": "Find up to 20 active people by name (2+ characters), returning only name and household label",
         "operationId": "LookupPeople",
         "parameters": [
           {
@@ -238,30 +238,6 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "pattern": "^-?(?:0|[1-9]\\d*)$",
-              "type": [
-                "integer",
-                "string"
-              ],
-              "format": "int32"
             }
           }
         ],
@@ -271,7 +247,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResponseOfPersonLookupResponse"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PersonLookupResponse"
+                  }
                 }
               }
             }
@@ -315,6 +294,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too Many Requests"
           }
         },
         "security": [
@@ -2777,37 +2759,11 @@
           }
         }
       },
-      "PagedResponseOfPersonLookupResponse": {
-        "required": [
-          "items",
-          "nextOffset"
-        ],
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PersonLookupResponse"
-            }
-          },
-          "nextOffset": {
-            "pattern": "^-?(?:0|[1-9]\\d*)$",
-            "type": [
-              "null",
-              "integer",
-              "string"
-            ],
-            "format": "int32"
-          }
-        }
-      },
       "PersonLookupResponse": {
         "required": [
           "id",
           "name",
-          "currentGroups",
-          "householdLabel",
-          "householdFirstNames"
+          "householdLabel"
         ],
         "type": "object",
         "properties": {
@@ -2818,23 +2774,11 @@
           "name": {
             "type": "string"
           },
-          "currentGroups": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "householdLabel": {
             "type": [
               "null",
               "string"
             ]
-          },
-          "householdFirstNames": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },

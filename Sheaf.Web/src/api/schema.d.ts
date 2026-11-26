@@ -128,7 +128,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Look up active people with limited identity only */
+        /** Find up to 20 active people by name (2+ characters), returning only name and household label */
         get: operations["LookupPeople"];
         put?: never;
         post?: never;
@@ -509,18 +509,11 @@ export interface components {
             /** Format: int32 */
             nextOffset: null | number | string;
         };
-        PagedResponseOfPersonLookupResponse: {
-            items: components["schemas"]["PersonLookupResponse"][];
-            /** Format: int32 */
-            nextOffset: null | number | string;
-        };
         PersonLookupResponse: {
             /** Format: uuid */
             id: string;
             name: string;
-            currentGroups: string[];
             householdLabel: null | string;
-            householdFirstNames: string[];
         };
         PersonRequest: {
             firstName: string;
@@ -765,8 +758,6 @@ export interface operations {
         parameters: {
             query?: {
                 name?: string;
-                offset?: number | string;
-                limit?: number | string;
             };
             header?: never;
             path?: never;
@@ -780,7 +771,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PagedResponseOfPersonLookupResponse"];
+                    "application/json": components["schemas"]["PersonLookupResponse"][];
                 };
             };
             /** @description Bad Request */
@@ -818,6 +809,13 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

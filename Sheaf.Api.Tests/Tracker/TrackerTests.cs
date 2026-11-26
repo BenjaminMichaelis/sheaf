@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net.Http.Json;
 using System.Security.Claims;
 
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 using Sheaf.Authorization;
@@ -104,9 +106,10 @@ public class TrackerTests : ChurchApiTestBase
 
     [Test]
     [Arguments(ChurchMembershipRole.Staff, HttpStatusCode.Created)]
+    [Arguments(ChurchMembershipRole.Admin, HttpStatusCode.Created)]
     [Arguments(ChurchMembershipRole.Leader, HttpStatusCode.Forbidden)]
-    [Arguments(ChurchMembershipRole.Admin, HttpStatusCode.Forbidden)]
-    public async Task CreatePerson_ByRole_AllowsOnlyTrackerManagers(ChurchMembershipRole role, HttpStatusCode expected)
+    [Arguments(ChurchMembershipRole.Coordinator, HttpStatusCode.Forbidden)]
+    public async Task CreatePerson_ByRole_AllowsOnlyPeopleManagers(ChurchMembershipRole role, HttpStatusCode expected)
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, role);
@@ -185,7 +188,7 @@ public class TrackerTests : ChurchApiTestBase
         await Assert.That(person.LastName).IsEqualTo("van Buren");
         await Assert.That(person.Name).IsEqualTo("Mary Jane van Buren");
         using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Jane%20van");
-        await Assert.That((await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items.Single().Name).IsEqualTo(person.Name);
+        await Assert.That((await TrackerReadAsync<PersonLookupResponse[]>(lookup)).Single().Name).IsEqualTo(person.Name);
         foreach (var input in new[] { new PersonRequest(" "), new PersonRequest(new string('a', 101)), new PersonRequest("Mary", new string('b', 101)) })
         {
             using var invalid = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/people/{person.Id}", input, person.Version);
@@ -258,10 +261,9 @@ public class TrackerTests : ChurchApiTestBase
         await Assert.That(afterRename.Label).IsEqualTo("Edited label");
         using var preserved = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/households/{household.Id}", new HouseholdRequest([submittedFirst.Id], " "), afterRename.Version);
         await Assert.That((await TrackerReadAsync<HouseholdResponse>(preserved)).Label).IsEqualTo("Edited label");
-        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
-        var found = (await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items.Single(p => p.Id == submittedFirst.Id);
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Submitted");
+        var found = (await TrackerReadAsync<PersonLookupResponse[]>(lookup)).Single(p => p.Id == submittedFirst.Id);
         await Assert.That(found.HouseholdLabel).IsEqualTo("Edited label");
-        await Assert.That(found.HouseholdFirstNames).IsEquivalentTo([submittedFirst.FirstName]);
     }
 
     [Test]
@@ -316,14 +318,15 @@ public class TrackerTests : ChurchApiTestBase
         var result = await TrackerReadAsync<HouseholdResponse>(structure);
         await Assert.That(result.Members.Select(p => p.Id)).IsEquivalentTo([member.Id, outside.Id]);
         await Assert.That(await structure.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
-        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
-        var found = (await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items;
-        // A Leader's lookup is limited to people they can already see, even when an outsider shares a household.
-        await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, member.Id]);
-        await Assert.That(found.Single(p => p.Id == member.Id).CurrentGroups).IsEquivalentTo([group.Name]);
-        await Assert.That(found.Single(p => p.Id == member.Id).HouseholdFirstNames).IsEquivalentTo(["Member", "Outside"]);
-        await Assert.That(found.Single(p => p.Id == leader.Id).HouseholdFirstNames).IsEmpty();
-        await Assert.That(await lookup.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Full%20Name");
+        var found = await TrackerReadAsync<PersonLookupResponse[]>(lookup);
+        // A Leader finds any active person by name, including people outside their groups, but sees only name and
+        // household label. The member was renamed above and the inactive person is excluded.
+        await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, outside.Id]);
+        await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdLabel).IsEqualTo("Renamed");
+        var lookupBody = await lookup.Content.ReadAsStringAsync();
+        await Assert.That(lookupBody).DoesNotContain("private@example.com");
+        await Assert.That(lookupBody).DoesNotContain(group.Name);
         using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(Time.GetUtcNow()), group.Version);
         await Assert.That(ending.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         await InChurchAsync(membership.ChurchId, async db =>
@@ -362,8 +365,8 @@ public class TrackerTests : ChurchApiTestBase
             using var denied = await TrackerRequestAsync(client, cookie, first.ChurchId, HttpMethod.Get, $"/groups/{id}");
             await Assert.That(denied.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         }
-        using var lookup = await TrackerRequestAsync(client, cookie, first.ChurchId, HttpMethod.Get, "/people/lookup");
-        await Assert.That((await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items).IsEmpty();
+        using var lookup = await TrackerRequestAsync(client, cookie, first.ChurchId, HttpMethod.Get, "/people/lookup?name=Same%20account");
+        await Assert.That(await TrackerReadAsync<PersonLookupResponse[]>(lookup)).IsEmpty();
     }
 
     [Test]
@@ -677,61 +680,133 @@ public class TrackerTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task LookupAsync_MoreResultsThanLimit_PagesInNameOrder()
-    {
-        var user = await CreateUserAsync();
-        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
-        await InChurchAsync(membership.ChurchId, async db =>
-        {
-            db.People.AddRange(new Person { FirstName = "Carol" }, new Person { FirstName = "Alice" }, new Person { FirstName = "Bob" });
-            await db.SaveChangesAsync();
-        });
-        using var client = CreateClient();
-        var (_, cookie) = await LoginAsync(client, user);
-
-        using var first = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?limit=2");
-        var firstPage = await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(first);
-        await Assert.That(string.Join(",", firstPage.Items.Select(p => p.Name))).IsEqualTo("Alice,Bob");
-        await Assert.That(firstPage.NextOffset).IsEqualTo(2);
-        using var second = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/lookup?limit=2&offset={firstPage.NextOffset}");
-        var secondPage = await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(second);
-        await Assert.That(secondPage.Items.Select(p => p.Name)).IsEquivalentTo(["Carol"]);
-        await Assert.That(secondPage.NextOffset).IsNull();
-        foreach (var query in new[] { "limit=0", $"limit={PageRequest.MaxLimit + 1}", "offset=-1" })
-        {
-            using var invalid = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/lookup?{query}");
-            await Assert.That(invalid.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
-        }
-    }
-
-    [Test]
-    public async Task LookupAsync_Leader_ReturnsOnlyAccessiblePeopleAndVisibleGroupNames()
+    public async Task LookupAsync_TwoOrThreeCharacterTerms_MatchNameStartsOrAnywhere()
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user);
-        var leader = new Person { FirstName = "Leader", UserId = user.Id };
-        var member = new Person { FirstName = "Member" };
-        var outside = new Person { FirstName = "Outside" };
-        var led = new Context { Name = "Led", StartsAt = Time.GetUtcNow().AddDays(-5) };
-        var unled = new Context { Name = "Unled", StartsAt = led.StartsAt };
+        var bo = new Person { FirstName = "Bo" };
+        var bob = new Person { FirstName = "Bob", LastName = "Smith" };
+        var bolton = new Person { FirstName = "Jim", LastName = "Bolton" };
+        var abbott = new Person { FirstName = "Abbott", LastName = "Ray" };
+        var inactive = new Person { FirstName = "Bonnie", IsActive = false };
         await InChurchAsync(membership.ChurchId, async db =>
         {
-            db.AddRange(leader, member, outside, led, unled);
-            db.ContextLeaders.Add(new ContextLeader { ContextId = led.Id, PersonId = leader.Id, StartsAt = led.StartsAt });
-            db.ContextMembers.AddRange(
-                new ContextMember { ContextId = led.Id, PersonId = member.Id, JoinedAt = led.StartsAt },
-                new ContextMember { ContextId = unled.Id, PersonId = member.Id, JoinedAt = led.StartsAt },
-                new ContextMember { ContextId = unled.Id, PersonId = outside.Id, JoinedAt = led.StartsAt });
+            db.People.AddRange(bo, bob, bolton, abbott, inactive);
             await db.SaveChangesAsync();
         });
         using var client = CreateClient();
         var (_, cookie) = await LoginAsync(client, user);
 
-        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup");
-        var found = (await TrackerReadAsync<PagedResponse<PersonLookupResponse>>(lookup)).Items;
+        using var prefix = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Bo");
+        using var anywhere = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=bbo");
 
-        await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, member.Id]);
-        await Assert.That(found.Single(p => p.Id == member.Id).CurrentGroups).IsEquivalentTo([led.Name]);
+        // Two characters match only the start of a first or last name, so "Bo" finds Bo, Bob, and Bolton but not Abbott.
+        await Assert.That((await TrackerReadAsync<PersonLookupResponse[]>(prefix)).Select(p => p.Id)).IsEquivalentTo([bo.Id, bob.Id, bolton.Id]);
+        await Assert.That((await TrackerReadAsync<PersonLookupResponse[]>(anywhere)).Select(p => p.Id)).IsEquivalentTo([abbott.Id]);
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("?name=")]
+    [Arguments("?name=B")]
+    [Arguments("?name=%20B%20")]
+    public async Task LookupAsync_MissingOrOneCharacterTerm_ReturnsBadRequest(string query)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/people/lookup{query}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    }
+
+    [Test]
+    public async Task LookupAsync_MoreMatchesThanCap_ReturnsFirstResultsInNameOrder()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.People.AddRange(Enumerable.Range(0, PeopleService.LookupMaxResults + 5)
+                .Select(i => new Person { FirstName = "Person", LastName = $"{i:D2}" }));
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Person");
+        var found = await TrackerReadAsync<PersonLookupResponse[]>(response);
+
+        await Assert.That(string.Join(",", found.Select(p => p.Name))).IsEqualTo(
+            string.Join(",", Enumerable.Range(0, PeopleService.LookupMaxResults).Select(i => $"Person {i:D2}")));
+    }
+
+    [Test]
+    public async Task LookupAsync_OverPerAccountLimit_ReturnsTooManyRequestsForThatAccountOnly()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user);
+        var other = await CreateUserAsync();
+        var otherMembership = await AddMembershipAsync(other);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        var (_, otherCookie) = await LoginAsync(client, other);
+
+        for (var i = 0; i < 60; i++)
+        {
+            using var allowed = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Ada");
+            await Assert.That(allowed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        }
+        using var limited = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Ada");
+        using var otherAccount = await TrackerRequestAsync(client, otherCookie, otherMembership.ChurchId, HttpMethod.Get, "/people/lookup?name=Ada");
+
+        await Assert.That(limited.StatusCode).IsEqualTo(HttpStatusCode.TooManyRequests);
+        await Assert.That(otherAccount.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task GetGroup_AuthorizedTrackerRequest_ReadsMembershipOnce()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var group = new Context { Name = "Counted", StartsAt = Time.GetUtcNow().AddDays(-1) };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.Add(group);
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        _membershipReads.Reset();
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, $"/groups/{group.Id}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        // The endpoint permission check and the tracker's current actor share one read of the stored role.
+        await Assert.That(_membershipReads.Count).IsEqualTo(1);
+    }
+
+    private readonly MembershipReadCounter _membershipReads = new();
+
+    protected override void ConfigureDatabase(DbContextOptionsBuilder options) => options.AddInterceptors(_membershipReads);
+
+    private sealed class MembershipReadCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM [ChurchMemberships]", StringComparison.Ordinal))
+                Interlocked.Increment(ref _count);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     [Test]

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sheaf.Data.Migrations;
 
 /// <inheritdoc />
-public partial class _20261125232104_TrackerFoundation : Migration
+public partial class _20261126001848_TrackerFoundation : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
@@ -97,6 +97,8 @@ public partial class _20261125232104_TrackerFoundation : Migration
                 HouseholdId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                 UserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                 IsActive = table.Column<bool>(type: "bit", nullable: false),
+                CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false, defaultValueSql: "SYSDATETIMEOFFSET()"),
+                CreatedByUserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                 Version = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
             },
             constraints: table =>
