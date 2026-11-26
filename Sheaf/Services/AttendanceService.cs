@@ -148,10 +148,11 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
 
         var current = await db.Attendances.Where(a => a.SessionId == session.Id && a.RemovedAt == null).ToListAsync(ct);
         var added = listed.Except(current.Select(a => a.PersonId)).ToArray();
-        // Someone newly marked present must be an active person in this church. Marking someone present gives the
-        // group's Leaders their full profile for 90 days (TrackerScope.People), so a Leader could unlock anyone found by
-        // name lookup. That is an accepted risk: it is detected, not prevented, through the recorder on each row and
-        // the Staff attendance-records report.
+        // Someone newly marked present must be an active person in this church. Marking someone present lets the
+        // group's Leaders read their full profile for 90 days (TrackerScope.VisiblePeople), so a Leader could unlock
+        // read access to anyone found by name lookup; it never grants edit, roster, or household access. That is an
+        // accepted risk: it is detected, not prevented, through the recorder on each row and the Staff
+        // attendance-records report.
         if (await db.People.CountAsync(p => added.Contains(p.Id) && p.IsActive, ct) != added.Length)
             throw Invalid();
 
