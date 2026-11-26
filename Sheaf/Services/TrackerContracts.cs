@@ -37,11 +37,10 @@ public sealed record HouseholdResponse(Guid Id, string? Label, HouseholdMemberRe
 public sealed record HouseholdMemberResponse(Guid Id, string FirstName);
 /// <summary>
 /// Records a group meeting. <paramref name="PersonIds"/> are existing people who came; <paramref name="NewPeople"/> are
-/// people to create and mark present in the same save. <paramref name="Id"/> may be chosen by the client so a retried
-/// request returns the meeting already recorded instead of a second one. Possible duplicates (a similar name, another
-/// meeting that day) are rejected with a confirmation problem unless <paramref name="Confirm"/> is true.
+/// people to create and mark present in the same save. Possible duplicates (a similar name, another meeting that day)
+/// are rejected with a confirmation problem unless <paramref name="Confirm"/> is true.
 /// </summary>
-public sealed record SessionRequest(DateOnly OccurredOn, Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, Guid? Id = null, bool Confirm = false);
+public sealed record SessionRequest(DateOnly OccurredOn, Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, bool Confirm = false);
 /// <summary>Replaces who came to a meeting. People left out are taken off the list, which is kept as history.</summary>
 public sealed record AttendeesRequest(Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, bool Confirm = false);
 /// <summary>A person named on a meeting: who came, or a roster member who did not.</summary>

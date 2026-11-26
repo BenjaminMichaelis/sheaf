@@ -11,9 +11,8 @@ namespace Sheaf.Data;
 /// </summary>
 public sealed class ContextSession : ITenanted
 {
-    /// <summary>Clients may choose the id (a UUID v7) so that retrying a create cannot record the meeting twice.</summary>
     [DatabaseGenerated(DatabaseGeneratedOption.None)]
-    public Guid Id { get; init; } = Guid.CreateVersion7();
+    public Guid Id { get; private set; } = Guid.CreateVersion7();
 
     public Guid ChurchId { get; set; }
 

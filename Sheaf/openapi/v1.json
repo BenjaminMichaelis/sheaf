@@ -2473,7 +2473,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Record a meeting and who came, creating new people in the same save; a retry with the same id returns the recorded meeting",
+        "summary": "Record a meeting and who came, creating new people in the same save",
         "operationId": "RecordGroupSession",
         "parameters": [
           {
@@ -2497,16 +2497,6 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
-                }
-              }
-            }
-          },
           "201": {
             "description": "Created",
             "content": {
@@ -3738,13 +3728,6 @@
             "items": {
               "$ref": "#/components/schemas/PersonRequest"
             }
-          },
-          "id": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
           },
           "confirm": {
             "type": "boolean",

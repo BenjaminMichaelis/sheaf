@@ -143,24 +143,6 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task RecordGroupSession_RetryWithSameId_ReturnsRecordedSessionWithoutDuplicating()
-    {
-        using var f = await SeedGroupAsync();
-        var request = new SessionRequest(Today, [f.Member.Id], [new PersonRequest("Once")], Id: Guid.CreateVersion7());
-
-        using var first = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", request);
-        using var retry = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", request);
-
-        await Assert.That((await TrackerReadAsync<SessionResponse>(first, HttpStatusCode.Created)).Id).IsEqualTo(request.Id);
-        await Assert.That((await TrackerReadAsync<SessionResponse>(retry)).Id).IsEqualTo(request.Id);
-        await InChurchAsync(f.ChurchId, async db =>
-        {
-            await Assert.That(await db.ContextSessions.CountAsync()).IsEqualTo(1);
-            await Assert.That(await db.People.CountAsync(p => p.FirstName == "Once")).IsEqualTo(1);
-        });
-    }
-
-    [Test]
     [Arguments(1)]
     [Arguments(-250)]
     public async Task RecordGroupSession_FutureDateOrBeforeGroupStarted_ReturnsBadRequest(int daysFromToday)
@@ -372,27 +354,5 @@ public class AttendanceTests : ChurchApiTestBase
 
         var records = (await TrackerReadAsync<PagedResponse<AttendanceRecordResponse>>(response)).Items;
         await Assert.That(records.Select(r => r.PersonId)).IsEquivalentTo([f.Member.Id, f.Leader.Id], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-    }
-
-    [Test]
-    [Arguments(false, true)]
-    [Arguments(true, false)]
-    public async Task RecordGroupSession_RetryWithChangedDateOrAttendees_ReturnsConflict(bool changeDate, bool addAttendee)
-    {
-        using var f = await SeedGroupAsync();
-        var request = new SessionRequest(Today, [f.Member.Id], Id: Guid.CreateVersion7());
-        using var first = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", request);
-        await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.Created);
-        var changed = request with
-        {
-            OccurredOn = changeDate ? Today.AddDays(-1) : Today,
-            PersonIds = addAttendee ? [f.Member.Id, f.Leader.Id] : [f.Member.Id]
-        };
-
-        using var retry = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", changed);
-
-        await Assert.That(retry.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-        await InChurchAsync(f.ChurchId, async db =>
-            await Assert.That(await db.Attendances.CountAsync()).IsEqualTo(1));
     }
 }

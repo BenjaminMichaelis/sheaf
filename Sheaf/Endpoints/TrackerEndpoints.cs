@@ -30,14 +30,12 @@ public static class TrackerEndpoints
             TypedResults.Ok(await s.GetSessionAsync(groupId, sessionId, ct)))
             .Tracker("GetGroupSession", "Get a meeting with who came and which roster members were absent");
         // Recording can create people and reports possible duplicates by name, so it shares lookup's per-account limit.
-        api.MapPost("/groups/{groupId:guid}/sessions", async Task<Results<Created<SessionResponse>, Ok<SessionResponse>>> (Guid groupId, SessionRequest request, IAttendanceService s, CancellationToken ct) =>
+        api.MapPost("/groups/{groupId:guid}/sessions", async Task<Created<SessionResponse>> (Guid groupId, SessionRequest request, IAttendanceService s, CancellationToken ct) =>
             {
-                var (result, created) = await s.CreateSessionAsync(groupId, request, ct);
-                return created
-                    ? TypedResults.Created($"/api/church/groups/{groupId}/sessions/{result.Id}", result)
-                    : TypedResults.Ok(result);
+                var result = await s.CreateSessionAsync(groupId, request, ct);
+                return TypedResults.Created($"/api/church/groups/{groupId}/sessions/{result.Id}", result);
             })
-            .Tracker("RecordGroupSession", "Record a meeting and who came, creating new people in the same save; a retry with the same id returns the recorded meeting")
+            .Tracker("RecordGroupSession", "Record a meeting and who came, creating new people in the same save")
             .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
             .Produces(StatusCodes.Status429TooManyRequests);
         api.MapPut("/groups/{groupId:guid}/sessions/{sessionId:guid}", async Task<Ok<SessionResponse>> (Guid groupId, Guid sessionId, [FromHeader(Name = IfMatchHeader)] string? ifMatch, AttendeesRequest request, IAttendanceService s, CancellationToken ct) =>

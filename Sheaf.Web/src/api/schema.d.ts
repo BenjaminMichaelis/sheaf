@@ -411,7 +411,7 @@ export interface paths {
         /** List a group's meetings, newest first, with how many came */
         get: operations["GetGroupSessions"];
         put?: never;
-        /** Record a meeting and who came, creating new people in the same save; a retry with the same id returns the recorded meeting */
+        /** Record a meeting and who came, creating new people in the same save */
         post: operations["RecordGroupSession"];
         delete?: never;
         options?: never;
@@ -670,8 +670,6 @@ export interface components {
             occurredOn: string;
             personIds?: null | string[];
             newPeople?: null | components["schemas"]["PersonRequest"][];
-            /** Format: uuid */
-            id?: null | string;
             /** @default false */
             confirm: boolean;
         };
@@ -2513,15 +2511,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionResponse"];
-                };
-            };
             /** @description Created */
             201: {
                 headers: {

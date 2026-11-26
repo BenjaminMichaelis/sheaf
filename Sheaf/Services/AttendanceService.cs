@@ -13,8 +13,7 @@ public interface IAttendanceService
 {
     Task<PagedResponse<SessionSummaryResponse>> GetSessionsAsync(Guid groupId, PageRequest page, CancellationToken ct);
     Task<SessionResponse> GetSessionAsync(Guid groupId, Guid sessionId, CancellationToken ct);
-    /// <summary>Records a meeting. <c>Created</c> is false when a retry found the meeting already recorded under the request's id.</summary>
-    Task<(SessionResponse Session, bool Created)> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct);
+    Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct);
     Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct);
     Task<PagedResponse<AttendanceRecordResponse>> GetRecordsAsync(Guid? personId, string? userId, PageRequest page, CancellationToken ct);
 }
@@ -56,18 +55,14 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         return await ResponseAsync(session, ct);
     }
 
-    public async Task<(SessionResponse Session, bool Created)> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct)
+    public async Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct)
     {
         var (actor, group) = await scope.GroupAsync(groupId, ct);
-        if (request.Id == Guid.Empty)
-            throw Invalid();
-        if (request.Id is { } id
-            && await db.ContextSessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, ct) is { } recorded)
-            return (await ReplayAsync(recorded, groupId, request, ct), false);
         // Any past date while the group existed may be recorded, so late paperwork can be caught up. The Leader edit
         // window applies only to changing a meeting once it is recorded.
         RequireMeetingDate(group, request.OccurredOn);
 
+        // A second meeting the same day needs confirming, which also catches a double submit or a retried request.
         var reasons = new Dictionary<string, object?>();
         if (!request.Confirm)
         {
@@ -78,7 +73,6 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         }
         var session = new ContextSession
         {
-            Id = request.Id ?? Guid.CreateVersion7(),
             ContextId = groupId,
             OccurredOn = request.OccurredOn,
             RecordedAt = scope.Now,
@@ -86,36 +80,8 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         };
         db.ContextSessions.Add(session);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, reasons, ct);
-        try
-        {
-            await scope.SaveAsync(ct);
-        }
-        catch (TrackerException) when (request.Id is not null)
-        {
-            // A retry may have raced the original request and lost on the primary key: answer as if it had found the
-            // meeting. Any other failure is rethrown unchanged.
-            if (await db.ContextSessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == session.Id, ct) is not { } concurrent)
-                throw;
-            return (await ReplayAsync(concurrent, groupId, request, ct), false);
-        }
-        return (await ResponseAsync(session, ct), true);
-    }
-
-    /// <summary>
-    /// Answers a create whose id is already recorded, as a retry of the request that recorded it. A retry must carry the
-    /// same group, date and attendees; anything else reuses an id for a different meeting, or would silently drop the
-    /// client's changes, so it is a Conflict. People the original request created have new ids, so only their number is
-    /// compared.
-    /// </summary>
-    private async Task<SessionResponse> ReplayAsync(ContextSession recorded, Guid groupId, SessionRequest request, CancellationToken ct)
-    {
-        var listed = (request.PersonIds ?? []).Distinct().ToArray();
-        var present = await db.Attendances.Where(a => a.SessionId == recorded.Id && a.RemovedAt == null)
-            .Select(a => a.PersonId).ToArrayAsync(ct);
-        if (recorded.ContextId != groupId || recorded.OccurredOn != request.OccurredOn
-            || listed.Except(present).Any() || present.Length != listed.Length + (request.NewPeople?.Length ?? 0))
-            throw Conflict();
-        return await ResponseAsync(recorded, ct);
+        await scope.SaveAsync(ct);
+        return await ResponseAsync(session, ct);
     }
 
     public async Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct)
