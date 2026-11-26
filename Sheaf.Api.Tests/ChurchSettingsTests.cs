@@ -65,4 +65,29 @@ public class ChurchSettingsTests : ChurchApiTestBase
         await Assert.That(settings.TimeZoneId).IsEqualTo("America/Chicago");
         await Assert.That(settings.Name).IsEqualTo($"Church {membership.ChurchId}");
     }
+
+    [Test]
+    public async Task GetGroups_StoredTimeZoneUnresolvable_ReturnsProblemUntilAdminResetsZone()
+    {
+        // Stands in for a zone that resolved where it was saved but not on this host.
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Admin);
+        await InScopeAsync(async services =>
+        {
+            var db = services.GetRequiredService<ApplicationDbContext>();
+            await db.Churches.Where(c => c.Id == membership.ChurchId).ExecuteUpdateAsync(c => c.SetProperty(x => x.TimeZoneId, "Gone/Zone"));
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var broken = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/groups");
+        await Assert.That(broken.StatusCode).IsEqualTo(HttpStatusCode.InternalServerError);
+        var problem = await broken.Content.ReadFromJsonAsync<ProblemDetails>();
+        await Assert.That(problem?.Title).Contains("/api/church/settings");
+
+        using var reset = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings", new ChurchSettingsRequest("America/Chicago"));
+        await Assert.That(reset.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        using var fixedResponse = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/groups");
+        await Assert.That(fixedResponse.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
 }

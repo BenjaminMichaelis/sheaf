@@ -63,12 +63,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
             throw Invalid();
         if (request.Id is { } id
             && await db.ContextSessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, ct) is { } recorded)
-        {
-            // A retry of a create that already succeeded. An id reused for another group is a client error.
-            if (recorded.ContextId != groupId)
-                throw Conflict();
-            return (await ResponseAsync(recorded, ct), false);
-        }
+            return (await ReplayAsync(recorded, groupId, request, ct), false);
         // Any past date while the group existed may be recorded, so late paperwork can be caught up. The Leader edit
         // window applies only to changing a meeting once it is recorded.
         RequireMeetingDate(group, request.OccurredOn);
@@ -101,11 +96,26 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
             // meeting. Any other failure is rethrown unchanged.
             if (await db.ContextSessions.AsNoTracking().SingleOrDefaultAsync(s => s.Id == session.Id, ct) is not { } concurrent)
                 throw;
-            if (concurrent.ContextId != groupId)
-                throw Conflict();
-            return (await ResponseAsync(concurrent, ct), false);
+            return (await ReplayAsync(concurrent, groupId, request, ct), false);
         }
         return (await ResponseAsync(session, ct), true);
+    }
+
+    /// <summary>
+    /// Answers a create whose id is already recorded, as a retry of the request that recorded it. A retry must carry the
+    /// same group, date and attendees; anything else reuses an id for a different meeting, or would silently drop the
+    /// client's changes, so it is a Conflict. People the original request created have new ids, so only their number is
+    /// compared.
+    /// </summary>
+    private async Task<SessionResponse> ReplayAsync(ContextSession recorded, Guid groupId, SessionRequest request, CancellationToken ct)
+    {
+        var listed = (request.PersonIds ?? []).Distinct().ToArray();
+        var present = await db.Attendances.Where(a => a.SessionId == recorded.Id && a.RemovedAt == null)
+            .Select(a => a.PersonId).ToArrayAsync(ct);
+        if (recorded.ContextId != groupId || recorded.OccurredOn != request.OccurredOn
+            || listed.Except(present).Any() || present.Length != listed.Length + (request.NewPeople?.Length ?? 0))
+            throw Conflict();
+        return await ResponseAsync(recorded, ct);
     }
 
     public async Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct)
@@ -129,7 +139,8 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
             join p in db.People on a.PersonId equals p.Id
             where (personId == null || a.PersonId == personId)
                 && (userId == null || a.RecordedByUserId == userId || a.RemovedByUserId == userId)
-            orderby a.RecordedAt descending, a.Id descending
+            // Newest event first: a removal counts from when it happened, not from when the row was first recorded.
+            orderby a.RemovedAt ?? a.RecordedAt descending, a.Id descending
             select new AttendanceRecordResponse(s.Id, s.ContextId, s.OccurredOn, p.Id,
                 p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
                 a.RecordedByUserId, a.RecordedAt, a.RemovedByUserId, a.RemovedAt);

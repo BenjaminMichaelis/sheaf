@@ -10,7 +10,7 @@ namespace Sheaf.Services;
 /// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/>, <see cref="Permission.TrackerManage"/>, and <see cref="Permission.PeopleManage"/>);
 /// this type only answers questions that need the data loaded, so every tracker service goes through it.
 /// </summary>
-public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock)
+public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock, ILogger<TrackerScope> logger)
 {
     /// <summary>How long after attending one of a Leader's groups a person's full profile stays visible to that Leader.</summary>
     public const int AttendanceVisibilityDays = 90;
@@ -36,8 +36,17 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
     public async Task<ChurchActor> ActorAsync(CancellationToken ct)
     {
         var actor = await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
-        _calendar ??= new ChurchCalendar(await db.Churches.Where(c => c.Id == actor.ChurchId)
-            .Select(c => c.TimeZoneId).SingleAsync(ct));
+        if (_calendar is null)
+        {
+            var zone = await db.Churches.Where(c => c.Id == actor.ChurchId).Select(c => c.TimeZoneId).SingleAsync(ct);
+            // A zone that resolved when saved can fail on a host with different time-zone data. Falling back to another
+            // zone would quietly move meeting dates, so fail clearly instead.
+            if (!ChurchCalendar.TryCreate(zone, out _calendar))
+            {
+                LogUnresolvableTimeZone(logger, actor.ChurchId, zone);
+                throw new TrackerException(TrackerFailure.TimeZoneUnavailable);
+            }
+        }
         return actor;
     }
 
@@ -59,8 +68,8 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
     }
 
     /// <summary>
-    /// Managers see every person. Everyone else sees current members and leaders of the groups they lead, and anyone
-    /// still marked present at one of those groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days.
+    /// People the actor may change, assign to a group, or put in a household. Managers reach every person; everyone else
+    /// reaches the current members and leaders of the groups they lead.
     /// </summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
@@ -68,11 +77,25 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
             return db.People;
         var groups = Groups(actor).Select(g => g.Id);
         var now = Now;
-        var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
         return db.People.Where(p => db.ContextMembers.Any(m => m.PersonId == p.Id && groups.Contains(m.ContextId)
                 && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
             || db.ContextLeaders.Any(l => l.PersonId == p.Id && groups.Contains(l.ContextId)
-                && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now))
+                && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)));
+    }
+
+    /// <summary>
+    /// People whose profile the actor may read: everyone in <see cref="People"/>, plus anyone still marked present at
+    /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
+    /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
+    /// </summary>
+    public IQueryable<Person> VisiblePeople(ChurchActor actor)
+    {
+        if (ManagesPeople(actor))
+            return db.People;
+        var groups = Groups(actor).Select(g => g.Id);
+        var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
+        var reachable = People(actor).Select(p => p.Id);
+        return db.People.Where(p => reachable.Contains(p.Id)
             || db.Attendances.Any(a => a.PersonId == p.Id && a.RemovedAt == null
                 && db.ContextSessions.Any(s => s.Id == a.SessionId && groups.Contains(s.ContextId) && s.OccurredOn >= attendedSince)));
     }
@@ -112,6 +135,9 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
             throw TrackerRules.Conflict();
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Church {ChurchId} has time zone {TimeZoneId}, which this host cannot resolve.")]
+    private static partial void LogUnresolvableTimeZone(ILogger logger, Guid churchId, string timeZoneId);
 }
 
 /// <summary>An offset page request, validated at the API boundary.</summary>

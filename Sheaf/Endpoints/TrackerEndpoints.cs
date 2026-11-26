@@ -204,6 +204,7 @@ internal sealed class TrackerEndpointFilter : IEndpointFilter
                 TrackerFailure.PreconditionFailed => (StatusCodes.Status412PreconditionFailed, "The resource changed since it was read. Reload it and retry."),
                 TrackerFailure.PreconditionRequired => (StatusCodes.Status428PreconditionRequired, "Send the resource's version in an If-Match header."),
                 TrackerFailure.ConfirmationRequired => (StatusCodes.Status409Conflict, "This looks like a duplicate. Resend with confirm to save anyway."),
+                TrackerFailure.TimeZoneUnavailable => (StatusCodes.Status500InternalServerError, "The church's time zone isn't available on this server. An Admin can set it again with PUT /api/church/settings."),
                 _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
             };
             var type = exception.Failure == TrackerFailure.ConfirmationRequired ? TrackerException.ConfirmationRequiredType : null;

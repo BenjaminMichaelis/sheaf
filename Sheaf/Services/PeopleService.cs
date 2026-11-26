@@ -30,7 +30,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
     public async Task<PersonResponse> GetPersonAsync(Guid id, CancellationToken ct)
     {
         var actor = await scope.ActorAsync(ct);
-        return Profile(await scope.People(actor).AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing());
+        return Profile(await scope.VisiblePeople(actor).AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing());
     }
 
     public async Task<PersonResponse> UpdatePersonAsync(Guid id, Guid expectedVersion, PersonRequest request, CancellationToken ct)

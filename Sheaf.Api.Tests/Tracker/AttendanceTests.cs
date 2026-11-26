@@ -271,6 +271,32 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task TrackerWrites_LeaderTargetsAttendedVisitor_RejectedWithoutChanges()
+    {
+        // Attending grants a Leader read access only: the visitor stays out of reach for writes.
+        using var f = await SeedGroupAsync();
+        var visitor = await AddPersonAsync(f, "Vera", "Visitor");
+        await AddSessionAsync(f, Today, visitor.Id);
+        using var read = await SendAsync(f, HttpMethod.Get, $"/people/{visitor.Id}");
+        var profile = await TrackerReadAsync<PersonResponse>(read);
+
+        using var edit = await SendAsync(f, HttpMethod.Put, $"/people/{visitor.Id}", new PersonRequest("Vera", "Visitor", Email: "new@example.com"), profile.Version);
+        using var assign = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/members", new AssignmentRequest(visitor.Id, Time.GetUtcNow()));
+        using var household = await SendAsync(f, HttpMethod.Post, "/households", new HouseholdRequest([f.Member.Id, visitor.Id]));
+
+        await Assert.That(edit.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+        await Assert.That(assign.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+        await Assert.That(household.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            var stored = await db.People.SingleAsync(p => p.Id == visitor.Id);
+            await Assert.That(stored.Email).IsNull();
+            await Assert.That(stored.HouseholdId).IsNull();
+            await Assert.That(await db.ContextMembers.AnyAsync(m => m.PersonId == visitor.Id)).IsFalse();
+        });
+    }
+
+    [Test]
     public async Task GetGroupSession_MemberJoinedAfterMeeting_NotListedAbsent()
     {
         using var f = await SeedGroupAsync();
@@ -320,5 +346,49 @@ public class AttendanceTests : ChurchApiTestBase
         await Assert.That(record.RecordedByUserId).IsEqualTo(f.Membership.UserId);
         await Assert.That(record.RemovedByUserId).IsEqualTo(f.Membership.UserId);
         await Assert.That(record.RemovedAt).IsNotNull();
+    }
+
+    [Test]
+    public async Task GetAttendanceRecords_OldRowRemovedToday_ListedBeforeRowsRecordedSince()
+    {
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff);
+        var old = await AddSessionAsync(f, Today.AddDays(-30), f.Member.Id);
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            var row = await db.Attendances.SingleAsync(a => a.SessionId == old.Id);
+            row.RecordedAt = Time.GetUtcNow().AddDays(-30);
+            await db.SaveChangesAsync();
+        });
+        await AddSessionAsync(f, Today.AddDays(-1), f.Leader.Id);
+        Time.Advance(TimeSpan.FromMinutes(1));
+        using var removed = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{old.Id}", new AttendeesRequest([]), old.Version);
+        await Assert.That(removed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+
+        using var response = await SendAsync(f, HttpMethod.Get, "/attendance-records");
+
+        var records = (await TrackerReadAsync<PagedResponse<AttendanceRecordResponse>>(response)).Items;
+        await Assert.That(records.Select(r => r.PersonId)).IsEquivalentTo([f.Member.Id, f.Leader.Id], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    public async Task RecordGroupSession_RetryWithChangedDateOrAttendees_ReturnsConflict(bool changeDate, bool addAttendee)
+    {
+        using var f = await SeedGroupAsync();
+        var request = new SessionRequest(Today, [f.Member.Id], Id: Guid.CreateVersion7());
+        using var first = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", request);
+        await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.Created);
+        var changed = request with
+        {
+            OccurredOn = changeDate ? Today.AddDays(-1) : Today,
+            PersonIds = addAttendee ? [f.Member.Id, f.Leader.Id] : [f.Member.Id]
+        };
+
+        using var retry = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", changed);
+
+        await Assert.That(retry.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+        await InChurchAsync(f.ChurchId, async db =>
+            await Assert.That(await db.Attendances.CountAsync()).IsEqualTo(1));
     }
 }

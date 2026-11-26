@@ -14,7 +14,12 @@ public enum TrackerFailure
     /// The write looks like a mistake (a likely duplicate). Nothing was saved; the problem's extensions say why, and
     /// the client resends with <c>confirm: true</c> to save anyway.
     /// </summary>
-    ConfirmationRequired
+    ConfirmationRequired,
+    /// <summary>
+    /// The church's stored time zone does not resolve on this server, for example after moving to a host with older
+    /// time-zone data. No date rule can run until an Admin sets the zone again.
+    /// </summary>
+    TimeZoneUnavailable
 }
 
 public sealed class TrackerException(TrackerFailure failure, IDictionary<string, object?>? extensions = null) : Exception(failure.ToString())

@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Sheaf.Data;
 
 /// <summary>
@@ -14,6 +16,15 @@ public sealed class ChurchCalendar
         if (!TryFindZone(timeZoneId, out var zone))
             throw new ArgumentException($"'{timeZoneId}' is not a known IANA time zone.", nameof(timeZoneId));
         _zone = zone;
+    }
+
+    private ChurchCalendar(TimeZoneInfo zone) => _zone = zone;
+
+    /// <summary>Creates the calendar for <paramref name="timeZoneId"/>, or returns false if this host cannot resolve it.</summary>
+    public static bool TryCreate(string? timeZoneId, [NotNullWhen(true)] out ChurchCalendar? calendar)
+    {
+        calendar = TryFindZone(timeZoneId, out var zone) ? new ChurchCalendar(zone) : null;
+        return calendar is not null;
     }
 
     /// <summary>Whether <paramref name="timeZoneId"/> names a time zone this host can resolve.</summary>
