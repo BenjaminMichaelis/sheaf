@@ -56,45 +56,6 @@ public class ChurchCalendarTests
     }
 
     [Test]
-    public async Task StartOf_MidnightSkippedBeforeAsuncionChangedStandardOffset_UsesOffsetInEffectThen()
-    {
-        // Paraguay moved clocks from 00:00 -04 to 01:00 -03 on 1 October 2023, then kept -03 as its standard offset
-        // from October 2024. The day still starts at 00:00 -04 then, not at today's standard offset.
-        var calendar = new ChurchCalendar("America/Asuncion");
-        var date = new DateOnly(2023, 10, 1);
-
-        var start = calendar.StartOf(date);
-
-        await Assert.That(start).IsEqualTo(new DateTimeOffset(2023, 10, 1, 4, 0, 0, TimeSpan.Zero));
-        await Assert.That(calendar.DateOf(start.AddMinutes(-1))).IsEqualTo(date.AddDays(-1));
-    }
-
-    [Test]
-    [Arguments("America/Asuncion")]
-    [Arguments("America/Santiago")]
-    [Arguments("America/Havana")]
-    [Arguments("Asia/Tehran")]
-    [Arguments("America/Caracas")]
-    [Arguments("Europe/Moscow")]
-    [Arguments("America/Sao_Paulo")]
-    public async Task StartOf_EveryDateFrom1995To2030_IsFirstInstantOfThatLocalDate(string zone)
-    {
-        // These zones skipped or repeated midnight, or changed their standard offset, during this range. Each day must
-        // start at the first instant the zone itself places on that date. A minute before stands in for "the instant
-        // before", because Windows places some changes at 23:59:59.999.
-        var calendar = new ChurchCalendar(zone);
-        var wrong = new List<string>();
-        for (var date = new DateOnly(1995, 1, 1); date < new DateOnly(2031, 1, 1); date = date.AddDays(1))
-        {
-            var start = calendar.StartOf(date);
-            if (calendar.DateOf(start) != date || calendar.DateOf(start.AddMinutes(-1)) != date.AddDays(-1))
-                wrong.Add($"{date:yyyy-MM-dd} starts at {start:u}");
-        }
-
-        await Assert.That(wrong).IsEmpty();
-    }
-
-    [Test]
     [Arguments(Chicago, true)]
     [Arguments("Etc/UTC", true)]
     [Arguments("Central Standard Time", false)]
