@@ -21,14 +21,14 @@ public interface IAttendanceService
 
 /// <summary>
 /// Group meetings and who came. Anyone who can see a group (its current Leaders, or Staff for every group) records
-/// its meetings for any past date while the group existed; Leaders may change a recorded meeting for
-/// <see cref="LeaderEditDays"/> days after it, Staff at any time.
+/// its meetings for any past date while the group existed; Leaders may change a meeting for
+/// <see cref="LeaderEditDays"/> days after it was recorded, Staff at any time.
 /// Taking someone off a meeting keeps the row as history, so the record of who was marked present, and by whom,
 /// survives every edit.
 /// </summary>
 public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scope) : IAttendanceService
 {
-    /// <summary>Days after a meeting that its group's Leaders may still change it.</summary>
+    /// <summary>Days after a meeting is recorded that its group's Leaders may still change it.</summary>
     public const int LeaderEditDays = 7;
     /// <summary>Most people one meeting may list.</summary>
     public const int MaxAttendees = 500;
@@ -123,7 +123,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var (actor, _) = await scope.GroupAsync(groupId, ct);
         var session = await db.ContextSessions.SingleOrDefaultAsync(s => s.Id == sessionId && s.ContextId == groupId, ct) ?? throw Missing();
         RequireVersion(session.Version, expectedVersion);
-        RequireEditWindow(actor, session.OccurredOn);
+        RequireEditWindow(actor, session);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, [], ct);
         session.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
@@ -148,12 +148,13 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     }
 
     /// <summary>
-    /// Leaders may change a recorded meeting only within <see cref="LeaderEditDays"/> days of its date; Staff at any
-    /// time. Depends on the meeting date, so it is checked here rather than on the endpoint.
+    /// Leaders may change a meeting only within <see cref="LeaderEditDays"/> days of when it was recorded, so late
+    /// paperwork gets the same window as same-day entry; Staff at any time. Depends on the stored meeting, so it is
+    /// checked here rather than on the endpoint.
     /// </summary>
-    private void RequireEditWindow(ChurchActor actor, DateOnly occurredOn)
+    private void RequireEditWindow(ChurchActor actor, ContextSession session)
     {
-        if (!TrackerScope.ManagesGroups(actor) && scope.Today > occurredOn.AddDays(LeaderEditDays))
+        if (!TrackerScope.ManagesGroups(actor) && scope.Now > session.RecordedAt.AddDays(LeaderEditDays))
             throw Denied();
     }
 

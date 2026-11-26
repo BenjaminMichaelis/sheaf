@@ -59,9 +59,12 @@ public class AttendanceTests : ChurchApiTestBase
         return person;
     }
 
-    private async Task<ContextSession> AddSessionAsync(GroupFixture f, DateOnly date, params Guid[] personIds)
+    private Task<ContextSession> AddSessionAsync(GroupFixture f, DateOnly date, params Guid[] personIds) =>
+        AddSessionAsync(f, date, Time.GetUtcNow(), personIds);
+
+    private async Task<ContextSession> AddSessionAsync(GroupFixture f, DateOnly date, DateTimeOffset recordedAt, params Guid[] personIds)
     {
-        var session = new ContextSession { ContextId = f.Group.Id, OccurredOn = date, RecordedAt = Time.GetUtcNow() };
+        var session = new ContextSession { ContextId = f.Group.Id, OccurredOn = date, RecordedAt = recordedAt };
         await InChurchAsync(f.ChurchId, async db =>
         {
             db.ContextSessions.Add(session);
@@ -245,11 +248,12 @@ public class AttendanceTests : ChurchApiTestBase
     [Arguments(ChurchMembershipRole.Leader, 7, HttpStatusCode.OK)]
     [Arguments(ChurchMembershipRole.Leader, 8, HttpStatusCode.Forbidden)]
     [Arguments(ChurchMembershipRole.Staff, 30, HttpStatusCode.OK)]
-    public async Task UpdateGroupSessionAttendees_DaysAfterMeeting_AllowsLeadersOnlyWithinEditWindow(ChurchMembershipRole role, int daysAgo, HttpStatusCode expected)
+    public async Task UpdateGroupSessionAttendees_DaysAfterRecording_AllowsLeadersOnlyWithinEditWindow(ChurchMembershipRole role, int daysAgo, HttpStatusCode expected)
     {
-        // Staff edit a group they do not lead, so the result shows their role, not leadership, allows it.
+        // The meeting date is older than every window, so only when it was recorded decides. Staff edit a group they
+        // do not lead, so the result shows their role, not leadership, allows it.
         using var f = await SeedGroupAsync(role, callerLeads: role == ChurchMembershipRole.Leader);
-        var session = await AddSessionAsync(f, Today.AddDays(-daysAgo), f.Member.Id);
+        var session = await AddSessionAsync(f, Today.AddDays(-60), Time.GetUtcNow().AddDays(-daysAgo), f.Member.Id);
 
         using var response = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}", new AttendeesRequest([f.Leader.Id]), session.Version);
 
