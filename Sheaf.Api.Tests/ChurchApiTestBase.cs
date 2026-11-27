@@ -30,7 +30,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected const string CookieName = "__Host-sheaf";
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>() }
+        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>(), new JsonStringEnumConverter<GroupRole>() }
     };
 
     private string _connectionString = "";
@@ -176,7 +176,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
         if (ifMatch is { } version)
             request.Headers.TryAddWithoutValidation("If-Match", Sheaf.Services.EntityTag.Format(version));
         if (body is not null)
-            request.Content = JsonContent.Create(body);
+            request.Content = JsonContent.Create(body, options: JsonOptions);
         return await client.SendAsync(request);
     }
 
@@ -184,7 +184,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected static async Task<T> TrackerReadAsync<T>(HttpResponseMessage response, System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK)
     {
         await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
-        return await response.Content.ReadFromJsonAsync<T>() ?? throw new InvalidOperationException("Missing tracker response.");
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions) ?? throw new InvalidOperationException("Missing tracker response.");
     }
 
     /// <summary>A whole-second clock that tests advance explicitly.</summary>

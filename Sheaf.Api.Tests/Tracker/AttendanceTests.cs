@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 using Sheaf.Data;
 using Sheaf.Services;
 
-using Context = Sheaf.Data.Context;
 
 namespace Sheaf.Api.Tests;
 
@@ -17,7 +16,7 @@ public class AttendanceTests : ChurchApiTestBase
     private const string TimeZone = "America/Chicago";
 
     /// <summary>A signed-in caller who leads one group with one other member.</summary>
-    private sealed record GroupFixture(ChurchMembership Membership, HttpClient Client, string Cookie, Context Group, Person Leader, Person Member) : IDisposable
+    private sealed record GroupFixture(ChurchMembership Membership, HttpClient Client, string Cookie, Group Group, Person Leader, Person Member) : IDisposable
     {
         public Guid ChurchId => Membership.ChurchId;
         public void Dispose() => Client.Dispose();
@@ -30,14 +29,14 @@ public class AttendanceTests : ChurchApiTestBase
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user, role);
-        var group = new Context { Name = "Sunday group", StartsAt = Time.GetUtcNow().AddDays(-200) };
+        var group = new Group { Name = "Sunday group", StartsAt = Time.GetUtcNow().AddDays(-200) };
         var leader = new Person { FirstName = "Lena", LastName = "Leader", UserId = callerLeads ? user.Id : null };
         var member = new Person { FirstName = "Max", LastName = "Member" };
         await InChurchAsync(membership.ChurchId, async db =>
         {
             db.AddRange(group, leader, member);
-            db.ContextLeaders.Add(new ContextLeader { ContextId = group.Id, PersonId = leader.Id, StartsAt = group.StartsAt });
-            db.ContextMembers.Add(new ContextMember { ContextId = group.Id, PersonId = member.Id, JoinedAt = group.StartsAt });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = group.Id, PersonId = leader.Id, Role = GroupRole.Leader, StartsAt = group.StartsAt });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = group.Id, PersonId = member.Id, Role = GroupRole.Member, StartsAt = group.StartsAt });
             await db.SaveChangesAsync();
         });
         var client = CreateClient();
@@ -59,17 +58,17 @@ public class AttendanceTests : ChurchApiTestBase
         return person;
     }
 
-    private Task<ContextSession> AddSessionAsync(GroupFixture f, DateOnly date, params Guid[] personIds) =>
+    private Task<GroupMeeting> AddSessionAsync(GroupFixture f, DateOnly date, params Guid[] personIds) =>
         AddSessionAsync(f, date, Time.GetUtcNow(), personIds);
 
-    private async Task<ContextSession> AddSessionAsync(GroupFixture f, DateOnly date, DateTimeOffset recordedAt, params Guid[] personIds)
+    private async Task<GroupMeeting> AddSessionAsync(GroupFixture f, DateOnly date, DateTimeOffset recordedAt, params Guid[] personIds)
     {
-        var session = new ContextSession { ContextId = f.Group.Id, OccurredOn = date, RecordedAt = recordedAt };
+        var session = new GroupMeeting { GroupId = f.Group.Id, OccurredOn = date, RecordedAt = recordedAt };
         await InChurchAsync(f.ChurchId, async db =>
         {
-            db.ContextSessions.Add(session);
+            db.GroupMeetings.Add(session);
             foreach (var personId in personIds)
-                db.Attendances.Add(new Attendance { SessionId = session.Id, PersonId = personId, RecordedAt = session.RecordedAt });
+                db.Attendances.Add(new Attendance { MeetingId = session.Id, PersonId = personId, RecordedAt = session.RecordedAt });
             await db.SaveChangesAsync();
         });
         return session;
@@ -106,7 +105,7 @@ public class AttendanceTests : ChurchApiTestBase
             var created = await db.People.SingleAsync(p => p.FirstName == "Zed");
             await Assert.That(created.CreatedByUserId).IsEqualTo(f.Membership.UserId);
             await Assert.That(created.Phone).IsEqualTo("555-0100");
-            await Assert.That(await db.ContextMembers.AnyAsync(m => m.PersonId == created.Id)).IsFalse();
+            await Assert.That(await db.GroupAssignments.AnyAsync(m => m.PersonId == created.Id)).IsFalse();
             await Assert.That(await db.Attendances.AllAsync(a => a.RecordedByUserId == f.Membership.UserId)).IsTrue();
         });
     }
@@ -127,7 +126,7 @@ public class AttendanceTests : ChurchApiTestBase
         await Assert.That(await similar.Content.ReadAsStringAsync()).DoesNotContain("ada@example.com");
         await InChurchAsync(f.ChurchId, async db =>
         {
-            await Assert.That(await db.ContextSessions.CountAsync()).IsEqualTo(0);
+            await Assert.That(await db.GroupMeetings.CountAsync()).IsEqualTo(0);
             await Assert.That(await db.People.CountAsync(p => p.FirstName == "Ada")).IsEqualTo(1);
         });
 
@@ -172,7 +171,7 @@ public class AttendanceTests : ChurchApiTestBase
     public async Task RecordGroupSession_GroupLedBySomeoneElse_ReturnsNotFound()
     {
         using var f = await SeedGroupAsync();
-        var otherGroup = new Context { Name = "Other group", StartsAt = f.Group.StartsAt };
+        var otherGroup = new Group { Name = "Other group", StartsAt = f.Group.StartsAt };
         await InChurchAsync(f.ChurchId, async db =>
         {
             db.Add(otherGroup);
@@ -278,7 +277,7 @@ public class AttendanceTests : ChurchApiTestBase
             var stored = await db.People.SingleAsync(p => p.Id == visitor.Id);
             await Assert.That(stored.Email).IsNull();
             await Assert.That(stored.HouseholdId).IsNull();
-            await Assert.That(await db.ContextMembers.AnyAsync(m => m.PersonId == visitor.Id)).IsFalse();
+            await Assert.That(await db.GroupAssignments.AnyAsync(m => m.PersonId == visitor.Id)).IsFalse();
         });
     }
 
@@ -307,7 +306,7 @@ public class AttendanceTests : ChurchApiTestBase
     public async Task RecordGroupSession_LeaderOfEndedGroup_ReturnsNotFound()
     {
         using var f = await SeedGroupAsync();
-        await InChurchAsync(f.ChurchId, db => db.Contexts.Where(g => g.Id == f.Group.Id)
+        await InChurchAsync(f.ChurchId, db => db.Groups.Where(g => g.Id == f.Group.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(g => g.EndsAt, Time.GetUtcNow().AddDays(-1))));
 
         using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today.AddDays(-3), [f.Member.Id]));
@@ -388,7 +387,7 @@ public class AttendanceTests : ChurchApiTestBase
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         await InChurchAsync(f.ChurchId, async db =>
         {
-            await Assert.That(await db.ContextSessions.CountAsync()).IsEqualTo(0);
+            await Assert.That(await db.GroupMeetings.CountAsync()).IsEqualTo(0);
             await Assert.That(await db.People.CountAsync()).IsEqualTo(3);
         });
     }
@@ -401,7 +400,7 @@ public class AttendanceTests : ChurchApiTestBase
         var late = await AddPersonAsync(f, "Lars", "Late");
         await InChurchAsync(f.ChurchId, async db =>
         {
-            db.ContextMembers.Add(new ContextMember { ContextId = f.Group.Id, PersonId = late.Id, JoinedAt = Time.GetUtcNow().AddDays(-3) });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = late.Id, Role = GroupRole.Member, StartsAt = Time.GetUtcNow().AddDays(-3) });
             await db.SaveChangesAsync();
         });
 
@@ -452,7 +451,7 @@ public class AttendanceTests : ChurchApiTestBase
         var old = await AddSessionAsync(f, Today.AddDays(-30), f.Member.Id);
         await InChurchAsync(f.ChurchId, async db =>
         {
-            var row = await db.Attendances.SingleAsync(a => a.SessionId == old.Id);
+            var row = await db.Attendances.SingleAsync(a => a.MeetingId == old.Id);
             row.RecordedAt = Time.GetUtcNow().AddDays(-30);
             await db.SaveChangesAsync();
         });

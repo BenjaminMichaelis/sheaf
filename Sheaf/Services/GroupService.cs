@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
+using Sheaf.Authorization;
 using Sheaf.Data;
 
 using static Sheaf.Services.TrackerRules;
@@ -21,7 +22,7 @@ public interface IGroupService
 
 public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : IGroupService
 {
-    private static GroupResponse Group(Context g) => new(g.Id, g.Name, g.StartsAt, g.EndsAt, g.GroupTypeId, g.Version);
+    private static GroupResponse Response(Group g) => new(g.Id, g.Name, g.StartsAt, g.EndsAt, g.GroupTypeId, g.Version);
 
     public async Task<PagedResponse<GroupTypeResponse>> GetTypesAsync(PageRequest page, CancellationToken ct)
     {
@@ -54,13 +55,13 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
     public async Task<PagedResponse<GroupResponse>> GetGroupsAsync(PageRequest page, CancellationToken ct)
     {
         var actor = await scope.ActorAsync(ct);
-        return await scope.Groups(actor).OrderBy(g => g.Name).ThenBy(g => g.Id)
+        return await scope.Groups(actor, GroupPermission.View).OrderBy(g => g.Name).ThenBy(g => g.Id)
             .Select(g => new GroupResponse(g.Id, g.Name, g.StartsAt, g.EndsAt, g.GroupTypeId, g.Version)).PageAsync(page, ct);
     }
 
-    public async Task<GroupResponse> GetGroupAsync(Guid id, CancellationToken ct) => Group((await scope.GroupAsync(id, ct)).Group);
+    public async Task<GroupResponse> GetGroupAsync(Guid id, CancellationToken ct) => Response((await scope.GroupAsync(id, GroupPermission.View, ct)).Group);
 
-    private async Task SetGroupAsync(Context group, GroupRequest request, CancellationToken ct)
+    private async Task SetGroupAsync(Group group, GroupRequest request, CancellationToken ct)
     {
         group.Name = RequiredName(request.Name);
         if (request.StartsAt == default)
@@ -74,41 +75,39 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
 
     public async Task<GroupResponse> CreateGroupAsync(GroupRequest request, CancellationToken ct)
     {
-        var group = new Context { Name = RequiredName(request.Name) };
+        var group = new Group { Name = RequiredName(request.Name) };
         await SetGroupAsync(group, request, ct);
-        db.Contexts.Add(group);
+        db.Groups.Add(group);
         await scope.SaveAsync(ct);
-        return Group(group);
+        return Response(group);
     }
 
     public async Task<GroupResponse> UpdateGroupAsync(Guid id, Guid expectedVersion, GroupRequest request, CancellationToken ct)
     {
-        var (_, group) = await scope.GroupAsync(id, ct);
+        var (_, group) = await scope.GroupAsync(id, GroupPermission.View, ct);
         RequireVersion(group.Version, expectedVersion);
         if (group.EndsAt != null)
             throw Conflict();
-        if (await db.ContextMembers.AnyAsync(m => m.ContextId == id && m.JoinedAt < request.StartsAt, ct)
-            || await db.ContextLeaders.AnyAsync(l => l.ContextId == id && l.StartsAt < request.StartsAt, ct))
+        if (await db.GroupAssignments.AnyAsync(a => a.GroupId == id && a.StartsAt < request.StartsAt, ct))
             throw Invalid();
         await SetGroupAsync(group, request, ct);
         group.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
-        return Group(group);
+        return Response(group);
     }
 
     public async Task<GroupResponse> EndGroupAsync(Guid id, Guid expectedVersion, EndRequest request, CancellationToken ct)
     {
-        var (_, group) = await scope.GroupAsync(id, ct);
+        var (_, group) = await scope.GroupAsync(id, GroupPermission.View, ct);
         RequireVersion(group.Version, expectedVersion);
         if (group.EndsAt != null)
             throw Conflict();
         if (request.EndsAt < group.StartsAt
-            || await db.ContextMembers.AnyAsync(m => m.ContextId == id && (m.JoinedAt > request.EndsAt || m.LeftAt > request.EndsAt), ct)
-            || await db.ContextLeaders.AnyAsync(l => l.ContextId == id && (l.StartsAt > request.EndsAt || l.EndsAt > request.EndsAt), ct))
+            || await db.GroupAssignments.AnyAsync(a => a.GroupId == id && (a.StartsAt > request.EndsAt || a.EndsAt > request.EndsAt), ct))
             throw Invalid();
         group.EndsAt = request.EndsAt;
         group.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
-        return Group(group);
+        return Response(group);
     }
 }

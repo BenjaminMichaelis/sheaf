@@ -1,3 +1,5 @@
+using Sheaf.Data;
+
 namespace Sheaf.Services;
 
 /// <summary>A resource whose <see cref="Version"/> is its entity tag: send it back in If-Match to update it.</summary>
@@ -23,12 +25,17 @@ public sealed record GroupTypeResponse(Guid Id, string Name);
 public sealed record GroupRequest(string Name, DateTimeOffset StartsAt, Guid? GroupTypeId = null);
 /// <summary>A retained group and its lifecycle. Its version also changes when assignments are added or ended.</summary>
 public sealed record GroupResponse(Guid Id, string Name, DateTimeOffset StartsAt, DateTimeOffset? EndsAt, Guid? GroupTypeId, Guid Version) : IVersioned;
-/// <summary>A dated group membership or leadership assignment.</summary>
+/// <summary>Adds a person who is not already in the group, in the role the route names, from <paramref name="StartsAt"/>.</summary>
 public sealed record AssignmentRequest(Guid PersonId, DateTimeOffset StartsAt);
-/// <summary>An instant for leaving an assignment or ending a group.</summary>
+/// <summary>An instant for leaving a group or ending a group.</summary>
 public sealed record EndRequest(DateTimeOffset EndsAt);
-/// <summary>A retained membership or leadership interval.</summary>
-public sealed record AssignmentResponse(Guid Id, Guid PersonId, DateTimeOffset StartsAt, DateTimeOffset? EndsAt);
+/// <summary>
+/// Moves a person's current assignment to <paramref name="Role"/> from <paramref name="StartsAt"/>: the current
+/// assignment ends then and a new one begins, so both intervals are kept.
+/// </summary>
+public sealed record RoleChangeRequest(GroupRole Role, DateTimeOffset StartsAt);
+/// <summary>A retained interval in which a person held one role in a group.</summary>
+public sealed record AssignmentResponse(Guid Id, Guid PersonId, GroupRole Role, DateTimeOffset StartsAt, DateTimeOffset? EndsAt);
 /// <summary>Household structure. Label may be omitted; an unspecified label preserves the existing label or defaults from the first submitted member's surname.</summary>
 public sealed record HouseholdRequest(Guid[] MemberIds, string? Label = null);
 /// <summary>A household with only member identifiers and first names.</summary>

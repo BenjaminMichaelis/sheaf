@@ -6,9 +6,10 @@ using Sheaf.Data;
 namespace Sheaf.Services;
 
 /// <summary>
-/// Owns the row-level visibility rules: which groups, people, and households an actor may see. Which operations a role
-/// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/>, <see cref="Permission.TrackerManage"/>, and <see cref="Permission.PeopleManage"/>);
-/// this type only answers questions that need the data loaded, so every tracker service goes through it.
+/// Owns the row-level visibility rules: which groups, people, and households an actor may see. Which operations a church
+/// role may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/>, <see cref="Permission.TrackerManage"/>, and <see cref="Permission.PeopleManage"/>);
+/// this type answers the questions that need the data loaded, including what the actor's group roles allow
+/// (<see cref="GroupPermission"/>), so every tracker service goes through it.
 /// </summary>
 public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock, ILogger<TrackerScope> logger)
 {
@@ -58,31 +59,36 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     /// <summary>Whether the actor manages every person and household rather than only those their groups reach.</summary>
     public static bool ManagesPeople(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.PeopleManage);
 
-    /// <summary>Managers see every group; everyone else sees only active groups they currently lead.</summary>
-    public IQueryable<Context> Groups(ChurchActor actor)
+    /// <summary>
+    /// Groups in which the actor may use <paramref name="permission"/>. Managers reach every group; everyone else reaches
+    /// active groups where their own person currently holds a role that grants it (<see cref="GroupRolePermissions"/>).
+    /// This is the only place a group role becomes access, so list filters and single-group checks always agree.
+    /// </summary>
+    public IQueryable<Group> Groups(ChurchActor actor, GroupPermission permission)
     {
         if (ManagesGroups(actor))
-            return db.Contexts;
+            return db.Groups;
+        var roles = GroupRolePermissions.RolesWith(permission).ToArray();
         var now = Now;
-        return db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
-            && db.ContextLeaders.Any(l => l.ContextId == g.Id && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)
-                && db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId)));
+        return db.Groups.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
+            && db.GroupAssignments.Any(a => a.GroupId == g.Id && roles.Contains(a.Role)
+                && a.StartsAt <= now && (a.EndsAt == null || a.EndsAt > now)
+                && db.People.Any(p => p.Id == a.PersonId && p.UserId == actor.UserId)));
     }
 
     /// <summary>
     /// People the actor may assign to a group or put in a household, and change (see also <see cref="EditablePeople"/>).
-    /// Managers reach every person; everyone else reaches the current members and leaders of the groups they lead.
+    /// Managers reach every person; everyone else reaches whoever is currently on the roster, in any role, of a group
+    /// where the actor may manage members.
     /// </summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
         if (ManagesPeople(actor))
             return db.People;
-        var groups = Groups(actor).Select(g => g.Id);
+        var groups = Groups(actor, GroupPermission.ManageMembers).Select(g => g.Id);
         var now = Now;
-        return db.People.Where(p => db.ContextMembers.Any(m => m.PersonId == p.Id && groups.Contains(m.ContextId)
-                && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
-            || db.ContextLeaders.Any(l => l.PersonId == p.Id && groups.Contains(l.ContextId)
-                && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)));
+        return db.People.Where(p => db.GroupAssignments.Any(a => a.PersonId == p.Id && groups.Contains(a.GroupId)
+            && a.StartsAt <= now && (a.EndsAt == null || a.EndsAt > now)));
     }
 
     /// <summary>
@@ -109,19 +115,22 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     {
         if (ManagesPeople(actor))
             return db.People;
-        var groups = Groups(actor).Select(g => g.Id);
+        var groups = Groups(actor, GroupPermission.View).Select(g => g.Id);
         var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
         var reachable = EditablePeople(actor).Select(p => p.Id);
         return db.People.Where(p => reachable.Contains(p.Id)
             || db.Attendances.Any(a => a.PersonId == p.Id && a.RemovedAt == null
-                && db.ContextSessions.Any(s => s.Id == a.SessionId && groups.Contains(s.ContextId) && s.OccurredOn >= attendedSince)));
+                && db.GroupMeetings.Any(m => m.Id == a.MeetingId && groups.Contains(m.GroupId) && m.OccurredOn >= attendedSince)));
     }
 
-    /// <summary>Loads a group visible to the actor, or throws NotFound.</summary>
-    public async Task<(ChurchActor Actor, Context Group)> GroupAsync(Guid id, CancellationToken ct)
+    /// <summary>
+    /// Loads a group in which the actor may use <paramref name="permission"/>, or throws NotFound. A group the actor can
+    /// see but not act on reads as not found too, so the response never says which groups exist.
+    /// </summary>
+    public async Task<(ChurchActor Actor, Group Group)> GroupAsync(Guid id, GroupPermission permission, CancellationToken ct)
     {
         var actor = await ActorAsync(ct);
-        var group = await Groups(actor).SingleOrDefaultAsync(g => g.Id == id, ct) ?? throw TrackerRules.Missing();
+        var group = await Groups(actor, permission).SingleOrDefaultAsync(g => g.Id == id, ct) ?? throw TrackerRules.Missing();
         return (actor, group);
     }
 

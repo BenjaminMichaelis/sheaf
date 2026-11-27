@@ -33,13 +33,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<Household> Households => Set<Household>();
 
-    public DbSet<Context> Contexts => Set<Context>();
+    public DbSet<Group> Groups => Set<Group>();
 
-    public DbSet<ContextMember> ContextMembers => Set<ContextMember>();
+    public DbSet<GroupAssignment> GroupAssignments => Set<GroupAssignment>();
 
-    public DbSet<ContextLeader> ContextLeaders => Set<ContextLeader>();
-
-    public DbSet<ContextSession> ContextSessions => Set<ContextSession>();
+    public DbSet<GroupMeeting> GroupMeetings => Set<GroupMeeting>();
 
     public DbSet<Attendance> Attendances => Set<Attendance>();
 
@@ -103,7 +101,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
         });
         builder.Entity<Household>().HasOne<Church>().WithMany().HasForeignKey(household => household.ChurchId)
             .OnDelete(DeleteBehavior.Restrict).IsRequired();
-        builder.Entity<Context>(entity =>
+        builder.Entity<Group>(entity =>
         {
             entity.HasOne<Church>().WithMany().HasForeignKey(group => group.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
@@ -111,45 +109,46 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
                 .OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
-                table.HasCheckConstraint("CK_Contexts_Name", "TRIM([Name]) <> ''");
-                table.HasCheckConstraint("CK_Contexts_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
-                table.HasCheckConstraint("CK_Contexts_Kind", "[Kind] = 0");
+                table.HasCheckConstraint("CK_Groups_Name", "TRIM([Name]) <> ''");
+                table.HasCheckConstraint("CK_Groups_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
             });
         });
-        builder.Entity<ContextMember>(entity =>
+        builder.Entity<GroupAssignment>(entity =>
         {
-            entity.HasOne<Church>().WithMany().HasForeignKey(member => member.ChurchId)
+            entity.HasOne<Church>().WithMany().HasForeignKey(assignment => assignment.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
-            entity.HasOne<Context>().WithMany().HasForeignKey(member => member.ContextId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<Person>().WithMany().HasForeignKey(member => member.PersonId).OnDelete(DeleteBehavior.Restrict);
-            entity.ToTable(table => table.HasCheckConstraint("CK_ContextMembers_Dates", "[LeftAt] IS NULL OR [LeftAt] >= [JoinedAt]"));
+            entity.HasOne<Group>().WithMany().HasForeignKey(assignment => assignment.GroupId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>().WithMany().HasForeignKey(assignment => assignment.PersonId).OnDelete(DeleteBehavior.Restrict);
+            // At most one open assignment per person and group, even under concurrent writes. The service also rejects
+            // overlapping intervals that are already closed.
+            entity.HasIndex(assignment => new { assignment.ChurchId, assignment.GroupId, assignment.PersonId }).IsUnique()
+                .HasFilter("[EndsAt] IS NULL");
+            // Access checks ask which groups the caller's person is assigned to.
+            entity.HasIndex(assignment => new { assignment.ChurchId, assignment.PersonId });
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_GroupAssignments_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                table.HasCheckConstraint("CK_GroupAssignments_Role", "[Role] IN (0, 1)");
+            });
         });
-        builder.Entity<ContextLeader>(entity =>
+        builder.Entity<GroupMeeting>(entity =>
         {
-            entity.HasOne<Church>().WithMany().HasForeignKey(leader => leader.ChurchId)
+            entity.Property(meeting => meeting.RecordedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
+            entity.HasOne<Church>().WithMany().HasForeignKey(meeting => meeting.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
-            entity.HasOne<Context>().WithMany().HasForeignKey(leader => leader.ContextId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<Person>().WithMany().HasForeignKey(leader => leader.PersonId).OnDelete(DeleteBehavior.Restrict);
-            entity.ToTable(table => table.HasCheckConstraint("CK_ContextLeaders_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]"));
-        });
-        builder.Entity<ContextSession>(entity =>
-        {
-            entity.Property(session => session.RecordedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
-            entity.HasOne<Church>().WithMany().HasForeignKey(session => session.ChurchId)
-                .OnDelete(DeleteBehavior.Restrict).IsRequired();
-            entity.HasOne<Context>().WithMany().HasForeignKey(session => session.ContextId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Group>().WithMany().HasForeignKey(meeting => meeting.GroupId).OnDelete(DeleteBehavior.Restrict);
             // A group's meetings are listed newest first; more than one per date is allowed.
-            entity.HasIndex(session => new { session.ChurchId, session.ContextId, session.OccurredOn });
+            entity.HasIndex(meeting => new { meeting.ChurchId, meeting.GroupId, meeting.OccurredOn });
         });
         builder.Entity<Attendance>(entity =>
         {
             entity.Property(attendance => attendance.RecordedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
             entity.HasOne<Church>().WithMany().HasForeignKey(attendance => attendance.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
-            entity.HasOne<ContextSession>().WithMany().HasForeignKey(attendance => attendance.SessionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<GroupMeeting>().WithMany().HasForeignKey(attendance => attendance.MeetingId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Person>().WithMany().HasForeignKey(attendance => attendance.PersonId).OnDelete(DeleteBehavior.Restrict);
-            // A person counts once per session; removed rows stay as history and do not count.
-            entity.HasIndex(attendance => new { attendance.ChurchId, attendance.SessionId, attendance.PersonId }).IsUnique()
+            // A person counts once per meeting; removed rows stay as history and do not count.
+            entity.HasIndex(attendance => new { attendance.ChurchId, attendance.MeetingId, attendance.PersonId }).IsUnique()
                 .HasFilter("[RemovedAt] IS NULL");
             // Profile visibility asks which sessions a person attended recently.
             entity.HasIndex(attendance => new { attendance.ChurchId, attendance.PersonId });

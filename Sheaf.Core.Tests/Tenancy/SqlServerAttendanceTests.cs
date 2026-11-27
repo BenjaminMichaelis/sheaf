@@ -24,7 +24,7 @@ public class SqlServerAttendanceTests
 
         await Sql.InDatabaseScopeAsync(churchId, async db =>
         {
-            db.Attendances.Add(new Attendance { SessionId = session.Id, PersonId = person.Id });
+            db.Attendances.Add(new Attendance { MeetingId = session.Id, PersonId = person.Id });
 
             await Assert.That(async () => await db.SaveChangesAsync()).Throws<DbUpdateException>();
         });
@@ -42,7 +42,7 @@ public class SqlServerAttendanceTests
             present.RemovedByUserId = "leader";
             await db.SaveChangesAsync();
 
-            db.Attendances.Add(new Attendance { SessionId = session.Id, PersonId = person.Id });
+            db.Attendances.Add(new Attendance { MeetingId = session.Id, PersonId = person.Id });
             await db.SaveChangesAsync();
         });
 
@@ -71,11 +71,11 @@ public class SqlServerAttendanceTests
 
         await Sql.InDatabaseScopeAsync(churchId, async db =>
         {
-            db.ContextSessions.Add(new ContextSession { ContextId = session.ContextId, OccurredOn = session.OccurredOn });
+            db.GroupMeetings.Add(new GroupMeeting { GroupId = session.GroupId, OccurredOn = session.OccurredOn });
             await db.SaveChangesAsync();
         });
 
-        var count = await Sql.InDatabaseScopeAsync(churchId, db => db.ContextSessions.CountAsync());
+        var count = await Sql.InDatabaseScopeAsync(churchId, db => db.GroupMeetings.CountAsync());
         await Assert.That(count).IsEqualTo(2);
     }
 
@@ -91,20 +91,20 @@ public class SqlServerAttendanceTests
     }
 
     /// <summary>Seeds church A with one group meeting on a Sunday and one person marked present.</summary>
-    private async Task<(Guid ChurchId, ContextSession Session, Person Person)> SeedSessionAsync()
+    private async Task<(Guid ChurchId, GroupMeeting Session, Person Person)> SeedSessionAsync()
     {
         TwoChurchScenario seed = await TenancyTestData.SeedTwoChurchesAsync(Sql);
         var churchId = seed.ChurchA.Id;
-        var group = new Sheaf.Data.Context { Name = "Sunday group", StartsAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+        var group = new Group { Name = "Sunday group", StartsAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
         var person = new Person { FirstName = "Ada" };
-        var session = new ContextSession { ContextId = group.Id, OccurredOn = new DateOnly(2026, 11, 22), RecordedByUserId = seed.UserA.Id };
+        var session = new GroupMeeting { GroupId = group.Id, OccurredOn = new DateOnly(2026, 11, 22), RecordedByUserId = seed.UserA.Id };
 
         await Sql.InDatabaseScopeAsync(churchId, async db =>
         {
-            db.Contexts.Add(group);
+            db.Groups.Add(group);
             db.People.Add(person);
-            db.ContextSessions.Add(session);
-            db.Attendances.Add(new Attendance { SessionId = session.Id, PersonId = person.Id, RecordedByUserId = seed.UserA.Id });
+            db.GroupMeetings.Add(session);
+            db.Attendances.Add(new Attendance { MeetingId = session.Id, PersonId = person.Id, RecordedByUserId = seed.UserA.Id });
             await db.SaveChangesAsync();
         });
         return (churchId, session, person);

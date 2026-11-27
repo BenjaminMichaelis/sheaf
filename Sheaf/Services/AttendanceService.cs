@@ -40,25 +40,25 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
 
     public async Task<PagedResponse<SessionSummaryResponse>> GetSessionsAsync(Guid groupId, PageRequest page, CancellationToken ct)
     {
-        await scope.GroupAsync(groupId, ct);
-        return await db.ContextSessions.Where(s => s.ContextId == groupId)
+        await scope.GroupAsync(groupId, GroupPermission.View, ct);
+        return await db.GroupMeetings.Where(s => s.GroupId == groupId)
             .OrderByDescending(s => s.OccurredOn).ThenByDescending(s => s.RecordedAt).ThenByDescending(s => s.Id)
             .Select(s => new SessionSummaryResponse(s.Id, s.OccurredOn,
-                db.Attendances.Count(a => a.SessionId == s.Id && a.RemovedAt == null), s.Version))
+                db.Attendances.Count(a => a.MeetingId == s.Id && a.RemovedAt == null), s.Version))
             .PageAsync(page, ct);
     }
 
     public async Task<SessionResponse> GetSessionAsync(Guid groupId, Guid sessionId, CancellationToken ct)
     {
-        await scope.GroupAsync(groupId, ct);
-        var session = await db.ContextSessions.AsNoTracking()
-            .SingleOrDefaultAsync(s => s.Id == sessionId && s.ContextId == groupId, ct) ?? throw Missing();
+        await scope.GroupAsync(groupId, GroupPermission.View, ct);
+        var session = await db.GroupMeetings.AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
         return await ResponseAsync(session, ct);
     }
 
     public async Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct)
     {
-        var (actor, group) = await scope.GroupAsync(groupId, ct);
+        var (actor, group) = await scope.GroupAsync(groupId, GroupPermission.RecordAttendance, ct);
         // Any past date while the group existed may be recorded, so late paperwork can be caught up (by a Leader only
         // while they still lead the group). The Leader edit window applies only to changing a meeting once recorded.
         RequireMeetingDate(group, request.OccurredOn);
@@ -67,19 +67,19 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var reasons = new Dictionary<string, object?>();
         if (!request.Confirm)
         {
-            var sameDay = await db.ContextSessions.Where(s => s.ContextId == groupId && s.OccurredOn == request.OccurredOn)
+            var sameDay = await db.GroupMeetings.Where(s => s.GroupId == groupId && s.OccurredOn == request.OccurredOn)
                 .OrderBy(s => s.RecordedAt).Select(s => s.Id).ToArrayAsync(ct);
             if (sameDay.Length > 0)
                 reasons["existingSessionIds"] = sameDay;
         }
-        var session = new ContextSession
+        var session = new GroupMeeting
         {
-            ContextId = groupId,
+            GroupId = groupId,
             OccurredOn = request.OccurredOn,
             RecordedAt = scope.Now,
             RecordedByUserId = actor.UserId
         };
-        db.ContextSessions.Add(session);
+        db.GroupMeetings.Add(session);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, reasons, ct);
         await scope.SaveAsync(ct);
         return await ResponseAsync(session, ct);
@@ -90,8 +90,8 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         // The list replaces who came, so leaving it out would take everyone off; an empty list does that on purpose.
         if (request.PersonIds is null)
             throw Invalid();
-        var (actor, _) = await scope.GroupAsync(groupId, ct);
-        var session = await db.ContextSessions.SingleOrDefaultAsync(s => s.Id == sessionId && s.ContextId == groupId, ct) ?? throw Missing();
+        var (actor, _) = await scope.GroupAsync(groupId, GroupPermission.RecordAttendance, ct);
+        var session = await db.GroupMeetings.SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
         RequireVersion(session.Version, expectedVersion);
         RequireEditWindow(actor, session);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, [], ct);
@@ -105,13 +105,13 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         await scope.ActorAsync(ct);
         var records =
             from a in db.Attendances
-            join s in db.ContextSessions on a.SessionId equals s.Id
+            join s in db.GroupMeetings on a.MeetingId equals s.Id
             join p in db.People on a.PersonId equals p.Id
             where (personId == null || a.PersonId == personId)
                 && (userId == null || a.RecordedByUserId == userId || a.RemovedByUserId == userId)
             // Newest event first: a removal counts from when it happened, not from when the row was first recorded.
             orderby a.RemovedAt ?? a.RecordedAt descending, a.Id descending
-            select new AttendanceRecordResponse(s.Id, s.ContextId, s.OccurredOn, p.Id,
+            select new AttendanceRecordResponse(s.Id, s.GroupId, s.OccurredOn, p.Id,
                 p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
                 a.RecordedByUserId, a.RecordedAt, a.RemovedByUserId, a.RemovedAt);
         return await records.PageAsync(page, ct);
@@ -122,14 +122,14 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     /// paperwork gets the same window as same-day entry; Staff at any time. Depends on the stored meeting, so it is
     /// checked here rather than on the endpoint.
     /// </summary>
-    private void RequireEditWindow(ChurchActor actor, ContextSession session)
+    private void RequireEditWindow(ChurchActor actor, GroupMeeting session)
     {
         if (!TrackerScope.ManagesGroups(actor) && scope.Now > session.RecordedAt.AddDays(LeaderEditDays))
             throw Denied();
     }
 
     /// <summary>A meeting date must not be in the future and must fall while the group existed.</summary>
-    private void RequireMeetingDate(Context group, DateOnly date)
+    private void RequireMeetingDate(Group group, DateOnly date)
     {
         var (start, end) = scope.Calendar.DayBounds(date);
         if (date > scope.Today || end <= group.StartsAt || (group.EndsAt is { } ended && start >= ended))
@@ -142,7 +142,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     /// are marked removed. Throws ConfirmationRequired, with nothing changed, when <paramref name="reasons"/> holds a
     /// warning or a new person's name matches someone who may already exist.
     /// </summary>
-    private async Task SetAttendeesAsync(ContextSession session, ChurchActor actor, Guid[]? personIds, PersonRequest[]? newPeople,
+    private async Task SetAttendeesAsync(GroupMeeting session, ChurchActor actor, Guid[]? personIds, PersonRequest[]? newPeople,
         bool confirm, Dictionary<string, object?> reasons, CancellationToken ct)
     {
         var listed = (personIds ?? []).Distinct().ToArray();
@@ -150,7 +150,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         if (listed.Length + newPeople.Length > MaxAttendees || newPeople.Length > MaxNewPeople)
             throw Invalid();
 
-        var current = await db.Attendances.Where(a => a.SessionId == session.Id && a.RemovedAt == null).ToListAsync(ct);
+        var current = await db.Attendances.Where(a => a.MeetingId == session.Id && a.RemovedAt == null).ToListAsync(ct);
         var added = listed.Except(current.Select(a => a.PersonId)).ToArray();
         // Someone newly marked present must be an active person in this church. Marking someone present lets the
         // group's Leaders read their full profile for 90 days (TrackerScope.VisiblePeople), so a Leader could unlock
@@ -172,7 +172,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
 
         db.People.AddRange(created);
         foreach (var personId in added.Concat(created.Select(p => p.Id)))
-            db.Attendances.Add(new Attendance { SessionId = session.Id, PersonId = personId, RecordedAt = now, RecordedByUserId = actor.UserId });
+            db.Attendances.Add(new Attendance { MeetingId = session.Id, PersonId = personId, RecordedAt = now, RecordedByUserId = actor.UserId });
         foreach (var removed in current.Where(a => !listed.Contains(a.PersonId)))
         {
             removed.RemovedAt = now;
@@ -181,24 +181,22 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     }
 
     /// <summary>
-    /// Who came, and who was absent: active people who were members or leaders of the group at any point on the
-    /// meeting's local date and are not marked present. Absence is worked out on read, never stored.
+    /// Who came, and who was absent: active people on the group's roster, in any role, at any point on the meeting's
+    /// local date and not marked present. Absence is worked out on read, never stored.
     /// </summary>
-    private async Task<SessionResponse> ResponseAsync(ContextSession session, CancellationToken ct)
+    private async Task<SessionResponse> ResponseAsync(GroupMeeting session, CancellationToken ct)
     {
         var (start, end) = scope.Calendar.DayBounds(session.OccurredOn);
-        var present = db.Attendances.Where(a => a.SessionId == session.Id && a.RemovedAt == null).Select(a => a.PersonId);
+        var present = db.Attendances.Where(a => a.MeetingId == session.Id && a.RemovedAt == null).Select(a => a.PersonId);
         var attendees = await db.People.Where(p => present.Contains(p.Id))
             .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
             .Select(NameOf).ToArrayAsync(ct);
         var absent = await db.People
             .Where(p => p.IsActive && !present.Contains(p.Id)
-                && (db.ContextMembers.Any(m => m.ContextId == session.ContextId && m.PersonId == p.Id
-                        && m.JoinedAt < end && (m.LeftAt == null || m.LeftAt > start))
-                    || db.ContextLeaders.Any(l => l.ContextId == session.ContextId && l.PersonId == p.Id
-                        && l.StartsAt < end && (l.EndsAt == null || l.EndsAt > start))))
+                && db.GroupAssignments.Any(a => a.GroupId == session.GroupId && a.PersonId == p.Id
+                    && a.StartsAt < end && (a.EndsAt == null || a.EndsAt > start)))
             .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
             .Select(NameOf).ToArrayAsync(ct);
-        return new SessionResponse(session.Id, session.ContextId, session.OccurredOn, attendees, absent, session.Version);
+        return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, attendees, absent, session.Version);
     }
 }
