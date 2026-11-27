@@ -63,11 +63,14 @@ public sealed partial class PlanningCenterConnectionService(
     /// The properties for a challenge to <see cref="PlanningCenterAuthenticationDefaults.Scheme"/>. They record the
     /// membership starting the connection; the handler encrypts them into the OAuth state.
     /// </summary>
-    public async Task<AuthenticationProperties> BeginConnectAsync(CancellationToken ct)
+    /// <param name="expectedChurchId">The church the page starting the connection shows; it must be the selected one.</param>
+    public async Task<AuthenticationProperties> BeginConnectAsync(Guid expectedChurchId, CancellationToken ct)
     {
         if (!options.Value.IsConfigured)
             throw new PlanningCenterException(PlanningCenterFailure.NotConfigured);
         ChurchActor actor = await RequireActorAsync(ct);
+        if (actor.ChurchId != expectedChurchId)
+            throw new PlanningCenterException(PlanningCenterFailure.ChurchMismatch);
         AuthenticationProperties properties = new();
         properties.Items[PlanningCenterAuthenticationDefaults.ChurchIdKey] = actor.ChurchId.ToString("D");
         properties.Items[PlanningCenterAuthenticationDefaults.MembershipIdKey] = actor.MembershipId.ToString("D");
@@ -76,9 +79,11 @@ public sealed partial class PlanningCenterConnectionService(
 
     /// <summary>Links the church to the organization in a grant the OpenID Connect handler has validated.</summary>
     public async Task<PlanningCenterConnectOutcome> CompleteConnectAsync(
-        Guid startedByChurchId, Guid startedByMembershipId, PlanningCenterGrant grant, CancellationToken ct)
+        Guid startedByChurchId, Guid startedByMembershipId, PlanningCenterGrant grant, CancellationToken requestAborted)
     {
-        ChurchActor actor = await RequireActorAsync(ct);
+        ChurchActor actor = await RequireActorAsync(requestAborted);
+        // The grant is live in Planning Center already, so the browser going away must not drop it unsaved and unrevoked.
+        CancellationToken ct = CancellationToken.None;
         // The connection must be finished by the membership that started it, so a callback link sent to someone else fails.
         if (startedByChurchId != actor.ChurchId || startedByMembershipId != actor.MembershipId)
         {
@@ -129,7 +134,7 @@ public sealed partial class PlanningCenterConnectionService(
         catch (DbUpdateConcurrencyException)
         {
             // Another connect or disconnect for this church finished first; keep its result.
-            await TryRevokeAsync(grant.RefreshToken, ct);
+            await RevokeUnlessStoredAsync(grant.RefreshToken, ct);
             return PlanningCenterConnectOutcome.Failed;
         }
         catch (DbUpdateException exception)
@@ -140,7 +145,7 @@ public sealed partial class PlanningCenterConnectionService(
                 link.Provider == Provider && link.ExternalTenantId == grant.OrganizationId && link.ChurchId != actor.ChurchId, ct);
             if (claimedElsewhere)
                 return PlanningCenterConnectOutcome.OrganizationInUse;
-            await TryRevokeAsync(grant.RefreshToken, ct);
+            await RevokeUnlessStoredAsync(grant.RefreshToken, ct);
             LogSaveFailed(exception);
             return PlanningCenterConnectOutcome.Failed;
         }
@@ -153,13 +158,16 @@ public sealed partial class PlanningCenterConnectionService(
     }
 
     /// <summary>Revokes Sheaf's access in Planning Center and forgets the tokens. Disconnecting twice is harmless.</summary>
-    public async Task DisconnectAsync(CancellationToken ct)
+    public async Task DisconnectAsync(CancellationToken requestAborted)
     {
-        ChurchActor actor = await RequireActorAsync(ct);
-        ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(ct);
+        ChurchActor actor = await RequireActorAsync(requestAborted);
+        ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(requestAborted);
         if (connection is null)
             return;
 
+        // Once a revoke starts, finish forgetting the tokens even if the browser goes away; otherwise the row would stay
+        // Active holding a revoked grant.
+        CancellationToken ct = CancellationToken.None;
         db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
             .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
         for (int attempt = 0; ; attempt++)
@@ -205,10 +213,22 @@ public sealed partial class PlanningCenterConnectionService(
     /// Best effort: a failed revoke must not leave Sheaf holding a connection the admin asked to remove. The token
     /// still expires in Planning Center (90 days for refresh tokens), and the failure is logged.
     /// </summary>
+    /// <summary>
+    /// Revokes a grant that was not saved, unless the church's stored row holds the same refresh token: Planning Center
+    /// may return one grant to two concurrent authorizations, and the one that saved first keeps it.
+    /// </summary>
+    private async Task RevokeUnlessStoredAsync(string refreshToken, CancellationToken ct)
+    {
+        string? stored = await FindConnection(db).AsNoTracking()
+            .Select(integration => integration.ProtectedCredentials).SingleOrDefaultAsync(ct);
+        if (credentials.TryUnprotect<PlanningCenterCredentials>(Provider, stored)?.RefreshToken != refreshToken)
+            await TryRevokeAsync(refreshToken, ct);
+    }
+
     private async Task TryRevokeAsync(string refreshToken, CancellationToken ct)
     {
-        if (!await oauth.TryRevokeAsync(refreshToken, ct))
-            LogRevokeFailed();
+        // The client logs a failure with its cause.
+        await oauth.TryRevokeAsync(refreshToken, ct);
     }
 
     [LoggerMessage(LogLevel.Error, "Saving a Planning Center connection failed.")]
@@ -217,6 +237,4 @@ public sealed partial class PlanningCenterConnectionService(
     [LoggerMessage(LogLevel.Information, "Church {ChurchId} connected to Planning Center organization {OrganizationId}.")]
     private partial void LogConnected(Guid churchId, string organizationId);
 
-    [LoggerMessage(LogLevel.Warning, "Revoking a Planning Center token failed; it will expire on its own.")]
-    private partial void LogRevokeFailed();
 }

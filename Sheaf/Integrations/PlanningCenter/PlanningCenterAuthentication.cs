@@ -97,14 +97,20 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
 
     public override Task RemoteFailure(RemoteFailureContext context)
     {
-        // Without readable state the return was not started by this browser; anything later is a failed exchange.
+        // A failure before the code exchange (unreadable state, or no correlation cookie because another browser started
+        // it) means this return does not belong to this browser. Planning Center reporting an error, or anything from
+        // the exchange on, is a failed connection.
         LogRemoteFailure(context.Failure);
-        Redirect(context.HttpContext, context.Properties is null
-            ? PlanningCenterConnectOutcome.InvalidRequest
-            : PlanningCenterConnectOutcome.Failed);
+        bool reachedExchange = context.HttpContext.Items.ContainsKey(ReachedCodeExchangeKey)
+            || context.Failure is OpenIdConnectProtocolException;
+        Redirect(context.HttpContext, reachedExchange
+            ? PlanningCenterConnectOutcome.Failed
+            : PlanningCenterConnectOutcome.InvalidRequest);
         context.HandleResponse();
         return Task.CompletedTask;
     }
+
+    private static readonly object ReachedCodeExchangeKey = new();
 
     /// <summary>
     /// Runs after the handler has checked state and correlation and before it redeems the code, so a return that the
@@ -116,7 +122,9 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         {
             Redirect(context.HttpContext, PlanningCenterConnectOutcome.InvalidRequest);
             context.HandleResponse();
+            return;
         }
+        context.HttpContext.Items[ReachedCodeExchangeKey] = true;
     }
 
     public override async Task TicketReceived(TicketReceivedContext context)
@@ -189,7 +197,8 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
 
     private void Redirect(HttpContext http, PlanningCenterConnectOutcome outcome) =>
         http.Response.Redirect(QueryHelpers.AddQueryString(
-            settings.Value.ReturnUrl, PlanningCenterEndpoints.OutcomeQueryName, outcome.ToString()));
+            // Configured whenever a connection can start (validated on start); "/" only for a stray callback otherwise.
+            settings.Value.ReturnUrl ?? "/", PlanningCenterEndpoints.OutcomeQueryName, outcome.ToString()));
 
     [LoggerMessage(LogLevel.Warning, "Planning Center connection did not complete.")]
     private partial void LogRemoteFailure(Exception? exception);

@@ -60,11 +60,23 @@ public class PlanningCenterOptionsValidatorTests
         await Assert.That(result.Succeeded).IsTrue();
     }
 
+    [Test]
+    public async Task Validate_ConfiguredWithoutReturnUrl_Fails()
+    {
+        PlanningCenterOptions options = Configured("Sheaf (ops@example.org)");
+        options.ReturnUrl = null;
+
+        var result = Validator("Development").Validate(null, options);
+
+        await Assert.That(result.Failed).IsTrue();
+    }
+
     private static PlanningCenterOptions Configured(string userAgent) => new()
     {
         ClientId = "client",
         ClientSecret = "secret",
         RedirectUri = Callback,
+        ReturnUrl = "https://sheaf.example.org/settings/integrations",
         UserAgent = userAgent
     };
 

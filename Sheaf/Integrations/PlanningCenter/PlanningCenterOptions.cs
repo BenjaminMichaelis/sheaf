@@ -16,13 +16,17 @@ public sealed class PlanningCenterOptions
     public string? ClientSecret { get; set; }
 
     /// <summary>
-    /// The callback registered with Planning Center, ending in <c>/api/integrations/planning-center/callback</c>. It must be
-    /// served on the same site as the frontend so the browser sends the Sheaf cookies with the callback.
+    /// The callback registered with Planning Center, ending in <c>/api/integrations/planning-center/callback</c>. The
+    /// Sheaf cookie is host-only, so the callback must be on the host that set it: the API's host, or a frontend host
+    /// that proxies <c>/api</c> to the API.
     /// </summary>
     public Uri? RedirectUri { get; set; }
 
-    /// <summary>Where the browser goes after the callback; Sheaf adds a <c>planningCenter</c> query value with the outcome.</summary>
-    public string ReturnUrl { get; set; } = "/";
+    /// <summary>
+    /// The frontend page the browser returns to after the callback; Sheaf adds a <c>planningCenter</c> query value with
+    /// the outcome. Required once the integration is configured.
+    /// </summary>
+    public string? ReturnUrl { get; set; }
 
     /// <summary><c>openid</c> makes Planning Center issue the id token Sheaf reads the organization from.</summary>
     public string Scopes { get; set; } = "openid people";
@@ -43,8 +47,9 @@ public sealed class PlanningCenterOptions
 
 /// <summary>
 /// Fails startup on settings that would otherwise fail quietly: a half-configured OAuth application reports itself
-/// unconfigured, and outside Development and Testing a User-Agent without contact details may be refused by Planning
-/// Center ("app name plus a URL or email", per its authentication docs).
+/// unconfigured, a missing return URL strands the admin after connecting, and outside Development and Testing a
+/// User-Agent without contact details may be refused by Planning Center ("app name plus a URL or email", per its
+/// authentication docs).
 /// </summary>
 public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment) : IValidateOptions<PlanningCenterOptions>
 {
@@ -56,6 +61,11 @@ public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment)
         {
             return ValidateOptionsResult.Fail(
                 "PlanningCenter: set ClientId, ClientSecret, and an absolute RedirectUri together, or none of them.");
+        }
+        if (string.IsNullOrWhiteSpace(options.ReturnUrl))
+        {
+            return ValidateOptionsResult.Fail(
+                "PlanningCenter:ReturnUrl must name the frontend page to return to after connecting.");
         }
         if (!environment.IsDevelopment() && !environment.IsEnvironment("Testing") && !HasContact(options.UserAgent))
         {

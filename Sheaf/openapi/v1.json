@@ -3011,9 +3011,40 @@
         ],
         "summary": "Navigate the browser here to connect the current church; it returns to the configured ReturnUrl with the outcome",
         "operationId": "ConnectPlanningCenter",
+        "parameters": [
+          {
+            "name": "churchId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "302": {
             "description": "Found"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "503": {
             "description": "Service Unavailable",

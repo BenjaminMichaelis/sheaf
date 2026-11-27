@@ -48,7 +48,7 @@ public class PlanningCenterTests : ChurchApiTestBase
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Staff);
         using (client)
         {
-            using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, "/connect");
+            using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, $"/connect?churchId={admin.ChurchId:D}");
 
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         }
@@ -536,6 +536,164 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task ConnectPlanningCenter_CrossSiteNavigation_ReturnsForbidden()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, $"{BasePath}/connect?churchId={admin.ChurchId:D}");
+            request.Headers.Add(HeaderNames.Cookie, admin.Cookie);
+            request.Headers.Add("Sec-Fetch-Site", "cross-site");
+
+            using HttpResponseMessage response = await client.SendAsync(request);
+
+            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
+            await Assert.That(Pco.Requests).IsEmpty();
+        }
+    }
+
+    [Test]
+    public async Task ConnectPlanningCenter_ChurchIdNotSelected_ReturnsConflict()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, $"/connect?churchId={Guid.NewGuid():D}");
+
+            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+        }
+    }
+
+    [Test]
+    public async Task PlanningCenterCallback_CorrelationCookieMissing_RedirectsInvalidRequestWithoutExchangingCode()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            var (url, _) = await BeginConnectAsync(client, admin);
+            string state = QueryHelpers.ParseQuery(url.Query)["state"].ToString();
+
+            // The link is opened in a browser that did not start the connection, so it has no correlation cookie.
+            using HttpResponseMessage callback = await CallbackAsync(client, admin.Cookie, handlerCookies: "", $"code=good-code&state={Uri.EscapeDataString(state)}");
+
+            await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.InvalidRequest);
+            await Assert.That(Pco.To("/oauth/token")).IsEmpty();
+        }
+    }
+
+    [Test]
+    public async Task PlanningCenterCallback_ReconnectToDifferentOrganization_ReleasesPreviousOrganization()
+    {
+        var (firstClient, first) = await SignInAsync(ChurchMembershipRole.Admin);
+        var (secondClient, second) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (firstClient)
+        using (secondClient)
+        {
+            await ConnectAsync(firstClient, first);
+            Pco.OrganizationId = "5151";
+            using HttpResponseMessage reconnect = await ConnectAsync(firstClient, first);
+            Pco.OrganizationId = "4242";
+
+            using HttpResponseMessage callback = await ConnectAsync(secondClient, second);
+
+            await AssertOutcomeAsync(reconnect, PlanningCenterConnectOutcome.Connected);
+            await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Connected);
+        }
+    }
+
+    [Test]
+    public async Task PlanningCenterCallback_SaveConflictWithStoredGrant_DoesNotRevokeIt()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            await ConnectAsync(client, admin);
+            // A second authorization returns the grant already stored, and another connect saves first.
+            Pco.Enqueue("/oauth/token", () => Pco.CodeExchange("access-1", "refresh-1"));
+            SaveHook.Before = async () =>
+            {
+                SaveHook.Before = null;
+                await UpdateConnectionAsync(admin.ChurchId, (_, _) => { });
+            };
+
+            using HttpResponseMessage callback = await ConnectAsync(client, admin);
+
+            await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
+            await Assert.That(Pco.To("/oauth/revoke")).IsEmpty();
+            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-1");
+        }
+    }
+
+    [Test]
+    public async Task GetAccessTokenAsync_RefreshRejectedAfterDisconnect_StaysDisconnected()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            await ConnectAsync(client, admin);
+            Time.Advance(TimeSpan.FromHours(3));
+            Pco.Enqueue("/oauth/token", async () =>
+            {
+                await UpdateConnectionAsync(admin.ChurchId, (row, _) =>
+                {
+                    row.Status = IntegrationStatus.Disconnected;
+                    row.ExternalTenantId = null;
+                    row.ProtectedCredentials = null;
+                });
+                return FakePlanningCenter.Json(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+            });
+
+            await Assert.That(async () => { await GetAccessTokenAsync(admin.ChurchId); })
+                .Throws<PlanningCenterException>()
+                .WithMessage(nameof(PlanningCenterFailure.NotConnected));
+            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
+        }
+    }
+
+    [Test]
+    public async Task GetAccessTokenAsync_RefreshRejectedButRefreshedElsewhere_ReturnsWinnersToken()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            await ConnectAsync(client, admin);
+            Time.Advance(TimeSpan.FromHours(3));
+            Pco.Enqueue("/oauth/token", async () =>
+            {
+                await UpdateConnectionAsync(admin.ChurchId, (row, protector) => row.ProtectedCredentials = protector.Protect(
+                    IntegrationProvider.PlanningCenter,
+                    new PlanningCenterCredentials("access-winner", Time.GetUtcNow().AddHours(2), "refresh-winner", Time.GetUtcNow())));
+                return FakePlanningCenter.Json(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
+            });
+
+            string token = await GetAccessTokenAsync(admin.ChurchId);
+
+            await Assert.That(token).IsEqualTo("access-winner");
+            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Active);
+        }
+    }
+
+    [Test]
+    public async Task GetAccessTokenAsync_InvalidGrantNotLabeledJson_MarksNeedsReauthorization()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            await ConnectAsync(client, admin);
+            Pco.Enqueue("/oauth/token", () => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent("""{"error":"invalid_grant"}""", Encoding.UTF8, "text/plain")
+            });
+            Time.Advance(TimeSpan.FromHours(3));
+
+            await Assert.That(async () => { await GetAccessTokenAsync(admin.ChurchId); })
+                .Throws<PlanningCenterException>()
+                .WithMessage(nameof(PlanningCenterFailure.NotConnected));
+            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.NeedsReauthorization);
+        }
+    }
+
+    [Test]
     public async Task GetAccessTokenAsync_SaveConflictsOnEveryAttempt_RevokesNewTokenAndThrows()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
@@ -647,7 +805,7 @@ public class PlanningCenterTests : ChurchApiTestBase
     /// </summary>
     private async Task<(Uri Url, string HandlerCookies)> BeginConnectAsync(HttpClient client, Admin admin)
     {
-        using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, "/connect");
+        using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, $"/connect?churchId={admin.ChurchId:D}");
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Redirect).Because(await response.Content.ReadAsStringAsync());
         Uri url = response.Headers.Location ?? throw new InvalidOperationException("The connect response did not redirect.");
         Pco.Nonce = QueryHelpers.ParseQuery(url.Query)["nonce"].ToString();

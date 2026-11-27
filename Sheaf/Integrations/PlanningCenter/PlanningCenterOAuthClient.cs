@@ -58,8 +58,10 @@ public sealed class PlanningCenterOAuthException(
 /// backchannel, an <see cref="OpenIdConnectMessage"/> posted as a form and parsed from the JSON response. Token
 /// requests are not retried: a refresh rotates the refresh token, so a blind retry could burn the only valid credential.
 /// </summary>
-public sealed class PlanningCenterOAuthClient(
-    IOptionsMonitor<OpenIdConnectOptions> openIdConnect, IOptions<PlanningCenterOptions> options)
+public sealed partial class PlanningCenterOAuthClient(
+    IOptionsMonitor<OpenIdConnectOptions> openIdConnect,
+    IOptions<PlanningCenterOptions> options,
+    ILogger<PlanningCenterOAuthClient> logger)
 {
     public const string HttpClientName = "PlanningCenter.OAuth";
 
@@ -101,8 +103,9 @@ public sealed class PlanningCenterOAuthClient(
     }
 
     /// <summary>
-    /// Best effort revoke: returns false instead of throwing when Planning Center is unreachable or Sheaf is no longer
-    /// configured, so an admin can always disconnect. An unrevoked refresh token still expires after 90 days.
+    /// Best effort revoke: returns false instead of throwing when Planning Center is unreachable, refuses, or Sheaf is no
+    /// longer configured, so an admin can always disconnect. The cause is logged; a refusal such as <c>invalid_client</c>
+    /// points at Sheaf's client secret. An unrevoked refresh token still expires after 90 days.
     /// </summary>
     public async Task<bool> TryRevokeAsync(string refreshToken, CancellationToken ct)
     {
@@ -114,6 +117,7 @@ public sealed class PlanningCenterOAuthClient(
         catch (Exception exception) when (PlanningCenterOAuthException.IsRemoteFailure(exception, ct)
             || exception is PlanningCenterException { Failure: PlanningCenterFailure.NotConfigured })
         {
+            LogRevokeFailed(exception);
             return false;
         }
     }
@@ -147,17 +151,16 @@ public sealed class PlanningCenterOAuthClient(
         using FormUrlEncodedContent form = new(request.Parameters);
         using HttpResponseMessage response = await handler.Backchannel.PostAsync(endpoint, form, ct);
         string body = await response.Content.ReadAsStringAsync(ct);
+        // Like the handler, parse whatever the content type says: an OAuth error is still recognized when mislabeled, and
+        // a body that is not JSON (such as a firewall's HTML page) carries no error code.
         OpenIdConnectMessage? message = null;
-        if (response.Content.Headers.ContentType?.MediaType == "application/json")
+        try
         {
-            try
-            {
-                message = new OpenIdConnectMessage(body);
-            }
-            catch (Exception exception) when (exception is ArgumentException or JsonException)
-            {
-                // An unreadable body still fails with the status code.
-            }
+            message = new OpenIdConnectMessage(body);
+        }
+        catch (Exception exception) when (exception is ArgumentException or JsonException)
+        {
+            // An unreadable body still fails with the status code.
         }
         if (!response.IsSuccessStatusCode)
         {
@@ -166,4 +169,7 @@ public sealed class PlanningCenterOAuthClient(
         }
         return message ?? throw PlanningCenterOAuthException.InvalidResponse("response was not JSON");
     }
+
+    [LoggerMessage(LogLevel.Warning, "Revoking a Planning Center token failed; it will expire on its own.")]
+    private partial void LogRevokeFailed(Exception exception);
 }

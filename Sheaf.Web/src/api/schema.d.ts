@@ -2936,7 +2936,9 @@ export interface operations {
     };
     ConnectPlanningCenter: {
         parameters: {
-            query?: never;
+            query: {
+                churchId: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2949,6 +2951,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description Service Unavailable */
             503: {

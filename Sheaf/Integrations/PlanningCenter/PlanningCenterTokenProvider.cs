@@ -56,7 +56,7 @@ public sealed partial class PlanningCenterTokenProvider(
             }
             catch (PlanningCenterOAuthException exception) when (exception.IsInvalidGrant)
             {
-                return await HandleRejectedRefreshAsync(connection, uncancelled);
+                return await HandleRejectedRefreshAsync(connection, stored.RefreshToken, uncancelled);
             }
 
             return await SaveRefreshedAsync(connection, PlanningCenterCredentials.From(tokenSet, clock.GetUtcNow()), uncancelled);
@@ -117,14 +117,17 @@ public sealed partial class PlanningCenterTokenProvider(
     }
 
     /// <summary>
-    /// Planning Center rejected the refresh token. If another process refreshed in the meantime its token is fine;
-    /// otherwise the grant is gone and an admin has to connect again.
+    /// Planning Center rejected the refresh token. If another process refreshed in the meantime its token is fine. If
+    /// the row moved on (disconnected, reconnected, or already given up), the rejection says nothing about what is
+    /// stored now, so nothing is written. Only a rejection of the token still stored means an admin has to connect again.
     /// </summary>
-    private async Task<string> HandleRejectedRefreshAsync(ChurchIntegration connection, CancellationToken ct)
+    private async Task<string> HandleRejectedRefreshAsync(ChurchIntegration connection, string rejectedRefreshToken, CancellationToken ct)
     {
         await db.Entry(connection).ReloadAsync(ct);
         if (UsableAccessToken(connection) is { } winner)
             return winner;
+        if (connection.Status != IntegrationStatus.Active || Read(connection)?.RefreshToken != rejectedRefreshToken)
+            throw new PlanningCenterException(PlanningCenterFailure.NotConnected);
         return await MarkNeedsReauthorizationAsync(connection, ct);
     }
 
@@ -148,8 +151,8 @@ public sealed partial class PlanningCenterTokenProvider(
 
     private async Task RevokeOrLogAsync(string refreshToken, CancellationToken ct)
     {
-        if (!await oauth.TryRevokeAsync(refreshToken, ct))
-            LogRevokeFailed();
+        // The client logs a failure with its cause.
+        await oauth.TryRevokeAsync(refreshToken, ct);
     }
 
     private PlanningCenterCredentials? Read(ChurchIntegration connection) =>
@@ -165,6 +168,4 @@ public sealed partial class PlanningCenterTokenProvider(
     [LoggerMessage(LogLevel.Warning, "Planning Center connection for church {ChurchId} needs an admin to reconnect.")]
     private partial void LogNeedsReauthorization(Guid churchId);
 
-    [LoggerMessage(LogLevel.Warning, "Revoking an unused Planning Center token failed; it will expire on its own.")]
-    private partial void LogRevokeFailed();
 }

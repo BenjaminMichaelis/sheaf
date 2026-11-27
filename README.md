@@ -259,14 +259,18 @@ contact its operator, and may answer 403 to one that does not. The default,
 `Sheaf/1.0`, has no contact, so outside Development and Testing startup fails unless
 `UserAgent` includes an email or URL.
 
-The redirect URI must be registered on the Planning Center OAuth application exactly,
-and served on the same site as the frontend so the browser sends Sheaf's cookies with
-the callback. Without these settings the status endpoint reports `configured: false`
-and connecting returns 503.
+The redirect URI must be registered on the Planning Center OAuth application exactly.
+Sheaf's sign-in cookie is host-only, so the callback must be served on the host that
+set it: the API's host, or a frontend host that proxies `/api` to the API. `ReturnUrl`
+(the frontend page to come back to) is required once the integration is configured.
+Without these settings the status endpoint reports `configured: false` and connecting
+returns 503.
 
 - `GET /api/church/integrations/planning-center` returns the connection status.
-- `GET /api/church/integrations/planning-center/connect` is a browser navigation, not
-  a fetch: it redirects to Planning Center (or returns 503 when unconfigured).
+- `GET /api/church/integrations/planning-center/connect?churchId=<selected church>` is
+  a browser navigation, not a fetch: it redirects to Planning Center. It returns 409
+  when `churchId` is not the selected church, 403 for a navigation another site
+  started (`Sec-Fetch-Site: cross-site`), and 503 when unconfigured.
 - The callback redirects to `ReturnUrl` with `planningCenter=Connected`, `Denied`,
   `InvalidRequest`, `OrganizationInUse`, or `Failed`. Only the membership that started
   the connection can finish it, checked before the code is exchanged; a return without
