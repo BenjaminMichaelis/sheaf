@@ -98,31 +98,42 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     [Test]
-    [Arguments("cross-site", null)]
-    [Arguments("cross-site", "https://attacker.example/page")]
-    [Arguments("same-site", "https://attacker.localhost.example/page")]
-    public async Task ConnectPlanningCenter_NavigationFromAnotherSite_ReturnsForbidden(string fetchSite, string? referer)
+    public async Task ConnectPlanningCenter_ChurchIdMissing_ReturnsBadRequest()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
         using (client)
         {
-            using HttpResponseMessage response = await NavigateToConnectAsync(client, admin, fetchSite, referer);
+            using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Get, "/connect");
+
+            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        }
+    }
+
+    [Test]
+    public async Task ConnectPlanningCenter_CrossSiteNavigation_ReturnsForbidden()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            using HttpResponseMessage response = await NavigateToConnectAsync(client, admin, "cross-site");
 
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
             await Assert.That(Pco.Requests).IsEmpty();
         }
     }
 
+    /// <summary>The Fetch Metadata resource isolation policy (web.dev/articles/fetch-metadata) allows these.</summary>
     [Test]
-    [Arguments("same-origin", null)]
-    [Arguments("none", null)]
-    [Arguments("same-site", "https://localhost/settings/integrations")]
-    public async Task ConnectPlanningCenter_NavigationFromSheaf_RedirectsToPlanningCenter(string fetchSite, string? referer)
+    [Arguments("same-origin")]
+    [Arguments("same-site")]
+    [Arguments("none")]
+    [Arguments(null)]
+    public async Task ConnectPlanningCenter_NavigationNotCrossSite_RedirectsToPlanningCenter(string? fetchSite)
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
         using (client)
         {
-            using HttpResponseMessage response = await NavigateToConnectAsync(client, admin, fetchSite, referer);
+            using HttpResponseMessage response = await NavigateToConnectAsync(client, admin, fetchSite);
 
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Redirect);
             await Assert.That(response.Headers.Location?.Host).IsEqualTo("api.planningcenteronline.com");
@@ -161,7 +172,7 @@ public class PlanningCenterTests : ChurchApiTestBase
                 await Assert.That(stored.ProtectedCredentials).DoesNotContain("refresh-connected");
                 await Assert.That(stored.ProtectedCredentials).DoesNotContain("access-connected");
             });
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-connected");
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-connected");
         }
     }
 
@@ -309,6 +320,22 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task PlanningCenterCallback_PersonIdLongerThanStored_RedirectsFailedAndRevokesGrant()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            Pco.PersonId = new string('7', ChurchIntegration.ExternalIdMaxLength + 1);
+
+            using HttpResponseMessage callback = await ConnectAsync(client, admin, "unstorable");
+
+            await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
+            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-unstorable"]);
+            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
+        }
+    }
+
+    [Test]
     public async Task PlanningCenterCallback_TokenEndpointUnavailable_DoesNotRetryCodeExchange()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
@@ -340,7 +367,7 @@ public class PlanningCenterTests : ChurchApiTestBase
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.OrganizationInUse);
             await Assert.That(RevokedTokens()).IsEmpty();
             await Assert.That((await GetStatusAsync(secondClient, second)).Status).IsEqualTo(IntegrationStatus.Disconnected);
-            await Assert.That(await GetAccessTokenAsync(first.ChurchId)).IsEqualTo("access-first");
+            await Assert.That(await StoredAccessTokenAsync(first.ChurchId)).IsEqualTo("access-first");
         }
     }
 
@@ -394,7 +421,7 @@ public class PlanningCenterTests : ChurchApiTestBase
 
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Connected);
             await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-old"]);
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-new");
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-new");
         }
     }
 
@@ -426,7 +453,7 @@ public class PlanningCenterTests : ChurchApiTestBase
 
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
             await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-lost"]);
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
         }
     }
 
@@ -444,7 +471,7 @@ public class PlanningCenterTests : ChurchApiTestBase
 
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
             await Assert.That(RevokedTokens()).IsEmpty();
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
         }
     }
 
@@ -465,7 +492,7 @@ public class PlanningCenterTests : ChurchApiTestBase
 
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
             await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-unsaved"]);
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-stored");
         }
     }
 
@@ -558,265 +585,23 @@ public class PlanningCenterTests : ChurchApiTestBase
         }
     }
 
+    // ---- OAuth client ----
+
     [Test]
-    public async Task DisconnectPlanningCenter_RefreshedDuringDisconnect_RevokesBothGrants()
+    public async Task DisconnectPlanningCenter_ChangedByAnotherAdminMeanwhile_ReturnsConflictAndKeepsTheirChange()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
         using (client)
         {
             await ConnectAsync(client, admin, "connected");
-            SaveHook.Before = async () =>
-            {
-                SaveHook.Before = null;
-                await StoreTokensAsync(admin.ChurchId, "refreshed");
-            };
+            ConflictOnNextSave(admin.ChurchId);
 
             using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Delete, "");
 
-            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
-            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-connected", "refresh-refreshed"]);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
-        }
-    }
-
-    // ---- Token provider ----
-
-    [Test]
-    public async Task GetAccessTokenAsync_FreshToken_ReturnsStoredTokenWithoutRefreshing()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-
-            string token = await GetAccessTokenAsync(admin.ChurchId);
-
-            await Assert.That(token).IsEqualTo("access-connected");
-            await Assert.That(RefreshedTokens()).IsEmpty();
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_NearExpiry_RefreshesWithRotatedRefreshToken()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            RespondToNextRefresh("first");
-            RespondToNextRefresh("second");
-
-            // Refreshed shortly before expiry, so a request never starts with a dying token.
-            Time.Advance(TimeSpan.FromHours(2) - PlanningCenterTokenProvider.RefreshMargin);
-            string first = await GetAccessTokenAsync(admin.ChurchId);
-            Time.Advance(TimeSpan.FromHours(2));
-            string second = await GetAccessTokenAsync(admin.ChurchId);
-
-            await Assert.That(first).IsEqualTo("access-first");
-            await Assert.That(second).IsEqualTo("access-second");
-            await Assert.That(RefreshedTokens()).IsEquivalentTo(["refresh-connected", "refresh-first"]);
-        }
-    }
-
-    [Test]
-    [Arguments("""{"error":"invalid_grant"}""")]
-    [Arguments("""{"error":"invalid_request","error_description":"The refresh token is no longer valid"}""")]
-    public async Task GetAccessTokenAsync_RefreshTokenRejected_MarksNeedsReauthorization(string body)
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            Pco.Enqueue("/oauth/token", () => FakePlanningCenter.Json(HttpStatusCode.Unauthorized, body));
-            ExpireAccessToken();
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.NeedsReauthorization);
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_InvalidGrantNotLabeledJson_MarksNeedsReauthorization()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            Pco.Enqueue("/oauth/token", () => new HttpResponseMessage(HttpStatusCode.Unauthorized)
-            {
-                Content = new StringContent("""{"error":"invalid_grant"}""", Encoding.UTF8, "text/plain")
-            });
-            ExpireAccessToken();
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.NeedsReauthorization);
-        }
-    }
-
-    [Test]
-    [Arguments(HttpStatusCode.BadRequest, "Bad Request")]
-    [Arguments(HttpStatusCode.Forbidden, "<html>Request blocked. CloudFront Request ID: abc</html>")]
-    public async Task GetAccessTokenAsync_RefreshFailsWithoutOAuthError_KeepsConnectionActive(HttpStatusCode status, string body)
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            Pco.Enqueue("/oauth/token", () => new HttpResponseMessage(status) { Content = new StringContent(body) });
-            RespondToNextRefresh("retried");
-            ExpireAccessToken();
-
-            await Assert.That(async () => { await GetAccessTokenAsync(admin.ChurchId); })
-                .Throws<PlanningCenterOAuthException>();
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Active);
-            // The stored refresh token is still the live one, so the next attempt uses it again.
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-retried");
-            await Assert.That(RefreshedTokens()).IsEquivalentTo(["refresh-connected", "refresh-connected"]);
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_UnreadableCredentials_MarksNeedsReauthorizationAndKeepsCiphertext()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            await UpdateConnectionAsync(admin.ChurchId, (row, _) => row.ProtectedCredentials = "not-decryptable");
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.NeedsReauthorization);
-            await Assert.That(RefreshedTokens()).IsEmpty();
-            // Kept so that a recovered Data Protection key ring could read it again.
-            await InChurchAsync(admin.ChurchId, async db =>
-                await Assert.That((await db.ChurchIntegrations.SingleAsync()).ProtectedCredentials).IsEqualTo("not-decryptable"));
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_DisconnectedDuringRefresh_RevokesNewTokenAndThrows()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            Pco.Enqueue("/oauth/token", async () =>
-            {
-                await SimulateDisconnectAsync(admin.ChurchId);
-                return FakePlanningCenter.Tokens("access-orphan", "refresh-orphan");
-            });
-            ExpireAccessToken();
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-orphan"]);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_RefreshRejectedAfterDisconnect_StaysDisconnected()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            Pco.Enqueue("/oauth/token", async () =>
-            {
-                await SimulateDisconnectAsync(admin.ChurchId);
-                return FakePlanningCenter.Json(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
-            });
-            ExpireAccessToken();
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_ConcurrentRefreshGaveUpDuringRefresh_KeepsNewTokenAndReactivates()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            // Another process refreshed with the same old token, was rejected, and marked the connection dead.
-            Pco.Enqueue("/oauth/token", async () =>
-            {
-                await SimulateGiveUpAsync(admin.ChurchId);
-                return FakePlanningCenter.Tokens("access-live", "refresh-live");
-            });
-            ExpireAccessToken();
-
-            string token = await GetAccessTokenAsync(admin.ChurchId);
-
-            await Assert.That(token).IsEqualTo("access-live");
-            await Assert.That(RevokedTokens()).IsEmpty();
-            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Active);
-            await Assert.That(await GetAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-live");
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_RefreshedElsewhereDuringRefresh_UsesWinnerAndRevokesOwnToken()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            ExpireAccessToken();
-            Pco.Enqueue("/oauth/token", async () =>
-            {
-                await StoreTokensAsync(admin.ChurchId, "winner");
-                return FakePlanningCenter.Tokens("access-loser", "refresh-loser");
-            });
-
-            string token = await GetAccessTokenAsync(admin.ChurchId);
-
-            await Assert.That(token).IsEqualTo("access-winner");
-            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-loser"]);
-        }
-    }
-
-    [Test]
-    public async Task GetAccessTokenAsync_RefreshRejectedButRefreshedElsewhere_ReturnsWinnersToken()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            ExpireAccessToken();
-            Pco.Enqueue("/oauth/token", async () =>
-            {
-                await StoreTokensAsync(admin.ChurchId, "winner");
-                return FakePlanningCenter.Json(HttpStatusCode.Unauthorized, """{"error":"invalid_grant"}""");
-            });
-
-            string token = await GetAccessTokenAsync(admin.ChurchId);
-
-            await Assert.That(token).IsEqualTo("access-winner");
+            await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
             await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Active);
         }
     }
-
-    [Test]
-    public async Task GetAccessTokenAsync_SaveConflictsOnEveryAttempt_RevokesNewTokenAndThrows()
-    {
-        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
-        using (client)
-        {
-            await ConnectAsync(client, admin, "connected");
-            RespondToNextRefresh("contended");
-            ExpireAccessToken();
-            // Before every save of the refreshed row, another writer gives up on the connection, so each save conflicts.
-            SaveHook.Before = () => SimulateGiveUpAsync(admin.ChurchId);
-
-            await AssertNotConnectedAsync(admin.ChurchId);
-            SaveHook.Before = null;
-            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-contended"]);
-        }
-    }
-
-    // ---- OAuth client ----
 
     [Test]
     public async Task TryRevokeAsync_SuccessWithEmptyBody_ReturnsTrue()
@@ -873,48 +658,30 @@ public class PlanningCenterTests : ChurchApiTestBase
 
     private IEnumerable<string> RevokedTokens() => Pco.To("/oauth/revoke").Select(request => request.Form["token"]);
 
-    private IEnumerable<string> RefreshedTokens() => Pco.To("/oauth/token")
-        .Where(request => request.Form["grant_type"] == "refresh_token")
-        .Select(request => request.Form["refresh_token"]);
-
-    /// <summary>Planning Center's next refresh issues <c>access-{name}</c> and <c>refresh-{name}</c>.</summary>
-    private void RespondToNextRefresh(string name) =>
-        Pco.Enqueue("/oauth/token", () => FakePlanningCenter.Tokens($"access-{name}", $"refresh-{name}"));
-
-    /// <summary>Moves past the stored access token's lifetime, so the next use refreshes.</summary>
-    private void ExpireAccessToken() => Time.Advance(TimeSpan.FromHours(3));
-
     /// <summary>Another writer saves first on the next save of the connection, so that save conflicts.</summary>
     private void ConflictOnNextSave(Guid churchId) => SaveHook.Before = async () =>
     {
         SaveHook.Before = null;
-        await UpdateConnectionAsync(churchId, (_, _) => { });
-    };
-
-    /// <summary>Another process stores <c>access-{name}</c>/<c>refresh-{name}</c> as the live tokens.</summary>
-    private Task StoreTokensAsync(Guid churchId, string name) => UpdateConnectionAsync(churchId, (row, protector) =>
-        row.Refresh(protector.Protect(IntegrationProvider.PlanningCenter,
-            new PlanningCenterCredentials($"access-{name}", Time.GetUtcNow().AddHours(2), $"refresh-{name}", Time.GetUtcNow()))));
-
-    /// <summary>An admin disconnects in another request.</summary>
-    private Task SimulateDisconnectAsync(Guid churchId) => UpdateConnectionAsync(churchId, (row, _) => row.Disconnect());
-
-    /// <summary>Another process's refresh was rejected, and it marked the connection for reconnecting.</summary>
-    private Task SimulateGiveUpAsync(Guid churchId) =>
-        UpdateConnectionAsync(churchId, (row, _) => row.RequireReauthorization(keepCredentials: false));
-
-    /// <summary>Changes the stored connection the way another process would, changing its concurrency version.</summary>
-    private Task UpdateConnectionAsync(Guid churchId, Action<ChurchIntegration, IntegrationCredentialProtector> change) =>
-        InScopeAsync(async services =>
+        await InScopeAsync(async services =>
         {
             services.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
-            ApplicationDbContext db = services.GetRequiredService<ApplicationDbContext>();
-            ChurchIntegration row = await db.ChurchIntegrations.SingleAsync();
-            change(row, services.GetRequiredService<IntegrationCredentialProtector>());
-            row.Version = Guid.NewGuid();
-            await db.SaveChangesAsync();
+            await services.GetRequiredService<ApplicationDbContext>().ChurchIntegrations
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Version, Guid.NewGuid()));
         });
+    };
 
+    /// <summary>The access token the church has stored, decrypted, or null when there is none.</summary>
+    private async Task<string?> StoredAccessTokenAsync(Guid churchId)
+    {
+        string? token = null;
+        await InScopeAsync(async services =>
+        {
+            services.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
+            PlanningCenterConnectionStore store = services.GetRequiredService<PlanningCenterConnectionStore>();
+            token = await store.Connection.SingleOrDefaultAsync() is { } connection ? store.Read(connection)?.AccessToken : null;
+        });
+        return token;
+    }
     private async Task<(HttpClient Client, Session Session)> SignInToChurchAsync(Guid churchId, ChurchMembershipRole role)
     {
         ApplicationUser user = await CreateUserAsync();
@@ -946,13 +713,12 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     /// <summary>A browser navigation to the connect endpoint, with the fetch metadata a browser would send.</summary>
-    private static async Task<HttpResponseMessage> NavigateToConnectAsync(HttpClient client, Session session, string fetchSite, string? referer)
+    private static async Task<HttpResponseMessage> NavigateToConnectAsync(HttpClient client, Session session, string? fetchSite)
     {
         using HttpRequestMessage request = new(HttpMethod.Get, BasePath + ConnectPath(session));
         request.Headers.Add(HeaderNames.Cookie, session.Cookie);
-        request.Headers.Add("Sec-Fetch-Site", fetchSite);
-        if (referer is not null)
-            request.Headers.Referrer = new Uri(referer);
+        if (fetchSite is not null)
+            request.Headers.Add("Sec-Fetch-Site", fetchSite);
         return await client.SendAsync(request);
     }
 
@@ -1008,23 +774,5 @@ public class PlanningCenterTests : ChurchApiTestBase
         await Assert.That(callback.StatusCode).IsEqualTo(HttpStatusCode.Redirect);
         await Assert.That(callback.Headers.Location?.OriginalString)
             .IsEqualTo($"{ReturnUrl}?{PlanningCenterAuthenticationDefaults.OutcomeQueryName}={expected}");
-    }
-
-    private async Task AssertNotConnectedAsync(Guid churchId)
-    {
-        PlanningCenterException? exception = await Assert.That(async () => { await GetAccessTokenAsync(churchId); })
-            .Throws<PlanningCenterException>();
-        await Assert.That(exception?.Failure).IsEqualTo(PlanningCenterFailure.NotConnected);
-    }
-
-    private async Task<string> GetAccessTokenAsync(Guid churchId)
-    {
-        string? token = null;
-        await InScopeAsync(async services =>
-        {
-            services.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
-            token = await services.GetRequiredService<PlanningCenterTokenProvider>().GetAccessTokenAsync(CancellationToken.None);
-        });
-        return token ?? throw new InvalidOperationException("No token was returned.");
     }
 }

@@ -55,6 +55,12 @@ public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment)
 {
     public ValidateOptionsResult Validate(string? name, PlanningCenterOptions options)
     {
+        // The HTTP client sets this header whether or not an OAuth application is configured, so it is checked first.
+        if (!IsValidUserAgent(options.UserAgent))
+        {
+            return ValidateOptionsResult.Fail(
+                "PlanningCenter:UserAgent is not a valid User-Agent header value, such as \"Sheaf (ops@example.org)\".");
+        }
         if (!options.IsPartlyConfigured)
             return ValidateOptionsResult.Success;
         if (!options.IsConfigured)
@@ -73,11 +79,6 @@ public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment)
         {
             return ValidateOptionsResult.Fail(
                 "PlanningCenter:ReturnUrl must name the frontend page to return to after connecting.");
-        }
-        if (!IsValidUserAgent(options.UserAgent))
-        {
-            return ValidateOptionsResult.Fail(
-                "PlanningCenter:UserAgent is not a valid User-Agent header value, such as \"Sheaf (ops@example.org)\".");
         }
         if (!environment.IsDevelopment() && !HasContact(options.UserAgent))
         {

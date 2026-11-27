@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
@@ -31,23 +32,21 @@ public static class PlanningCenterServiceCollectionExtensions
                 client.MaxResponseContentBufferSize = 10 * 1024 * 1024;
             })
             // The service defaults give every client one shared standard pipeline that retries all methods. OAuth posts
-            // must not be retried: a code is single-use and a refresh rotates the refresh token. So this client
-            // replaces that pipeline with its own, which retries only safe methods: the discovery document and keys.
+            // must not be retried: an authorization code is single-use. So this client replaces that pipeline with its
+            // own, which retries only safe methods: the discovery document and keys.
             .RemoveAllResilienceHandlers()
             .AddStandardResilienceHandler(options => options.Retry.DisableForUnsafeHttpMethods());
 #pragma warning restore EXTEXP0001
 
         // The connect step is Microsoft's OpenID Connect handler; Sheaf supplies its options and events.
         services.AddAuthentication().AddOpenIdConnect(PlanningCenterAuthenticationDefaults.Scheme, _ => { });
-        services.ConfigureOptions<ConfigurePlanningCenterOpenIdConnect>();
+        services.AddOptions<OpenIdConnectOptions>(PlanningCenterAuthenticationDefaults.Scheme)
+            .Configure<IOptions<PlanningCenterOptions>, IHttpClientFactory, TimeProvider>(PlanningCenterOpenIdConnect.Configure);
         services.AddScoped<PlanningCenterOpenIdConnectEvents>();
 
         services.AddSingleton<PlanningCenterOAuthClient>();
-        services.TryAddSingleton<IntegrationCredentialProtector>();
-        services.TryAddSingleton<IntegrationRefreshLocks>();
         services.AddScoped<PlanningCenterConnectionStore>();
         services.AddScoped<PlanningCenterConnectionService>();
-        services.AddScoped<PlanningCenterTokenProvider>();
         return services;
     }
 }

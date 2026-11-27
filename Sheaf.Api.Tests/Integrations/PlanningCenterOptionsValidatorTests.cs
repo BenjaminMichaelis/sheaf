@@ -85,6 +85,15 @@ public class PlanningCenterOptionsValidatorTests
     }
 
     [Test]
+    public async Task Validate_UnconfiguredWithMalformedUserAgent_Fails()
+    {
+        // The HTTP client sets this header even without an OAuth application, so a bad value must fail at start.
+        var result = Validator("Development").Validate(null, new PlanningCenterOptions { UserAgent = "Sheaf (unclosed" });
+
+        await Assert.That(result.Failed).IsTrue();
+    }
+
+    [Test]
     public async Task Validate_ConfiguredWithoutReturnUrl_Fails()
     {
         PlanningCenterOptions options = Configured("Sheaf (ops@example.org)");

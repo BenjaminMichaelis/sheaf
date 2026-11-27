@@ -51,9 +51,6 @@ public sealed partial class PlanningCenterConnectionService(
 {
     private const IntegrationProvider Provider = PlanningCenterConnectionStore.Provider;
 
-    /// <summary>The most times <see cref="DisconnectAsync"/> re-reads and retries after another writer changed the row.</summary>
-    private const int MaxDisconnectAttempts = 5;
-
     public async Task<PlanningCenterStatusResponse> GetStatusAsync(CancellationToken ct)
     {
         ChurchIntegration? connection = await store.Connection.AsNoTracking().SingleOrDefaultAsync(ct);
@@ -67,11 +64,8 @@ public sealed partial class PlanningCenterConnectionService(
     /// membership starting the connection; the handler encrypts them into the OAuth state, and only that membership can
     /// finish it (checked by <see cref="PlanningCenterOpenIdConnectEvents"/> before the code is exchanged).
     /// </summary>
-    /// <exception cref="PlanningCenterException">Sheaf has no Planning Center application configured.</exception>
     public async Task<AuthenticationProperties> BeginConnectAsync(CancellationToken ct)
     {
-        if (!options.Value.IsConfigured)
-            throw new PlanningCenterException(PlanningCenterFailure.NotConfigured);
         ChurchActor actor = await RequireActorAsync(ct);
         return PlanningCenterConnectionStart.ToProperties(new(actor.ChurchId, actor.MembershipId));
     }
@@ -145,34 +139,31 @@ public sealed partial class PlanningCenterConnectionService(
     /// Revokes Sheaf's access in Planning Center and forgets the tokens and who connected. Disconnecting twice is harmless.
     /// A failed revoke does not stop the disconnect: the token still expires in Planning Center, and the client logs it.
     /// </summary>
-    public async Task DisconnectAsync(CancellationToken requestAborted)
+    /// <returns>False when another admin connected or disconnected meanwhile; nothing was changed by this call.</returns>
+    public async Task<bool> DisconnectAsync(CancellationToken requestAborted)
     {
         ChurchActor actor = await RequireActorAsync(requestAborted);
-        // Once a revoke starts, finish forgetting the tokens even if the browser goes away; otherwise the row would stay
+        ChurchIntegration? connection = await store.Connection.SingleOrDefaultAsync(requestAborted);
+        if (connection is null)
+            return true;
+
+        // Once the revoke starts, finish forgetting the tokens even if the browser goes away; otherwise the row would stay
         // Active holding a revoked grant.
         CancellationToken ct = CancellationToken.None;
-        for (int attempt = 1; ; attempt++)
+        db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
+            .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
+        if (store.Read(connection) is { } stored)
+            await oauth.TryRevokeAsync(stored.RefreshToken, ct);
+        connection.Disconnect();
+        try
         {
-            ChurchIntegration? connection = await store.Connection.SingleOrDefaultAsync(ct);
-            if (connection is null)
-                return;
-            db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
-                .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
-
-            if (store.Read(connection) is { } stored)
-                await oauth.TryRevokeAsync(stored.RefreshToken, ct);
-            connection.Disconnect();
-            try
-            {
-                await db.SaveChangesAsync(ct);
-                return;
-            }
-            catch (DbUpdateConcurrencyException) when (attempt < MaxDisconnectAttempts)
-            {
-                // A refresh or reconnect saved meanwhile (new tokens, or different links). Start over from what is stored
-                // now, so whatever it saved is revoked and released too.
-                db.ChangeTracker.Clear();
-            }
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another admin's connect or disconnect saved first; its result stands and this admin can retry.
+            return false;
         }
     }
 

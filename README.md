@@ -233,8 +233,8 @@ OpenID Connect handler (scheme `PlanningCenter`). The handler validates state,
 correlation, the code exchange, and the id token (signature, issuer, audience, nonce)
 against Planning Center's discovery document; the organization comes from the id
 token. Its events save the connection and redirect, so it never signs anyone in. Sheaf
-refreshes and revokes tokens itself, since no Microsoft library manages tokens for a
-non-Microsoft provider. Sheaf uses one Planning Center
+revokes tokens itself, since the handler has no revoke. Refreshing tokens comes with the
+first feature that calls Planning Center's API. Sheaf uses one Planning Center
 OAuth application for all churches; it is configured in the `PlanningCenter` section.
 Locally, set the AppHost's optional parameters, which it passes to the API (unset ones
 are skipped, and the integration stays unconfigured):
@@ -268,16 +268,18 @@ returns 503.
 
 - `GET /api/church/integrations/planning-center` returns the connection status.
 - `GET /api/church/integrations/planning-center/connect?churchId=<selected church>` is
-  a browser navigation, not a fetch: it redirects to Planning Center. It returns 409
-  when `churchId` is not the selected church, 403 unless the navigation comes from
-  Sheaf (`Sec-Fetch-Site: same-origin` or `none`, or a `Referer` in `AllowedOrigins`),
-  and 503 when unconfigured.
+  a browser navigation, not a fetch: it redirects to Planning Center. It returns 400
+  without `churchId`, 409 when `churchId` is not the selected church, 403 for a
+  cross-site navigation (`Sec-Fetch-Site: cross-site`, following the Fetch Metadata
+  resource isolation policy at https://web.dev/articles/fetch-metadata), and 503 when
+  unconfigured.
 - The callback redirects to `ReturnUrl` with `planningCenter=Connected`, `Denied`,
   `InvalidRequest`, `OrganizationInUse`, or `Failed`. Only the membership that started
   the connection can finish it, checked before the code is exchanged; a return without
   that Sheaf session is `InvalidRequest`.
 - `DELETE /api/church/integrations/planning-center` revokes the token in Planning
-  Center and forgets it. Revoking does not remove Sheaf from the organization's
+  Center and forgets it, or returns 409 if another admin changed the connection
+  meanwhile. Revoking does not remove Sheaf from the organization's
   authorized applications in Planning Center (planningcenter/developers#1419); a
   Planning Center admin removes it there if wanted.
 
@@ -286,10 +288,15 @@ and provider), so another church management system can be added without a schema
 change. Each provider's credentials are serialized into one value encrypted at rest
 with Data Protection. The shared `IntegrationTenantLinks` table ensures an external
 account, such as a Planning Center organization, is connected to only one church at a
-time. Token requests (the handler's and Sheaf's) are never retried, because
-an authorization code is single-use and every refresh replaces the refresh token. If
-Planning Center rejects a refresh, the connection becomes `NeedsReauthorization` and
-an Admin must connect again.
+time. Token requests are never retried, because an authorization code is single-use.
+
+Planning Center behavior to honor when refresh arrives (Phase 2): access tokens last 2
+hours and refresh tokens 90 days from the last refresh, so an idle connection needs a
+background refresh; every refresh issues a new refresh token, and the old one is revoked
+only once the new access token is used (planningcenter/developers#1310); a dead refresh
+token is answered with `invalid_grant` (HTTP 401) or `invalid_request` with \"The refresh
+token is no longer valid\" (#284, #1310, #1318), while other errors, such as a firewall's
+403 page, must not be treated as a dead token (#1310).
 
 ### Mobile (Avalonia)
 

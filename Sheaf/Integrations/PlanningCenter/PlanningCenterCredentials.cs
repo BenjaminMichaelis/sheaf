@@ -6,8 +6,4 @@ public sealed record PlanningCenterCredentials(
     string AccessToken,
     DateTimeOffset AccessTokenExpiresAt,
     string RefreshToken,
-    DateTimeOffset RefreshTokenIssuedAt)
-{
-    public static PlanningCenterCredentials From(PlanningCenterTokenSet tokenSet, DateTimeOffset now) =>
-        new(tokenSet.AccessToken, now + tokenSet.ExpiresIn, tokenSet.RefreshToken, now);
-}
+    DateTimeOffset RefreshTokenIssuedAt);

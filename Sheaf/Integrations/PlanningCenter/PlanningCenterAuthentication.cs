@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 using Sheaf.Authorization;
+using Sheaf.Data;
 
 namespace Sheaf.Integrations.PlanningCenter;
 
@@ -57,9 +58,7 @@ internal sealed record PlanningCenterConnectionStart(Guid ChurchId, Guid Members
 /// <c>prompt=select_account</c> as Planning Center recommends. The id token is validated against Planning Center's
 /// discovery document and signing keys, and supplies the organization.
 /// </summary>
-internal sealed class ConfigurePlanningCenterOpenIdConnect(
-    IOptions<PlanningCenterOptions> settings, IHttpClientFactory httpClients, TimeProvider clock)
-    : IConfigureNamedOptions<OpenIdConnectOptions>
+internal static class PlanningCenterOpenIdConnect
 {
     /// <summary>
     /// Stands in for a missing client id. The handler refuses options without one, and its scheme is registered whether
@@ -67,13 +66,8 @@ internal sealed class ConfigurePlanningCenterOpenIdConnect(
     /// </summary>
     private const string UnconfiguredClientId = "unconfigured";
 
-    public void Configure(string? name, OpenIdConnectOptions options)
-    {
-        if (name == PlanningCenterAuthenticationDefaults.Scheme)
-            Configure(options);
-    }
-
-    public void Configure(OpenIdConnectOptions options)
+    public static void Configure(
+        OpenIdConnectOptions options, IOptions<PlanningCenterOptions> settings, IHttpClientFactory httpClients, TimeProvider clock)
     {
         PlanningCenterOptions planningCenter = settings.Value;
         options.Authority = planningCenter.BaseAddress.AbsoluteUri;
@@ -99,19 +93,18 @@ internal sealed class ConfigurePlanningCenterOpenIdConnect(
         options.EventsType = typeof(PlanningCenterOpenIdConnectEvents);
     }
 }
-
 /// <summary>
 /// Ends every return from Planning Center with a redirect to the frontend carrying the outcome, instead of signing in.
 /// <see cref="TicketReceived"/> runs after the handler has validated state, correlation, the PKCE exchange, the id
-/// token, and its nonce. The handler resolves this class from the request's services, so it takes scoped dependencies.
+/// token, and its nonce.
 /// </summary>
+/// <remarks>
+/// The authentication middleware creates this scheme's handler, and so this class, on every request, because the
+/// handler watches for its callback path. So it takes only light dependencies and resolves the rest from the request's
+/// services inside the callbacks that need them.
+/// </remarks>
 internal sealed partial class PlanningCenterOpenIdConnectEvents(
-    IOptions<PlanningCenterOptions> settings,
-    IAuthorizationService authorization,
-    ICurrentChurchActor currentActor,
-    PlanningCenterConnectionService connections,
-    PlanningCenterOAuthClient oauth,
-    ILogger<PlanningCenterOpenIdConnectEvents> logger) : OpenIdConnectEvents
+    IOptions<PlanningCenterOptions> settings, ILogger<PlanningCenterOpenIdConnectEvents> logger) : OpenIdConnectEvents
 {
     private static readonly object ReachedCodeExchangeKey = new();
 
@@ -190,7 +183,7 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
     /// The handler answers the callback before the authentication middleware reads the Sheaf cookie, so the admin
     /// finishing the connection is authenticated and authorized here, and must be the membership that started it.
     /// </summary>
-    private async Task<bool> IsStartedByCurrentAdminAsync(HttpContext http, PlanningCenterConnectionStart? start)
+    private static async Task<bool> IsStartedByCurrentAdminAsync(HttpContext http, PlanningCenterConnectionStart? start)
     {
         if (start is null)
             return false;
@@ -198,15 +191,15 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         if (!signedIn.Succeeded || signedIn.Principal is null)
             return false;
         http.User = signedIn.Principal;
-        AuthorizationResult allowed = await authorization.AuthorizeAsync(
+        AuthorizationResult allowed = await http.RequestServices.GetRequiredService<IAuthorizationService>().AuthorizeAsync(
             http.User, http, SheafPolicies.ForPermission(Permission.ManageIntegrations));
         return allowed.Succeeded
-            && await currentActor.GetAsync(http.RequestAborted) is { } actor
+            && await http.RequestServices.GetRequiredService<ICurrentChurchActor>().GetAsync(http.RequestAborted) is { } actor
             && actor.ChurchId == start.ChurchId
             && actor.MembershipId == start.MembershipId;
     }
 
-    private async Task<PlanningCenterConnectOutcome> CompleteAsync(TicketReceivedContext context)
+    private static async Task<PlanningCenterConnectOutcome> CompleteAsync(TicketReceivedContext context)
     {
         if (context.Principal is not { } principal || context.Properties is not { } properties)
             return PlanningCenterConnectOutcome.InvalidRequest;
@@ -216,7 +209,10 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
             || !DateTimeOffset.TryParse(properties.GetTokenValue("expires_at"), CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind, out DateTimeOffset expiresAt)
             || principal.FindFirstValue("sub") is not { Length: > 0 } personId
-            || principal.FindFirstValue("organization_id") is not { Length: > 0 } organizationId)
+            || principal.FindFirstValue("organization_id") is not { Length: > 0 } organizationId
+            // Ids are stored whole, so ones longer than their column are refused rather than cut.
+            || personId.Length > ChurchIntegration.ExternalIdMaxLength
+            || organizationId.Length > ChurchIntegration.ExternalIdMaxLength)
         {
             // Planning Center issued tokens Sheaf cannot use; release them rather than leave them live and unstored.
             await RevokeNewGrantAsync(context);
@@ -227,13 +223,15 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
             accessToken, expiresAt, refreshToken,
             personId, principal.FindFirstValue("name"),
             organizationId, principal.FindFirstValue("organization_name"));
-        return await connections.CompleteConnectAsync(grant, context.HttpContext.RequestAborted);
+        return await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterConnectionService>()
+            .CompleteConnectAsync(grant, context.HttpContext.RequestAborted);
     }
 
     /// <summary>Revokes the refresh token this callback received, if any; the client logs a failure.</summary>
-    private async Task<bool> RevokeNewGrantAsync(TicketReceivedContext context) =>
+    private static async Task<bool> RevokeNewGrantAsync(TicketReceivedContext context) =>
         context.Properties?.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is { Length: > 0 } refreshToken
-        && await oauth.TryRevokeAsync(refreshToken, CancellationToken.None);
+        && await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterOAuthClient>()
+            .TryRevokeAsync(refreshToken, CancellationToken.None);
 
     private void Redirect(HttpContext http, PlanningCenterConnectOutcome outcome) =>
         http.Response.Redirect(QueryHelpers.AddQueryString(

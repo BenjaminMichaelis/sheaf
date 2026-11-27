@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,9 +12,9 @@ namespace Sheaf.Api.Tests.Integrations;
 
 /// <summary>
 /// Stands in for api.planningcenteronline.com behind the OAuth HTTP client. It serves an OpenID Connect discovery
-/// document and signing key shaped like Planning Center's, and by default issues numbered tokens (access-1/refresh-1,
-/// access-2/refresh-2, ...); a code exchange also returns an RS256 id token for <see cref="OrganizationId"/> carrying
-/// <see cref="Nonce"/>. Tests queue one-off responses per path to simulate failures.
+/// document and signing key shaped like Planning Center's, and accepts revokes. Tests queue each code exchange's response,
+/// usually <see cref="CodeExchange"/>: tokens plus an RS256 id token for <see cref="OrganizationId"/> carrying
+/// <see cref="Nonce"/>, and queue other one-off responses to simulate failures.
 /// </summary>
 public sealed class FakePlanningCenter : HttpMessageHandler
 {
@@ -24,7 +23,6 @@ public sealed class FakePlanningCenter : HttpMessageHandler
     private readonly ConcurrentDictionary<string, ConcurrentQueue<Func<Task<HttpResponseMessage>>>> _overrides = new();
     private readonly RSA _rsa = RSA.Create(2048);
     private readonly RsaSecurityKey _signingKey;
-    private int _tokenNumber;
 
     public FakePlanningCenter() => _signingKey = new RsaSecurityKey(_rsa) { KeyId = "test-key" };
 
@@ -33,6 +31,9 @@ public sealed class FakePlanningCenter : HttpMessageHandler
     public ConcurrentQueue<Request> Requests { get; } = new();
 
     public string OrganizationId { get; set; } = "4242";
+
+    /// <summary>The <c>sub</c> of the person who authorizes.</summary>
+    public string PersonId { get; set; } = "77";
 
     /// <summary>Whether id tokens carry the organization claims; false simulates a token Sheaf cannot use.</summary>
     public bool IncludeOrganization { get; set; } = true;
@@ -56,10 +57,6 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
 
-    /// <summary>A refresh response with the given tokens.</summary>
-    public static HttpResponseMessage Tokens(string accessToken, string refreshToken) => Json(HttpStatusCode.OK,
-        $$"""{"access_token":"{{accessToken}}","token_type":"bearer","expires_in":7200,"refresh_token":"{{refreshToken}}","scope":"openid people"}""");
-
     /// <summary>A code-exchange response with the given tokens and a valid id token.</summary>
     public HttpResponseMessage CodeExchange(string accessToken, string refreshToken) => Json(HttpStatusCode.OK,
         $$"""{"access_token":"{{accessToken}}","token_type":"bearer","expires_in":7200,"refresh_token":"{{refreshToken}}","scope":"openid people","id_token":"{{IdToken()}}"}""");
@@ -80,20 +77,9 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         {
             "/.well-known/openid-configuration" => Json(HttpStatusCode.OK, Discovery),
             "/oauth/discovery/keys" => Json(HttpStatusCode.OK, Jwks()),
-            "/oauth/token" => IssueTokens(form.GetValueOrDefault("grant_type") == "authorization_code"),
             "/oauth/revoke" => Json(HttpStatusCode.OK, "{}"),
             _ => new HttpResponseMessage(HttpStatusCode.NotFound)
         };
-    }
-
-    private HttpResponseMessage IssueTokens(bool withIdToken)
-    {
-        int number = Interlocked.Increment(ref _tokenNumber);
-        string idToken = withIdToken ? $$""","id_token":"{{IdToken()}}" """ : "";
-        HttpResponseMessage response = Json(HttpStatusCode.OK,
-            $$"""{"access_token":"access-{{number}}","token_type":"bearer","expires_in":7200,"refresh_token":"refresh-{{number}}","scope":"openid people","created_at":1700000000{{idToken}}}""");
-        response.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
-        return response;
     }
 
     /// <summary>An id token shaped like Planning Center's documented one, with its organization id as a number.</summary>
@@ -102,7 +88,7 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         DateTime now = DateTime.UtcNow;
         Dictionary<string, object> claims = new()
         {
-            ["sub"] = "77",
+            ["sub"] = PersonId,
             ["name"] = "Pat Admin",
             ["email"] = "pat@example.com"
         };
@@ -155,5 +141,4 @@ public sealed class FakePlanningCenter : HttpMessageHandler
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
-
 }

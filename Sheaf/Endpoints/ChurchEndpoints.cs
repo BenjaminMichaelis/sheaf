@@ -36,11 +36,19 @@ internal static class ChurchProblems
 /// </summary>
 internal sealed class ChurchQueryEndpointFilter : IEndpointFilter
 {
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
-        Guid.TryParseExact(context.HttpContext.Request.Query["churchId"], "D", out Guid churchId)
-        && ChurchProblems.IsSelected(context.HttpContext, churchId)
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        if (!Guid.TryParseExact(context.HttpContext.Request.Query["churchId"], "D", out Guid churchId))
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["churchId"] = ["The selected church's id is required."]
+            });
+        }
+        return ChurchProblems.IsSelected(context.HttpContext, churchId)
             ? await next(context)
             : ChurchProblems.SelectionConflict();
+    }
 }
 
 internal sealed class ChurchHeaderEndpointFilter : IEndpointFilter
