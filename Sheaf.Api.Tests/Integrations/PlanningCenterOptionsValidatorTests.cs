@@ -1,0 +1,73 @@
+using Microsoft.Extensions.Hosting.Internal;
+
+using Sheaf.Integrations.PlanningCenter;
+
+namespace Sheaf.Api.Tests.Integrations;
+
+public class PlanningCenterOptionsValidatorTests
+{
+    private static readonly Uri Callback = new("https://sheaf.example.org/api/integrations/planning-center/callback");
+
+    [Test]
+    public async Task Validate_NothingConfigured_Succeeds()
+    {
+        var result = Validator("Production").Validate(null, new PlanningCenterOptions());
+
+        await Assert.That(result.Succeeded).IsTrue();
+    }
+
+    [Test]
+    [Arguments("client", null, true)]
+    [Arguments(null, "secret", true)]
+    [Arguments("client", "secret", false)]
+    public async Task Validate_PartlyConfigured_Fails(string? clientId, string? clientSecret, bool withRedirect)
+    {
+        PlanningCenterOptions options = new()
+        {
+            ClientId = clientId,
+            ClientSecret = clientSecret,
+            RedirectUri = withRedirect ? Callback : null
+        };
+
+        var result = Validator("Development").Validate(null, options);
+
+        await Assert.That(result.Failed).IsTrue();
+    }
+
+    [Test]
+    public async Task Validate_ProductionWithoutUserAgentContact_Fails()
+    {
+        var result = Validator("Production").Validate(null, Configured("Sheaf/1.0"));
+
+        await Assert.That(result.Failed).IsTrue();
+    }
+
+    [Test]
+    [Arguments("Sheaf (ops@example.org)")]
+    [Arguments("Sheaf (https://sheaf.example.org/contact)")]
+    public async Task Validate_ProductionWithUserAgentContact_Succeeds(string userAgent)
+    {
+        var result = Validator("Production").Validate(null, Configured(userAgent));
+
+        await Assert.That(result.Succeeded).IsTrue();
+    }
+
+    [Test]
+    public async Task Validate_DevelopmentWithDefaultUserAgent_Succeeds()
+    {
+        var result = Validator("Development").Validate(null, Configured("Sheaf/1.0"));
+
+        await Assert.That(result.Succeeded).IsTrue();
+    }
+
+    private static PlanningCenterOptions Configured(string userAgent) => new()
+    {
+        ClientId = "client",
+        ClientSecret = "secret",
+        RedirectUri = Callback,
+        UserAgent = userAgent
+    };
+
+    private static PlanningCenterOptionsValidator Validator(string environment) =>
+        new(new HostingEnvironment { EnvironmentName = environment });
+}

@@ -225,6 +225,67 @@ rostered person does not attend; no separate absence workflow or visitor categor
 is introduced. Existing consent/trust requirements and Person erasure/anonymization
 policy remain applicable; inactivity does not trigger erasure.
 
+### Planning Center connection
+
+A church Admin (`ManageIntegrations`) connects the church to one Planning Center
+organization with OpenID Connect (authorization code + PKCE), run by ASP.NET Core's
+OpenID Connect handler (scheme `PlanningCenter`). The handler validates state,
+correlation, the code exchange, and the id token (signature, issuer, audience, nonce)
+against Planning Center's discovery document; the organization comes from the id
+token. Its events save the connection and redirect, so it never signs anyone in. Sheaf
+refreshes and revokes tokens itself, since no Microsoft library manages tokens for a
+non-Microsoft provider. Sheaf uses one Planning Center
+OAuth application for all churches; it is configured in the `PlanningCenter` section.
+Locally, set the AppHost's optional parameters, which it passes to the API (unset ones
+are skipped, and the integration stays unconfigured):
+
+```pwsh
+dotnet user-secrets set Parameters:planning-center-client-id "<client id>" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-client-secret "<secret>" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-redirect-uri "http://localhost:5285/api/integrations/planning-center/callback" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-return-url "<frontend origin>/settings/integrations" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-user-agent "Sheaf (<contact URL or email>)" --project Sheaf.AppHost
+```
+
+In production, set the Terraform variable `planning_center` in `Infra`. Store the client
+secret in Azure Key Vault and pass its versionless secret ID as
+`client_secret_key_vault_secret_id`; the container app reads it through a Key Vault
+reference with the app's managed identity, which needs the Key Vault Secrets User role
+on that secret. The secret value never goes into Terraform.
+
+ClientId, ClientSecret, and RedirectUri must be set together or not at all; startup
+fails otherwise. Planning Center requires a `User-Agent` naming the app and a way to
+contact its operator, and may answer 403 to one that does not. The default,
+`Sheaf/1.0`, has no contact, so outside Development and Testing startup fails unless
+`UserAgent` includes an email or URL.
+
+The redirect URI must be registered on the Planning Center OAuth application exactly,
+and served on the same site as the frontend so the browser sends Sheaf's cookies with
+the callback. Without these settings the status endpoint reports `configured: false`
+and connecting returns 503.
+
+- `GET /api/church/integrations/planning-center` returns the connection status.
+- `GET /api/church/integrations/planning-center/connect` is a browser navigation, not
+  a fetch: it redirects to Planning Center (or returns 503 when unconfigured).
+- The callback redirects to `ReturnUrl` with `planningCenter=Connected`, `Denied`,
+  `InvalidRequest`, `OrganizationInUse`, or `Failed`. Only the membership that started
+  the connection can finish it, checked before the code is exchanged; a return without
+  that Sheaf session is `InvalidRequest`.
+- `DELETE /api/church/integrations/planning-center` revokes the token in Planning
+  Center and forgets it. Revoking does not remove Sheaf from the organization's
+  authorized applications in Planning Center (planningcenter/developers#1419); a
+  Planning Center admin removes it there if wanted.
+
+Connections are stored as provider-neutral `ChurchIntegrations` rows (one per church
+and provider), so another church management system can be added without a schema
+change. Each provider's credentials are serialized into one value encrypted at rest
+with Data Protection. The shared `IntegrationTenantLinks` table ensures an external
+account, such as a Planning Center organization, is connected to only one church at a
+time. Token requests (the handler's and Sheaf's) are never retried, because
+an authorization code is single-use and every refresh replaces the refresh token. If
+Planning Center rejects a refresh, the connection becomes `NeedsReauthorization` and
+an Admin must connect again.
+
 ### Mobile (Avalonia)
 
 `Sheaf.Mobile*` holds the shared app plus Android, iOS, Browser and Desktop heads. Install workloads with `dotnet workload restore`. Android is built locally; iOS requires macOS (built in CI). Mobile apps run separately from Aspire; point them at the API (Android emulator: `http://10.0.2.2:5285`, iOS simulator: `http://localhost:5285`).
