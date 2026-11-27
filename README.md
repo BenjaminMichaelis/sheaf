@@ -247,6 +247,15 @@ dotnet user-secrets set Parameters:planning-center-return-url "<frontend origin>
 dotnet user-secrets set Parameters:planning-center-user-agent "Sheaf (<contact URL or email>)" --project Sheaf.AppHost
 ```
 
+The AppHost now keeps its secrets (including the SQL Server password Aspire generates) in
+its user secrets. If an existing persistent `Sheaf-sql` container then fails with "Login
+failed for user 'sa'", its data volume holds a password from before; give the checkout its
+own container and volume instead of reusing it:
+
+```pwsh
+dotnet user-secrets set Sheaf:ContainerSuffix "<name>" --project Sheaf.AppHost
+```
+
 In production, set the Terraform variable `planning_center` in `Infra`. Store the client
 secret in Azure Key Vault and pass its versionless secret ID as
 `client_secret_key_vault_secret_id`; the container app reads it through a Key Vault
