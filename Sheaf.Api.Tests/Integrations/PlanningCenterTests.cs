@@ -351,7 +351,7 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task PlanningCenterCallback_OrganizationConnectedToAnotherChurch_RedirectsOrganizationInUseWithoutRevoking()
+    public async Task PlanningCenterCallback_OrganizationConnectedToAnotherChurch_RedirectsOrganizationInUseAndRevokesNewGrant()
     {
         var (firstClient, first) = await SignInAsync(ChurchMembershipRole.Admin);
         var (secondClient, second) = await SignInAsync(ChurchMembershipRole.Admin);
@@ -360,12 +360,11 @@ public class PlanningCenterTests : ChurchApiTestBase
         {
             await ConnectAsync(firstClient, first, "first");
 
-            // Planning Center may hand the same person the grant the first church already holds; revoking would cut it off.
-            using HttpResponseMessage callback = await ConnectAsync(secondClient, second,
-                () => Pco.CodeExchange("access-first", "refresh-first"));
+            // Planning Center issues a new token pair on every authorization, so this grant is the second church's alone.
+            using HttpResponseMessage callback = await ConnectAsync(secondClient, second, "second");
 
             await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.OrganizationInUse);
-            await Assert.That(RevokedTokens()).IsEmpty();
+            await Assert.That(RevokedTokens()).IsEquivalentTo(["refresh-second"]);
             await Assert.That((await GetStatusAsync(secondClient, second)).Status).IsEqualTo(IntegrationStatus.Disconnected);
             await Assert.That(await StoredAccessTokenAsync(first.ChurchId)).IsEqualTo("access-first");
         }

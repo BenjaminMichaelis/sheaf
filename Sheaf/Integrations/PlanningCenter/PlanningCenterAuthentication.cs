@@ -168,10 +168,8 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Unconditional: with the database failing, whether this grant is the one already stored cannot be checked.
-            // Revoking a stored grant here is only possible if Planning Center returned the same grant to two concurrent
-            // connects; that connection then holds a revoked grant until an admin reconnects (Phase 2's refresh will
-            // detect it and mark it NeedsReauthorization).
+            // Revoked without checking the stored grant (the database may be what failed): Planning Center issues a new
+            // token pair on every authorization, so this grant is never one already stored.
             bool revoked = await RevokeNewGrantAsync(context);
             LogCompleteFailed(exception, revoked);
             outcome = PlanningCenterConnectOutcome.Failed;

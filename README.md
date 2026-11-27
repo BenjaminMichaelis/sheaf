@@ -302,7 +302,8 @@ time. Token requests are never retried, because an authorization code is single-
 Planning Center behavior to honor when refresh arrives (Phase 2): access tokens last 2
 hours and refresh tokens 90 days from the last refresh, so an idle connection needs a
 background refresh; every refresh issues a new refresh token, and the old one is revoked
-only once the new access token is used (planningcenter/developers#1310); a dead refresh
+only once the new access token is used (planningcenter/developers#1310), and a repeat
+authorization also gets a new pair (seen against the live service); a dead refresh
 token is answered with `invalid_grant` (HTTP 401) or `invalid_request` with \"The refresh
 token is no longer valid\" (#284, #1310, #1318), while other errors, such as a firewall's
 403 page, must not be treated as a dead token (#1310).

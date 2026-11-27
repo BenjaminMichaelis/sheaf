@@ -78,11 +78,14 @@ public sealed partial class PlanningCenterConnectionService(
         CancellationToken ct = CancellationToken.None;
 
         IntegrationTenantLink? claim = await db.IntegrationTenantLinks.FindAsync([Provider, grant.OrganizationId], ct);
-        // The new token is deliberately not revoked when another church holds the organization. Planning Center does not
-        // document whether authorizing again returns the grant that church already holds, so revoking could disconnect
-        // it, and this church cannot read the other's tokens to compare. The token is never stored and expires unused.
+        // Another church holds the organization, so the new grant is never stored; release it. Planning Center issues a new
+        // token pair on every authorization (confirmed against the live service), and revoking one pair leaves others
+        // intact (planningcenter/developers#1419), so the other church's connection is unaffected.
         if (claim is not null && claim.ChurchId != actor.ChurchId)
+        {
+            await oauth.TryRevokeAsync(grant.RefreshToken, ct);
             return PlanningCenterConnectOutcome.OrganizationInUse;
+        }
         // Reconnecting to a different organization releases the one this church held before.
         db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
             .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId
@@ -122,13 +125,17 @@ public sealed partial class PlanningCenterConnectionService(
             bool claimedElsewhere = await db.IntegrationTenantLinks.AsNoTracking().AnyAsync(link =>
                 link.Provider == Provider && link.ExternalTenantId == grant.OrganizationId && link.ChurchId != actor.ChurchId, ct);
             if (claimedElsewhere)
+            {
+                await oauth.TryRevokeAsync(grant.RefreshToken, ct);
                 return PlanningCenterConnectOutcome.OrganizationInUse;
+            }
             await RevokeUnlessStoredAsync(grant.RefreshToken, ct);
             LogSaveFailed(exception);
             return PlanningCenterConnectOutcome.Failed;
         }
 
-        // Planning Center may hand back the same grant on a repeat authorization; never revoke the one just stored.
+        // Planning Center issues a new pair on each authorization, so this normally revokes the replaced one; the check is a
+        // cheap guard against ever revoking the grant just stored.
         if (replacedRefreshToken is not null && replacedRefreshToken != grant.RefreshToken)
             await oauth.TryRevokeAsync(replacedRefreshToken, ct);
         LogConnected(actor.ChurchId, grant.OrganizationId);
