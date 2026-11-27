@@ -6,8 +6,8 @@ internal static class TenancyTestData
 {
     public static async Task<TwoChurchScenario> SeedTwoChurchesAsync(ProductionSqlServerFixture sql)
     {
-        Church churchA = new() { Slug = "production-a", Name = "Production A" };
-        Church churchB = new() { Slug = "production-b", Name = "Production B" };
+        Church churchA = new() { Slug = "production-a", Name = "Production A", TimeZoneId = "America/Chicago" };
+        Church churchB = new() { Slug = "production-b", Name = "Production B", TimeZoneId = "America/Chicago" };
         ApplicationUser userA = new() { Id = "production-user-a", UserName = "production-user-a" };
         ApplicationUser userB = new() { Id = "production-user-b", UserName = "production-user-b" };
         ChurchMembership membershipA = new() { ChurchId = churchA.Id, UserId = userA.Id, Role = ChurchMembershipRole.Leader };

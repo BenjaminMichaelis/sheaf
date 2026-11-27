@@ -17,7 +17,7 @@ public sealed class MembershipSecurityTests : IDisposable
     private const string UserId = "member";
     private const string OtherUserId = "other";
 
-    private readonly Church _church = new() { Slug = "church", Name = "Church" };
+    private readonly Church _church = new() { Slug = "church", Name = "Church", TimeZoneId = "America/Chicago" };
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
     private readonly CapturingLoggerProvider _logs = new();
     private readonly ILoggerFactory _loggerFactory;

@@ -1,8 +1,13 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: full SDK image for compiling and publishing
-FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
+# Build stage: full SDK image for compiling and publishing. The tag matches global.json, which pins the SDK and
+# disables roll-forward, so a floating 11.0 tag would break once a newer SDK ships.
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100 AS build
 WORKDIR /src
+
+# global.json also pins the workload set version; install it, as CI does, before anything restores.
+COPY ["global.json", "."]
+RUN dotnet workload update
 
 # Copy project files first for layer-cached restore.
 # Changes to source code won't invalidate the restore layer.
@@ -24,9 +29,11 @@ RUN --mount=type=cache,id=sheaf-nuget,target=/root/.nuget/packages,sharing=locke
     -c Release \
     -o /app/publish
 
-# Runtime stage: Ubuntu Noble Chiseled - distroless-like, minimal attack surface.
-# No shell, no package manager, no root; runs as UID 65532 (app) by default.
-FROM mcr.microsoft.com/dotnet/aspnet:11.0-noble-chiseled AS final
+# Runtime stage: Ubuntu 26.04 (Resolute) Chiseled - distroless-like, minimal attack surface. .NET 11 images are
+# published for Resolute, not Noble. No shell, no package manager, no root; runs as UID 65532 (app) by default.
+# The -extra variant adds tzdata and ICU: churches keep meeting dates in their own IANA time zone, which needs the
+# tz database at runtime.
+FROM mcr.microsoft.com/dotnet/aspnet:11.0-resolute-chiseled-extra AS final
 WORKDIR /app
 EXPOSE 8080
 ENV ASPNETCORE_HTTP_PORTS=8080 \

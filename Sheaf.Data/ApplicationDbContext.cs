@@ -39,6 +39,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<ContextLeader> ContextLeaders => Set<ContextLeader>();
 
+    public DbSet<ContextSession> ContextSessions => Set<ContextSession>();
+
+    public DbSet<Attendance> Attendances => Set<Attendance>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
@@ -73,6 +77,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
                 .OnDelete(DeleteBehavior.Restrict)
                 .IsRequired();
         });
+
+        builder.Entity<Church>().ToTable(table => table.HasCheckConstraint("CK_Churches_TimeZoneId", "TRIM([TimeZoneId]) <> ''"));
 
         builder.Entity<GroupType>(entity =>
         {
@@ -125,6 +131,30 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
             entity.HasOne<Context>().WithMany().HasForeignKey(leader => leader.ContextId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Person>().WithMany().HasForeignKey(leader => leader.PersonId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table => table.HasCheckConstraint("CK_ContextLeaders_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]"));
+        });
+        builder.Entity<ContextSession>(entity =>
+        {
+            entity.Property(session => session.RecordedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
+            entity.HasOne<Church>().WithMany().HasForeignKey(session => session.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired();
+            entity.HasOne<Context>().WithMany().HasForeignKey(session => session.ContextId).OnDelete(DeleteBehavior.Restrict);
+            // A group's meetings are listed newest first; more than one per date is allowed.
+            entity.HasIndex(session => new { session.ChurchId, session.ContextId, session.OccurredOn });
+        });
+        builder.Entity<Attendance>(entity =>
+        {
+            entity.Property(attendance => attendance.RecordedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
+            entity.HasOne<Church>().WithMany().HasForeignKey(attendance => attendance.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired();
+            entity.HasOne<ContextSession>().WithMany().HasForeignKey(attendance => attendance.SessionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>().WithMany().HasForeignKey(attendance => attendance.PersonId).OnDelete(DeleteBehavior.Restrict);
+            // A person counts once per session; removed rows stay as history and do not count.
+            entity.HasIndex(attendance => new { attendance.ChurchId, attendance.SessionId, attendance.PersonId }).IsUnique()
+                .HasFilter("[RemovedAt] IS NULL");
+            // Profile visibility asks which sessions a person attended recently.
+            entity.HasIndex(attendance => new { attendance.ChurchId, attendance.PersonId });
+            entity.ToTable(table => table.HasCheckConstraint("CK_Attendances_Removed",
+                "([RemovedAt] IS NULL AND [RemovedByUserId] IS NULL) OR ([RemovedAt] IS NOT NULL AND [RemovedAt] >= [RecordedAt])"));
         });
 
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")

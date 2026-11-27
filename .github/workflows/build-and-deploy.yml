@@ -170,9 +170,49 @@ jobs:
           path: 'efbundle'
           retention-days: 1
 
+  # Build the backend image on every run, without pushing, so Dockerfile and base-image changes are checked before they
+  # reach a deploy.
+  docker-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Sheaf/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: sheaf:ci
+          cache-from: type=gha,scope=sheaf-image
+          cache-to: type=gha,mode=max,scope=sheaf-image
+
+      # Church meeting dates are kept in IANA time zones, which need the tz database at runtime. Chiseled images have
+      # no shell, so copy a zone file out of a created (not started) container to prove it is present.
+      - name: Verify time zone data in image
+        run: |
+          $container = docker create sheaf:ci
+          try {
+            docker cp "${container}:/usr/share/zoneinfo/America/Chicago" ./zone-check
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "The runtime image has no tz database (/usr/share/zoneinfo)."
+              exit 1
+            }
+          }
+          finally {
+            docker rm $container | Out-Null
+          }
+
   automerge:
     if: ${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}
-    needs: [build]
+    needs: [build, docker-image]
     runs-on: ubuntu-latest
 
     permissions:
