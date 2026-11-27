@@ -154,6 +154,14 @@ public class AuthorizationPolicyTests
         await Assert.That(RolePermissions.HasPermission(role, Permission.PeopleManage)).IsEqualTo(expected);
 
     [Test]
+    [Arguments(ChurchMembershipRole.Leader, false)]
+    [Arguments(ChurchMembershipRole.Coordinator, false)]
+    [Arguments(ChurchMembershipRole.Staff, false)]
+    [Arguments(ChurchMembershipRole.Admin, true)]
+    public async Task HasPermission_ManageChurch_MatchesExpectedRoles(ChurchMembershipRole role, bool expected) =>
+        await Assert.That(RolePermissions.HasPermission(role, Permission.ManageChurch)).IsEqualTo(expected);
+
+    [Test]
     public async Task HandleAsync_StoredRoleLosesPermission_FailsDespiteRoleClaim()
     {
         IAuthorizationService authorization = CreateAuthorizationService(new StoredRoles(_ => ChurchMembershipRole.Leader));

@@ -35,3 +35,25 @@ public sealed record HouseholdRequest(Guid[] MemberIds, string? Label = null);
 public sealed record HouseholdResponse(Guid Id, string? Label, HouseholdMemberResponse[] Members, Guid Version) : IVersioned;
 /// <summary>A household member's limited identity.</summary>
 public sealed record HouseholdMemberResponse(Guid Id, string FirstName);
+/// <summary>
+/// Records a group meeting. <paramref name="PersonIds"/> are existing people who came; <paramref name="NewPeople"/> are
+/// people to create and mark present in the same save. Possible duplicates (a similar name, another meeting that day)
+/// are rejected with a confirmation problem unless <paramref name="Confirm"/> is true.
+/// </summary>
+public sealed record SessionRequest(DateOnly OccurredOn, Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, bool Confirm = false);
+/// <summary>
+/// Replaces who came to a meeting. <paramref name="PersonIds"/> is required: people left out are taken off the list,
+/// which is kept as history, and an empty list takes everyone off.
+/// </summary>
+public sealed record AttendeesRequest(Guid[]? PersonIds, PersonRequest[]? NewPeople = null, bool Confirm = false);
+/// <summary>A person named on a meeting: who came, or a roster member who did not.</summary>
+public sealed record SessionPersonResponse(Guid Id, string Name);
+/// <summary>A meeting with who came and which roster members, as of that date, did not.</summary>
+public sealed record SessionResponse(Guid Id, Guid GroupId, DateOnly OccurredOn, SessionPersonResponse[] Attendees, SessionPersonResponse[] Absent, Guid Version) : IVersioned;
+/// <summary>A meeting in a group's history.</summary>
+public sealed record SessionSummaryResponse(Guid Id, DateOnly OccurredOn, int AttendeeCount, Guid Version) : IVersioned;
+/// <summary>People who may already exist for the new person at <paramref name="Index"/> in the request.</summary>
+public sealed record SimilarPeopleResponse(int Index, PersonLookupResponse[] Matches);
+/// <summary>One person marked present, by whom, and whether and by whom they were taken off the list.</summary>
+public sealed record AttendanceRecordResponse(Guid SessionId, Guid GroupId, DateOnly OccurredOn, Guid PersonId, string PersonName,
+    string? RecordedByUserId, DateTimeOffset RecordedAt, string? RemovedByUserId, DateTimeOffset? RemovedAt);

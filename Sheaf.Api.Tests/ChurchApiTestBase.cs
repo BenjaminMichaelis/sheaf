@@ -97,7 +97,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected async Task<ChurchMembership> AddMembershipAsync(
         ApplicationUser user, ChurchMembershipRole role = ChurchMembershipRole.Leader)
     {
-        Church church = new() { Name = "Pending", Slug = $"church-{Guid.NewGuid():N}" };
+        Church church = new() { Name = "Pending", Slug = $"church-{Guid.NewGuid():N}", TimeZoneId = "America/Chicago" };
         church.Name = $"Church {church.Id}";
         await InScopeAsync(async services =>
         {
@@ -166,6 +166,26 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
             services.GetRequiredService<ITenantContextInitializer>().Initialize(churchId, null);
             await action(services.GetRequiredService<ApplicationDbContext>());
         });
+
+    /// <summary>Sends a tracker request as a signed-in member of <paramref name="churchId"/>, optionally with If-Match.</summary>
+    protected static async Task<HttpResponseMessage> TrackerRequestAsync(HttpClient client, string cookie, Guid churchId, HttpMethod method, string path, object? body = null, Guid? ifMatch = null)
+    {
+        using HttpRequestMessage request = new(method, $"/api/church{path}");
+        request.Headers.Add("Cookie", cookie);
+        request.Headers.Add("X-Sheaf-Church", churchId.ToString("D"));
+        if (ifMatch is { } version)
+            request.Headers.TryAddWithoutValidation("If-Match", Sheaf.Services.EntityTag.Format(version));
+        if (body is not null)
+            request.Content = JsonContent.Create(body);
+        return await client.SendAsync(request);
+    }
+
+    /// <summary>Asserts the status code, reporting the body on failure, and reads the JSON response.</summary>
+    protected static async Task<T> TrackerReadAsync<T>(HttpResponseMessage response, System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK)
+    {
+        await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
+        return await response.Content.ReadFromJsonAsync<T>() ?? throw new InvalidOperationException("Missing tracker response.");
+    }
 
     /// <summary>A whole-second clock that tests advance explicitly.</summary>
     protected sealed class ControlledTimeProvider : TimeProvider

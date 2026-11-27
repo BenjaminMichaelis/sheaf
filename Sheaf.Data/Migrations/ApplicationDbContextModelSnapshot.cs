@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261126063557_ChurchIntegrations";
+    public override string LastMigrationId => "20261127194028_ChurchIntegrations";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -301,6 +301,50 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.ToTable("AspNetUsers");
             });
 
+        modelBuilder.Entity("Sheaf.Data.Attendance", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("PersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<DateTimeOffset>("RecordedAt")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("datetimeoffset")
+                    .HasDefaultValueSql("SYSDATETIMEOFFSET()");
+
+                b.Property<string>("RecordedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<DateTimeOffset?>("RemovedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("RemovedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<Guid>("SessionId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "PersonId");
+
+                b.HasIndex("ChurchId", "SessionId", "PersonId")
+                    .IsUnique()
+                    .HasFilter("[RemovedAt] IS NULL");
+
+                b.ToTable("Attendances", t =>
+                    {
+                        t.HasCheckConstraint("CK_Attendances_Removed", "([RemovedAt] IS NULL AND [RemovedByUserId] IS NULL) OR ([RemovedAt] IS NOT NULL AND [RemovedAt] >= [RecordedAt])");
+                    });
+            });
+
         modelBuilder.Entity("Sheaf.Data.Church", b =>
             {
                 b.Property<Guid>("Id")
@@ -314,12 +358,20 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired()
                     .HasColumnType("nvarchar(450)");
 
+                b.Property<string>("TimeZoneId")
+                    .IsRequired()
+                    .HasMaxLength(64)
+                    .HasColumnType("nvarchar(64)");
+
                 b.HasKey("Id");
 
                 b.HasIndex("Slug")
                     .IsUnique();
 
-                b.ToTable("Churches");
+                b.ToTable("Churches", t =>
+                    {
+                        t.HasCheckConstraint("CK_Churches_TimeZoneId", "TRIM([TimeZoneId]) <> ''");
+                    });
             });
 
         modelBuilder.Entity("Sheaf.Data.ChurchIntegration", b =>
@@ -512,6 +564,40 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     });
             });
 
+        modelBuilder.Entity("Sheaf.Data.ContextSession", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("ContextId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<DateOnly>("OccurredOn")
+                    .HasColumnType("date");
+
+                b.Property<DateTimeOffset>("RecordedAt")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("datetimeoffset")
+                    .HasDefaultValueSql("SYSDATETIMEOFFSET()");
+
+                b.Property<string>("RecordedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<Guid>("Version")
+                    .IsConcurrencyToken()
+                    .HasColumnType("uniqueidentifier");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "ContextId", "OccurredOn");
+
+                b.ToTable("ContextSessions");
+            });
+
         modelBuilder.Entity("Sheaf.Data.GroupType", b =>
             {
                 b.Property<Guid>("ChurchId")
@@ -701,6 +787,27 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired();
             });
 
+        modelBuilder.Entity("Sheaf.Data.Attendance", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "PersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.ContextSession", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "SessionId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
         modelBuilder.Entity("Sheaf.Data.ChurchIntegration", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
@@ -777,6 +884,21 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.HasOne("Sheaf.Data.Person", null)
                     .WithMany()
                     .HasForeignKey("ChurchId", "PersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.ContextSession", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Context", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "ContextId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
             });

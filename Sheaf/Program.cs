@@ -123,6 +123,7 @@ builder.Services.AddScoped<Sheaf.Services.IPeopleService, Sheaf.Services.PeopleS
 builder.Services.AddScoped<Sheaf.Services.IGroupService, Sheaf.Services.GroupService>();
 builder.Services.AddScoped<Sheaf.Services.IAssignmentService, Sheaf.Services.AssignmentService>();
 builder.Services.AddScoped<Sheaf.Services.IHouseholdService, Sheaf.Services.HouseholdService>();
+builder.Services.AddScoped<Sheaf.Services.IAttendanceService, Sheaf.Services.AttendanceService>();
 builder.Services.AddPlanningCenter(builder.Configuration);
 
 var authBuilder = builder.Services.AddAuthentication(options =>
@@ -199,6 +200,7 @@ app.MapGet("/", () => "API is running.").AllowAnonymous();
 
 app.MapAuthEndpoints();
 app.MapTracker();
+app.MapChurchSettings();
 app.MapPlanningCenter();
 
 app.Run();

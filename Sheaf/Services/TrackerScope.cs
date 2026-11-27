@@ -10,13 +10,47 @@ namespace Sheaf.Services;
 /// may call is declared on the endpoints (<see cref="Permission.TrackerAccess"/>, <see cref="Permission.TrackerManage"/>, and <see cref="Permission.PeopleManage"/>);
 /// this type only answers questions that need the data loaded, so every tracker service goes through it.
 /// </summary>
-public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock)
+public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock, ILogger<TrackerScope> logger)
 {
+    /// <summary>How long after attending one of a Leader's groups a person's full profile stays visible to that Leader.</summary>
+    public const int AttendanceVisibilityDays = 90;
+    /// <summary>How long after creating a person a Leader may still correct their details.</summary>
+    public const int CreatorEditDays = 7;
+
+    private ChurchCalendar? _calendar;
+
     public DateTimeOffset Now => clock.GetUtcNow();
 
-    /// <summary>Returns the current actor from persisted membership, or throws Forbidden if it no longer exists.</summary>
-    public async Task<ChurchActor> ActorAsync(CancellationToken ct) =>
-        await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
+    /// <summary>
+    /// The current church's calendar, loaded by <see cref="ActorAsync"/>. Every <see cref="ChurchActor"/> a tracker
+    /// service holds came from <see cref="ActorAsync"/>, so the calendar is always loaded by the time a rule needs it.
+    /// </summary>
+    public ChurchCalendar Calendar => _calendar
+        ?? throw new InvalidOperationException($"Call {nameof(ActorAsync)} before reading the church calendar.");
+
+    /// <summary>The church's local date now.</summary>
+    public DateOnly Today => Calendar.DateOf(Now);
+
+    /// <summary>
+    /// Returns the current actor from persisted membership, or throws Forbidden if it no longer exists. Also loads the
+    /// church's calendar, which visibility and attendance rules use to compare meeting dates with instants.
+    /// </summary>
+    public async Task<ChurchActor> ActorAsync(CancellationToken ct)
+    {
+        var actor = await currentActor.GetAsync(ct) ?? throw TrackerRules.Denied();
+        if (_calendar is null)
+        {
+            var zone = await db.Churches.Where(c => c.Id == actor.ChurchId).Select(c => c.TimeZoneId).SingleAsync(ct);
+            // A zone that resolved when saved can fail on a host with different time-zone data. Falling back to another
+            // zone would quietly move meeting dates, so fail clearly instead.
+            if (!ChurchCalendar.TryCreate(zone, out _calendar))
+            {
+                LogUnresolvableTimeZone(logger, actor.ChurchId, zone);
+                throw new TrackerException(TrackerFailure.TimeZoneUnavailable);
+            }
+        }
+        return actor;
+    }
 
     /// <summary>Whether the actor manages every group rather than only the groups they lead.</summary>
     public static bool ManagesGroups(ChurchActor actor) => RolePermissions.HasPermission(actor.Role, Permission.TrackerManage);
@@ -35,7 +69,10 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
                 && db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId)));
     }
 
-    /// <summary>Managers see every person; everyone else sees current members and leaders of the groups they lead.</summary>
+    /// <summary>
+    /// People the actor may assign to a group or put in a household, and change (see also <see cref="EditablePeople"/>).
+    /// Managers reach every person; everyone else reaches the current members and leaders of the groups they lead.
+    /// </summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
         if (ManagesPeople(actor))
@@ -46,6 +83,38 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
                 && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
             || db.ContextLeaders.Any(l => l.PersonId == p.Id && groups.Contains(l.ContextId)
                 && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)));
+    }
+
+    /// <summary>
+    /// People whose name and contact details the actor may correct: everyone in <see cref="People"/>, plus people the
+    /// actor created in the last <see cref="CreatorEditDays"/> days, so a Leader can fix a typo in someone they just
+    /// added while recording attendance. Creating someone never lets a Leader add them to a roster or household.
+    /// </summary>
+    public IQueryable<Person> EditablePeople(ChurchActor actor)
+    {
+        if (ManagesPeople(actor))
+            return db.People;
+        var createdSince = Now.AddDays(-CreatorEditDays);
+        var reachable = People(actor).Select(p => p.Id);
+        return db.People.Where(p => reachable.Contains(p.Id)
+            || (p.CreatedByUserId == actor.UserId && p.CreatedAt >= createdSince));
+    }
+
+    /// <summary>
+    /// People whose profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
+    /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
+    /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
+    /// </summary>
+    public IQueryable<Person> VisiblePeople(ChurchActor actor)
+    {
+        if (ManagesPeople(actor))
+            return db.People;
+        var groups = Groups(actor).Select(g => g.Id);
+        var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
+        var reachable = EditablePeople(actor).Select(p => p.Id);
+        return db.People.Where(p => reachable.Contains(p.Id)
+            || db.Attendances.Any(a => a.PersonId == p.Id && a.RemovedAt == null
+                && db.ContextSessions.Any(s => s.Id == a.SessionId && groups.Contains(s.ContextId) && s.OccurredOn >= attendedSince)));
     }
 
     /// <summary>Loads a group visible to the actor, or throws NotFound.</summary>
@@ -83,6 +152,9 @@ public sealed class TrackerScope(ApplicationDbContext db, ICurrentChurchActor cu
             throw TrackerRules.Conflict();
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Church {ChurchId} has time zone {TimeZoneId}, which this host cannot resolve.")]
+    private static partial void LogUnresolvableTimeZone(ILogger logger, Guid churchId, string timeZoneId);
 }
 
 /// <summary>An offset page request, validated at the API boundary.</summary>
@@ -128,6 +200,10 @@ internal static class TrackerRules
     public static TrackerException Denied() => new(TrackerFailure.Forbidden);
     public static TrackerException Invalid() => new(TrackerFailure.InvalidInput);
     public static TrackerException Conflict() => new(TrackerFailure.Conflict);
+
+    /// <summary>Nothing is saved; <paramref name="reasons"/> become ProblemDetails members explaining what to confirm.</summary>
+    public static TrackerException ConfirmationRequired(IDictionary<string, object?> reasons) =>
+        new(TrackerFailure.ConfirmationRequired, reasons);
 
     public static string RequiredName(string? value, int length = 200)
     {
