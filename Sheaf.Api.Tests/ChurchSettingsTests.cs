@@ -52,7 +52,72 @@ public class ChurchSettingsTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task GetChurchSettings_Leader_ReturnsNameAndTimeZone()
+    public async Task UpdateChurchSettings_PaddedGroupLabelsGivenThenOmitted_UsesTrimmedChurchWordsThenDefaults()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Admin);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var labelled = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings",
+            new ChurchSettingsRequest("America/Chicago", "  Village  ", " Villages "));
+        var settings = await TrackerReadAsync<ChurchSettingsResponse>(labelled);
+        await Assert.That(settings.GroupLabel).IsEqualTo("Village");
+        await Assert.That(settings.GroupLabelPlural).IsEqualTo("Villages");
+        using var read = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/settings");
+        await Assert.That((await TrackerReadAsync<ChurchSettingsResponse>(read)).GroupLabel).IsEqualTo("Village");
+
+        using var reset = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings", new ChurchSettingsRequest("America/Chicago"));
+        var defaults = await TrackerReadAsync<ChurchSettingsResponse>(reset);
+        await Assert.That(defaults.GroupLabel).IsEqualTo("Group");
+        await Assert.That(defaults.GroupLabelPlural).IsEqualTo("Groups");
+    }
+
+    [Test]
+    [Arguments(50, "", HttpStatusCode.OK)]
+    [Arguments(50, "   ", HttpStatusCode.OK)]
+    [Arguments(51, "", HttpStatusCode.BadRequest)]
+    public async Task UpdateChurchSettings_GroupLabelLength_AcceptsUpTo50CharactersAfterTrimming(int length, string padding, HttpStatusCode expected)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Admin);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        var label = padding + new string('v', length) + padding;
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings",
+            new ChurchSettingsRequest("America/Chicago", label, label));
+
+        await Assert.That(response.StatusCode).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("Cell", null, nameof(ChurchSettingsRequest.GroupLabelPlural))]
+    [Arguments("Cell", "   ", nameof(ChurchSettingsRequest.GroupLabelPlural))]
+    [Arguments(null, "Cells", nameof(ChurchSettingsRequest.GroupLabel))]
+    [Arguments("Cell", "Cells whose plural label is far too long to fit in fifty characters", nameof(ChurchSettingsRequest.GroupLabelPlural))]
+    public async Task UpdateChurchSettings_OneLabelMissingOrTooLong_ReturnsProblemForThatLabelAndKeepsSettings(string? label, string? plural, string invalidField)
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Admin);
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        using var saved = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings",
+            new ChurchSettingsRequest("America/Chicago", "Village", "Villages"));
+        var before = await TrackerReadAsync<ChurchSettingsResponse>(saved);
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, "/settings",
+            new ChurchSettingsRequest("America/Denver", label, plural));
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+        await Assert.That(problem?.Errors.Keys).IsEquivalentTo([invalidField]);
+        using var read = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/settings");
+        await Assert.That(await TrackerReadAsync<ChurchSettingsResponse>(read)).IsEqualTo(before);
+    }
+
+    [Test]
+    public async Task GetChurchSettings_Leader_ReturnsNameTimeZoneAndDefaultLabels()
     {
         var user = await CreateUserAsync();
         var membership = await AddMembershipAsync(user);
@@ -64,6 +129,8 @@ public class ChurchSettingsTests : ChurchApiTestBase
         var settings = await TrackerReadAsync<ChurchSettingsResponse>(response);
         await Assert.That(settings.TimeZoneId).IsEqualTo("America/Chicago");
         await Assert.That(settings.Name).IsEqualTo($"Church {membership.ChurchId}");
+        await Assert.That(settings.GroupLabel).IsEqualTo("Group");
+        await Assert.That(settings.GroupLabelPlural).IsEqualTo("Groups");
     }
 
     [Test]
