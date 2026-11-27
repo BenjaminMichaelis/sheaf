@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 using Sheaf.Core.Authentication;
@@ -29,11 +30,22 @@ public static class DependencyInjection
             builder.Services.AddIdentityCore<ApplicationUser>(options =>
             {
                 options.SignIn.RequireConfirmedAccount = true;
+                options.User.RequireUniqueEmail = true;
                 options.ClaimsIdentity.RoleClaimType = SheafClaimTypes.Role;
+                // Emails can contain any address EmailAddressAttribute accepts (apostrophes, plus signs), and the
+                // user name is the email, so don't restrict user name characters.
+                options.User.AllowedUserNameCharacters = "";
+                // Six-digit codes instead of long link tokens: they can be typed on any device, so web and mobile
+                // verify the same way without deep links. See EmailCodeTokenProvider for how guessing is bounded.
+                options.Tokens.EmailConfirmationTokenProvider = EmailCodeTokenProvider.ProviderName;
+                options.Tokens.PasswordResetTokenProvider = EmailCodeTokenProvider.ProviderName;
+                options.Tokens.ChangeEmailTokenProvider = EmailCodeTokenProvider.ProviderName;
             })
             .AddEntityFrameworkStores<ApplicationDbContext>()
             .AddSignInManager()
-            .AddDefaultTokenProviders();
+            .AddDefaultTokenProviders()
+            .AddTokenProvider<EmailCodeTokenProvider>(EmailCodeTokenProvider.ProviderName);
+            builder.Services.TryAddSingleton(TimeProvider.System);
 
             return builder;
         }

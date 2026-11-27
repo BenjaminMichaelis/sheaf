@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261126022815_Attendance";
+    public override string LastMigrationId => "20261127211232_AccountEmailVerification";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -254,6 +254,16 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<bool>("EmailConfirmed")
                     .HasColumnType("bit");
 
+                b.Property<string>("FirstName")
+                    .IsRequired()
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
+                b.Property<string>("LastName")
+                    .IsRequired()
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
                 b.Property<bool>("LockoutEnabled")
                     .HasColumnType("bit");
 
@@ -291,7 +301,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.HasKey("Id");
 
                 b.HasIndex("NormalizedEmail")
-                    .HasDatabaseName("EmailIndex");
+                    .IsUnique()
+                    .HasDatabaseName("EmailIndex")
+                    .HasFilter("[NormalizedEmail] IS NOT NULL");
 
                 b.HasIndex("NormalizedUserName")
                     .IsUnique()

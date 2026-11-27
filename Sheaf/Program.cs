@@ -17,6 +17,7 @@ using Sheaf.Authentication;
 using Sheaf.Authorization;
 using Sheaf.Core;
 using Sheaf.Data;
+using Sheaf.Email;
 using Sheaf.Endpoints;
 using Sheaf.Middleware;
 
@@ -154,9 +155,9 @@ authBuilder.AddIdentityCookies(options =>
     });
 });
 
-// No-op email sender for now (can be replaced with real implementation)
-builder.Services.AddScoped<IEmailSender<ApplicationUser>>(sp =>
-    new NoOpEmailSender<ApplicationUser>());
+builder.AddSheafEmail(isOpenApiGeneration);
+// Minimal API validation of DataAnnotations on endpoint parameters; invalid requests get a 400 ValidationProblem.
+builder.Services.AddValidation();
 
 var app = builder.Build();
 
@@ -198,13 +199,5 @@ app.MapTracker();
 app.MapChurchSettings();
 
 app.Run();
-
-// Simple no-op email sender
-internal sealed class NoOpEmailSender<TUser> : IEmailSender<TUser> where TUser : class
-{
-    public Task SendConfirmationLinkAsync(TUser user, string email, string confirmationLink) => Task.CompletedTask;
-    public Task SendPasswordResetLinkAsync(TUser user, string email, string resetLink) => Task.CompletedTask;
-    public Task SendPasswordResetCodeAsync(TUser user, string email, string resetCode) => Task.CompletedTask;
-}
 
 public partial class Program { }

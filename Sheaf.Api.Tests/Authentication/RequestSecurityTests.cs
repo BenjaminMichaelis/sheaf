@@ -345,7 +345,9 @@ public class ProductionSecurityStartupTests
             base.ConfigureStartupConfiguration(configurationBuilder);
             Dictionary<string, string?> settings = new()
             {
-                ["DataProtection:KeyVaultKeyIdentifier"] = "https://vault.example/keys/test"
+                ["DataProtection:KeyVaultKeyIdentifier"] = "https://vault.example/keys/test",
+                ["Email:Smtp:Host"] = "smtp.example",
+                ["Email:From"] = "Sheaf <no-reply@example.com>"
             };
             if (configureOrigins)
             {

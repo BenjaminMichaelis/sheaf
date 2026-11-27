@@ -39,6 +39,9 @@ export default function Layout() {
 
           {user?.isAuthenticated ? (
             <>
+              <Button color="inherit" onClick={() => navigate('/account')}>
+                Account
+              </Button>
               <Button color="inherit" onClick={handleLogout}>
                 Logout
               </Button>

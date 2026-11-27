@@ -72,6 +72,11 @@ var backendMigrations = backend
 
 if (!builder.ExecutionContext.IsPublishMode)
 {
+    // Captures every email the API sends locally; open its web UI from the dashboard to read verification codes.
+    // Deployed environments configure a real server through Email:Smtp:* settings instead.
+    var mailpit = builder.AddMailPit("mailpit");
+    backend.WithReference(mailpit).WaitFor(mailpit);
+
     backend.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development");
     backend.WithEnvironment("DOTNET_ENVIRONMENT", "Development");
     backend.WithEnvironment(async context =>
