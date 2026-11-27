@@ -157,36 +157,48 @@ public sealed partial class PlanningCenterConnectionService(
         return PlanningCenterConnectOutcome.Connected;
     }
 
-    /// <summary>Revokes Sheaf's access in Planning Center and forgets the tokens. Disconnecting twice is harmless.</summary>
+    /// <summary>The most times <see cref="DisconnectAsync"/> re-reads and retries after another writer changed the row.</summary>
+    internal const int MaxDisconnectAttempts = 5;
+
+    /// <summary>
+    /// Revokes Sheaf's access in Planning Center and forgets the tokens and who connected. Disconnecting twice is harmless.
+    /// </summary>
     public async Task DisconnectAsync(CancellationToken requestAborted)
     {
         ChurchActor actor = await RequireActorAsync(requestAborted);
-        ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(requestAborted);
-        if (connection is null)
-            return;
-
         // Once a revoke starts, finish forgetting the tokens even if the browser goes away; otherwise the row would stay
         // Active holding a revoked grant.
         CancellationToken ct = CancellationToken.None;
-        db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
-            .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
-        for (int attempt = 0; ; attempt++)
+        for (int attempt = 1; ; attempt++)
         {
+            ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(ct);
+            if (connection is null)
+                return;
+            db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
+                .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
+
             if (credentials.TryUnprotect<PlanningCenterCredentials>(Provider, connection.ProtectedCredentials) is { } stored)
                 await TryRevokeAsync(stored.RefreshToken, ct);
 
             connection.Status = IntegrationStatus.Disconnected;
             connection.ExternalTenantId = null;
+            connection.ExternalTenantName = null;
+            connection.ConnectedAccountId = null;
+            connection.ConnectedAccountName = null;
+            connection.ConnectedByMembershipId = null;
+            connection.ConnectedAt = null;
+            connection.Scopes = null;
             SetCredentials(connection, null, credentials);
             try
             {
                 await db.SaveChangesAsync(ct);
                 return;
             }
-            catch (DbUpdateConcurrencyException) when (attempt == 0)
+            catch (DbUpdateConcurrencyException) when (attempt < MaxDisconnectAttempts)
             {
-                // A token refresh saved new credentials meanwhile; reload so those are revoked too.
-                await db.Entry(connection).ReloadAsync(ct);
+                // A refresh or reconnect saved meanwhile (new tokens, or different links). Start over from what is stored
+                // now, so whatever it saved is revoked and released too.
+                db.ChangeTracker.Clear();
             }
         }
     }
@@ -210,10 +222,6 @@ public sealed partial class PlanningCenterConnectionService(
         value is { Length: var length } && length > maxLength ? value[..maxLength] : value;
 
     /// <summary>
-    /// Best effort: a failed revoke must not leave Sheaf holding a connection the admin asked to remove. The token
-    /// still expires in Planning Center (90 days for refresh tokens), and the failure is logged.
-    /// </summary>
-    /// <summary>
     /// Revokes a grant that was not saved, unless the church's stored row holds the same refresh token: Planning Center
     /// may return one grant to two concurrent authorizations, and the one that saved first keeps it.
     /// </summary>
@@ -225,6 +233,10 @@ public sealed partial class PlanningCenterConnectionService(
             await TryRevokeAsync(refreshToken, ct);
     }
 
+    /// <summary>
+    /// Best effort: a failed revoke must not leave Sheaf holding a connection the admin asked to remove. The token
+    /// still expires in Planning Center (90 days for refresh tokens), and the client logs the failure.
+    /// </summary>
     private async Task TryRevokeAsync(string refreshToken, CancellationToken ct)
     {
         // The client logs a failure with its cause.

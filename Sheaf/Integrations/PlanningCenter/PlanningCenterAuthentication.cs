@@ -127,9 +127,28 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         context.HttpContext.Items[ReachedCodeExchangeKey] = true;
     }
 
+    /// <remarks>
+    /// The handler raises this after its own error handling, so an unexpected failure here (such as the database being
+    /// unavailable) is caught here: the admin still returns to Sheaf, and the grant Planning Center just issued is
+    /// revoked rather than left live and unstored.
+    /// </remarks>
     public override async Task TicketReceived(TicketReceivedContext context)
     {
-        PlanningCenterConnectOutcome outcome = await CompleteAsync(context);
+        PlanningCenterConnectOutcome outcome;
+        try
+        {
+            outcome = await CompleteAsync(context);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogCompleteFailed(exception);
+            if (context.Properties?.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is { Length: > 0 } refreshToken)
+            {
+                await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterOAuthClient>()
+                    .TryRevokeAsync(refreshToken, CancellationToken.None);
+            }
+            outcome = PlanningCenterConnectOutcome.Failed;
+        }
         Redirect(context.HttpContext, outcome);
         context.HandleResponse();
     }
@@ -202,4 +221,7 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
 
     [LoggerMessage(LogLevel.Warning, "Planning Center connection did not complete.")]
     private partial void LogRemoteFailure(Exception? exception);
+
+    [LoggerMessage(LogLevel.Error, "Saving a Planning Center connection failed unexpectedly; its new grant was revoked.")]
+    private partial void LogCompleteFailed(Exception exception);
 }

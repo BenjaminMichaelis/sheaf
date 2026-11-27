@@ -34,6 +34,9 @@ public static class PlanningCenterEndpoints
         church.MapGet("/connect", async Task<Results<ChallengeHttpResult, ProblemHttpResult>> (
                     HttpContext http, Guid churchId, PlanningCenterConnectionService service, CancellationToken ct) =>
                 {
+                    // same-site stays allowed: the frontend may be a different origin on the same site (in development,
+                    // another localhost port), and a navigation carries no Origin header to check against AllowedOrigins.
+                    // Planning Center's consent screen still stands between any start and a connection.
                     if (http.Request.Headers["Sec-Fetch-Site"] == "cross-site")
                     {
                         return TypedResults.Problem(statusCode: StatusCodes.Status403Forbidden,

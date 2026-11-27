@@ -43,7 +43,7 @@ public sealed partial class PlanningCenterTokenProvider(
             if (Read(connection) is not { } stored)
             {
                 // Active but unreadable, for example after a Data Protection key loss: only a reconnect can fix it.
-                return await MarkNeedsReauthorizationAsync(connection, ct);
+                return await MarkNeedsReauthorizationAsync(connection, keepCredentials: true, ct);
             }
 
             // From here Planning Center may rotate the refresh token, so the caller's cancellation must not discard the
@@ -128,24 +128,32 @@ public sealed partial class PlanningCenterTokenProvider(
             return winner;
         if (connection.Status != IntegrationStatus.Active || Read(connection)?.RefreshToken != rejectedRefreshToken)
             throw new PlanningCenterException(PlanningCenterFailure.NotConnected);
-        return await MarkNeedsReauthorizationAsync(connection, ct);
+        return await MarkNeedsReauthorizationAsync(connection, keepCredentials: false, ct);
     }
 
-    private async Task<string> MarkNeedsReauthorizationAsync(ChurchIntegration connection, CancellationToken ct)
+    /// <param name="keepCredentials">
+    /// True when the credentials are unreadable rather than rejected: the status alone stops their use, and keeping the
+    /// ciphertext lets a recovered Data Protection key ring make them readable again.
+    /// </param>
+    private async Task<string> MarkNeedsReauthorizationAsync(ChurchIntegration connection, bool keepCredentials, CancellationToken ct)
     {
         connection.Status = IntegrationStatus.NeedsReauthorization;
-        PlanningCenterConnectionService.SetCredentials(connection, null, credentials);
+        if (keepCredentials)
+            connection.Version = Guid.NewGuid();
+        else
+            PlanningCenterConnectionService.SetCredentials(connection, null, credentials);
         try
         {
             await db.SaveChangesAsync(ct);
+            LogNeedsReauthorization(connection.ChurchId);
         }
         catch (DbUpdateConcurrencyException)
         {
+            // Another writer got there first; whatever it saved stands.
             await db.Entry(connection).ReloadAsync(ct);
             if (UsableAccessToken(connection) is { } lateWinner)
                 return lateWinner;
         }
-        LogNeedsReauthorization(connection.ChurchId);
         throw new PlanningCenterException(PlanningCenterFailure.NotConnected);
     }
 

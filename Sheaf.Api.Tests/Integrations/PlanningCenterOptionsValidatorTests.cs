@@ -61,6 +61,30 @@ public class PlanningCenterOptionsValidatorTests
     }
 
     [Test]
+    [Arguments("file:///api/integrations/planning-center/callback")]
+    [Arguments("http://sheaf.example.org/api/integrations/planning-center/callback")]
+    public async Task Validate_RedirectUriNotHttpsOrLocalhost_Fails(string redirectUri)
+    {
+        PlanningCenterOptions options = Configured("Sheaf (ops@example.org)");
+        options.RedirectUri = new Uri(redirectUri);
+
+        var result = Validator("Production").Validate(null, options);
+
+        await Assert.That(result.Failed).IsTrue();
+    }
+
+    [Test]
+    public async Task Validate_LocalhostHttpRedirectUri_Succeeds()
+    {
+        PlanningCenterOptions options = Configured("Sheaf (ops@example.org)");
+        options.RedirectUri = new Uri("http://localhost:5285/api/integrations/planning-center/callback");
+
+        var result = Validator("Development").Validate(null, options);
+
+        await Assert.That(result.Succeeded).IsTrue();
+    }
+
+    [Test]
     public async Task Validate_ConfiguredWithoutReturnUrl_Fails()
     {
         PlanningCenterOptions options = Configured("Sheaf (ops@example.org)");

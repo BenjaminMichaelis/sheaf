@@ -62,6 +62,13 @@ public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment)
             return ValidateOptionsResult.Fail(
                 "PlanningCenter: set ClientId, ClientSecret, and an absolute RedirectUri together, or none of them.");
         }
+        // On Linux a path such as "/api/..." binds as an absolute file:// URI, so the scheme is checked, not just absoluteness.
+        if (options.RedirectUri.Scheme != Uri.UriSchemeHttps
+            && !(options.RedirectUri.Scheme == Uri.UriSchemeHttp && options.RedirectUri.IsLoopback))
+        {
+            return ValidateOptionsResult.Fail(
+                "PlanningCenter:RedirectUri must be an https URL (http only for localhost), registered with Planning Center.");
+        }
         if (string.IsNullOrWhiteSpace(options.ReturnUrl))
         {
             return ValidateOptionsResult.Fail(

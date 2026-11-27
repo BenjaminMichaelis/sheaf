@@ -76,8 +76,8 @@ public sealed partial class PlanningCenterOAuthClient(
             ClientId = handler.ClientId,
             ClientSecret = handler.ClientSecret
         };
-        OpenIdConnectMessage response = await PostAsync(handler, configuration.TokenEndpoint, request, ct);
-        if (string.IsNullOrEmpty(response.AccessToken) || string.IsNullOrEmpty(response.RefreshToken)
+        OpenIdConnectMessage? response = await PostAsync(handler, configuration.TokenEndpoint, request, ct);
+        if (response is null || string.IsNullOrEmpty(response.AccessToken) || string.IsNullOrEmpty(response.RefreshToken)
             || !int.TryParse(response.ExpiresIn, NumberStyles.None, CultureInfo.InvariantCulture, out int expiresIn)
             || expiresIn <= 0)
         {
@@ -99,6 +99,7 @@ public sealed partial class PlanningCenterOAuthClient(
         OpenIdConnectMessage request = new() { ClientId = handler.ClientId, ClientSecret = handler.ClientSecret };
         request.SetParameter("token", refreshToken);
         request.SetParameter("token_type_hint", OpenIdConnectParameterNames.RefreshToken);
+        // RFC 7009: success is the status code; the client ignores the body.
         await PostAsync(handler, configuration.RevocationEndpoint, request, ct);
     }
 
@@ -145,7 +146,8 @@ public sealed partial class PlanningCenterOAuthClient(
     }
 
     /// <summary>Posts like the handler's code redemption, then parses the body as an <see cref="OpenIdConnectMessage"/>.</summary>
-    private static async Task<OpenIdConnectMessage> PostAsync(
+    /// <returns>The parsed body, or null when a successful response's body is not JSON.</returns>
+    private static async Task<OpenIdConnectMessage?> PostAsync(
         OpenIdConnectOptions handler, string endpoint, OpenIdConnectMessage request, CancellationToken ct)
     {
         using FormUrlEncodedContent form = new(request.Parameters);
@@ -167,7 +169,7 @@ public sealed partial class PlanningCenterOAuthClient(
             throw new PlanningCenterOAuthException(
                 message?.Error, (int)response.StatusCode, errorDescription: message?.ErrorDescription);
         }
-        return message ?? throw PlanningCenterOAuthException.InvalidResponse("response was not JSON");
+        return message;
     }
 
     [LoggerMessage(LogLevel.Warning, "Revoking a Planning Center token failed; it will expire on its own.")]
