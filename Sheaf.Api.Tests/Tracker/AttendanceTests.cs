@@ -75,20 +75,6 @@ public class AttendanceTests : ChurchApiTestBase
         return session;
     }
 
-    private static async Task<ProblemDetails> ReadConfirmationAsync(HttpResponseMessage response)
-    {
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict).Because(await response.Content.ReadAsStringAsync());
-        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>() ?? throw new InvalidOperationException("Missing problem.");
-        await Assert.That(problem.Type).IsEqualTo(TrackerException.ConfirmationRequiredType);
-        return problem;
-    }
-
-    private static async Task<JsonElement> ExtensionAsync(ProblemDetails problem, string name)
-    {
-        await Assert.That(problem.Extensions.TryGetValue(name, out var value)).IsTrue();
-        return await Assert.That(value).IsTypeOf<JsonElement>();
-    }
-
     [Test]
     public async Task RecordGroupSession_RosterAndNewPerson_RecordsAttendeesAbsentAndCreatesPerson()
     {
@@ -257,6 +243,108 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task GetPerson_LeaderReadsAttendedVisitor_ReturnsBasicProfileWithHouseholdFirstNamesAndCannotEdit()
+    {
+        using var f = await SeedGroupAsync();
+        var household = new Household { Label = "Visitor family" };
+        var visitor = new Person { FirstName = "Vera", LastName = "Visitor", Email = "vera@example.com", Phone = "555-0101", HouseholdId = household.Id };
+        var spouse = new Person { FirstName = "Victor", LastName = "Visitor", Email = "victor@example.com", HouseholdId = household.Id };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.AddRange(household, visitor, spouse);
+            await db.SaveChangesAsync();
+        });
+        await AddSessionAsync(f, Today, visitor.Id);
+
+        using var visitorRead = await SendAsync(f, HttpMethod.Get, $"/people/{visitor.Id}");
+
+        var profile = await TrackerReadAsync<PersonResponse>(visitorRead);
+        await Assert.That(profile.Email).IsEqualTo("vera@example.com");
+        await Assert.That(profile.Phone).IsEqualTo("555-0101");
+        await Assert.That(profile.HouseholdLabel).IsEqualTo("Visitor family");
+        await Assert.That(profile.HouseholdMembers).IsEquivalentTo([new HouseholdMemberResponse(spouse.Id, "Victor")]);
+        await Assert.That(profile.CanEdit).IsFalse();
+        // Household members appear by first name only, never with their own contacts.
+        await Assert.That(await visitorRead.Content.ReadAsStringAsync()).DoesNotContain("victor@example.com");
+    }
+
+    [Test]
+    public async Task GetPerson_LeaderReadsRosterMember_ReturnsCanEdit()
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}");
+
+        await Assert.That((await TrackerReadAsync<PersonResponse>(response)).CanEdit).IsTrue();
+    }
+
+    [Test]
+    public async Task GetPerson_StaffReadsPersonOutsideTheirGroupsWithoutHousehold_ReturnsCanEditAndNoHousehold()
+    {
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff, callerLeads: false);
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}");
+
+        var profile = await TrackerReadAsync<PersonResponse>(response);
+        await Assert.That(profile.CanEdit).IsTrue();
+        await Assert.That(profile.HouseholdLabel).IsNull();
+        await Assert.That(profile.HouseholdMembers).IsEmpty();
+    }
+
+    [Test]
+    public async Task UpdateGroupSessionAttendees_DescriptionReplacedThenOmitted_ReplacesThenClearsDescription()
+    {
+        using var f = await SeedGroupAsync();
+        var path = $"/groups/{f.Group.Id}/sessions";
+        using var created = await SendAsync(f, HttpMethod.Post, path, new SessionRequest(Today, [f.Leader.Id], Description: "Prayed for exams"));
+        var session = await TrackerReadAsync<SessionResponse>(created, HttpStatusCode.Created);
+        using var read = await SendAsync(f, HttpMethod.Get, $"{path}/{session.Id}");
+        await Assert.That((await TrackerReadAsync<SessionResponse>(read)).Description).IsEqualTo("Prayed for exams");
+
+        using var replaced = await SendAsync(f, HttpMethod.Put, $"{path}/{session.Id}", new AttendeesRequest([f.Leader.Id], Description: "Shared a meal"), session.Version);
+        var afterReplace = await TrackerReadAsync<SessionResponse>(replaced);
+        await Assert.That(afterReplace.Description).IsEqualTo("Shared a meal");
+
+        using var cleared = await SendAsync(f, HttpMethod.Put, $"{path}/{session.Id}", new AttendeesRequest([f.Leader.Id]), afterReplace.Version);
+        await Assert.That((await TrackerReadAsync<SessionResponse>(cleared)).Description).IsNull();
+    }
+
+    [Test]
+    [Arguments(2000, HttpStatusCode.Created, 1)]
+    [Arguments(2001, HttpStatusCode.BadRequest, 0)]
+    public async Task RecordGroupSession_DescriptionLength_SavesOnlyUpTo2000Characters(int length, HttpStatusCode expected, int savedSessions)
+    {
+        using var f = await SeedGroupAsync();
+
+        var path = $"/groups/{f.Group.Id}/sessions";
+
+        using var response = await SendAsync(f, HttpMethod.Post, path, new SessionRequest(Today, [f.Leader.Id], Description: new string('x', length)));
+
+        await Assert.That(response.StatusCode).IsEqualTo(expected);
+        using var history = await SendAsync(f, HttpMethod.Get, path);
+        await Assert.That((await TrackerReadAsync<PagedResponse<SessionSummaryResponse>>(history)).Items).Count().IsEqualTo(savedSessions);
+    }
+
+    [Test]
+    public async Task UpdateGroupSessionAttendees_DescriptionTooLong_ReturnsBadRequestAndKeepsSession()
+    {
+        using var f = await SeedGroupAsync();
+        var path = $"/groups/{f.Group.Id}/sessions";
+        using var created = await SendAsync(f, HttpMethod.Post, path, new SessionRequest(Today, [f.Leader.Id], Description: "Prayed for exams"));
+        var session = await TrackerReadAsync<SessionResponse>(created, HttpStatusCode.Created);
+
+        using var response = await SendAsync(f, HttpMethod.Put, $"{path}/{session.Id}",
+            new AttendeesRequest([f.Leader.Id, f.Member.Id], Description: new string('x', 2001)), session.Version);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        using var read = await SendAsync(f, HttpMethod.Get, $"{path}/{session.Id}");
+        var kept = await TrackerReadAsync<SessionResponse>(read);
+        await Assert.That(kept.Description).IsEqualTo("Prayed for exams");
+        await Assert.That(kept.Attendees.Select(a => a.Id)).IsEquivalentTo([f.Leader.Id]);
+        await Assert.That(kept.Version).IsEqualTo(session.Version);
+    }
+
+    [Test]
     public async Task TrackerWrites_LeaderTargetsAttendedVisitor_RejectedWithoutChanges()
     {
         // Attending grants a Leader read access only: the visitor stays out of reach for writes.
@@ -333,7 +421,7 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task UpdateGroupSessionAttendees_NewPersonWithSimilarName_RequiresConfirmation()
+    public async Task UpdateGroupSessionAttendees_LeaderAddsNewPersonWithSimilarName_RequiresConfirmationWithoutGroupNames()
     {
         using var f = await SeedGroupAsync();
         var session = await AddSessionAsync(f, Today, f.Member.Id);
@@ -341,8 +429,10 @@ public class AttendanceTests : ChurchApiTestBase
         using var response = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}",
             new AttendeesRequest([f.Member.Id], [new PersonRequest("Max", "Member")]), session.Version);
 
-        var problem = await ReadConfirmationAsync(response);
-        await Assert.That((await ExtensionAsync(problem, "similarPeople"))[0].GetProperty("matches")[0].GetProperty("id").GetGuid()).IsEqualTo(f.Member.Id);
+        var match = (await ReadSimilarPeopleAsync(response))[0].Matches[0];
+        await Assert.That(match.Id).IsEqualTo(f.Member.Id);
+        // The Leader leads the match's group, yet group names go only to those who manage every group.
+        await Assert.That(match.Groups).IsNull();
         await InChurchAsync(f.ChurchId, async db =>
             await Assert.That(await db.People.CountAsync(p => p.FirstName == "Max")).IsEqualTo(1));
     }
