@@ -13,7 +13,7 @@ namespace Sheaf.Services;
 /// </summary>
 public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock, ILogger<TrackerScope> logger)
 {
-    /// <summary>How long after attending one of a Leader's groups a person's full profile stays visible to that Leader.</summary>
+    /// <summary>How long after attending one of a Leader's groups a person's basic profile stays visible to that Leader.</summary>
     public const int AttendanceVisibilityDays = 90;
     /// <summary>How long after creating a person a Leader may still correct their details.</summary>
     public const int CreatorEditDays = 7;
@@ -70,10 +70,9 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
             return db.Groups;
         var roles = GroupRolePermissions.RolesWith(permission).ToArray();
         var now = Now;
-        return db.Groups.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
-            && db.GroupAssignments.Any(a => a.GroupId == g.Id && roles.Contains(a.Role)
-                && a.StartsAt <= now && (a.EndsAt == null || a.EndsAt > now)
-                && db.People.Any(p => p.Id == a.PersonId && p.UserId == actor.UserId)));
+        var granting = db.GroupAssignments.CurrentAt(now)
+            .Where(a => roles.Contains(a.Role) && db.People.Any(p => p.Id == a.PersonId && p.UserId == actor.UserId));
+        return db.Groups.ActiveAt(now).Where(g => granting.Any(a => a.GroupId == g.Id));
     }
 
     /// <summary>
@@ -87,8 +86,8 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
             return db.People;
         var groups = Groups(actor, GroupPermission.ManageMembers).Select(g => g.Id);
         var now = Now;
-        return db.People.Where(p => db.GroupAssignments.Any(a => a.PersonId == p.Id && groups.Contains(a.GroupId)
-            && a.StartsAt <= now && (a.EndsAt == null || a.EndsAt > now)));
+        var assigned = db.GroupAssignments.CurrentAt(now);
+        return db.People.Where(p => assigned.Any(a => a.PersonId == p.Id && groups.Contains(a.GroupId)));
     }
 
     /// <summary>
@@ -107,7 +106,7 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     }
 
     /// <summary>
-    /// People whose profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
+    /// People whose basic profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
     /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
     /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
     /// </summary>
@@ -202,9 +201,27 @@ public static class EntityTag
     }
 }
 
+/// <summary>
+/// The one definition of "current" for groups and group assignments. Access rules and lookups share it, so a person is
+/// never shown as in a group they cannot be reached through, or the reverse.
+/// </summary>
+internal static class TrackerPeriods
+{
+    /// <summary>Groups that have started and not yet ended at <paramref name="now"/>.</summary>
+    public static IQueryable<Group> ActiveAt(this IQueryable<Group> groups, DateTimeOffset now) =>
+        groups.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now));
+
+    /// <summary>Assignments, in any role, that have begun and not yet ended at <paramref name="now"/>.</summary>
+    public static IQueryable<GroupAssignment> CurrentAt(this IQueryable<GroupAssignment> assignments, DateTimeOffset now) =>
+        assignments.Where(a => a.StartsAt <= now && (a.EndsAt == null || a.EndsAt > now));
+}
+
 /// <summary>Shared tracker failures and input normalization.</summary>
 internal static class TrackerRules
 {
+    /// <summary>The trimmed value, or null when it is missing or only whitespace.</summary>
+    public static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     public static TrackerException Missing() => new(TrackerFailure.NotFound);
     public static TrackerException Denied() => new(TrackerFailure.Forbidden);
     public static TrackerException Invalid() => new(TrackerFailure.InvalidInput);
@@ -223,11 +240,8 @@ internal static class TrackerRules
 
     public static string? Optional(string? value, int length)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return null;
-        if (value.Trim().Length > length)
-            throw Invalid();
-        return value.Trim();
+        var trimmed = Trimmed(value);
+        return trimmed?.Length > length ? throw Invalid() : trimmed;
     }
 
     /// <summary>Throws PreconditionFailed unless the loaded version is the one the client read.</summary>

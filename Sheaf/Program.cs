@@ -82,6 +82,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 // Add services to the container.
 builder.Services.AddProblemDetails();
+// Validates Minimal API parameters (DataAnnotations and IValidatableObject) and returns 400 ValidationProblem on failure.
+builder.Services.AddValidation();
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, _, _) =>

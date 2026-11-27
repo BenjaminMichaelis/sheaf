@@ -12,6 +12,20 @@ public partial class TrackerFoundation : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.AddColumn<string>(
+            name: "GroupLabel",
+            table: "Churches",
+            type: "nvarchar(50)",
+            maxLength: 50,
+            nullable: true);
+
+        migrationBuilder.AddColumn<string>(
+            name: "GroupLabelPlural",
+            table: "Churches",
+            type: "nvarchar(50)",
+            maxLength: 50,
+            nullable: true);
+
+        migrationBuilder.AddColumn<string>(
             name: "TimeZoneId",
             table: "Churches",
             type: "nvarchar(64)",
@@ -26,7 +40,8 @@ public partial class TrackerFoundation : Migration
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false)
+                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                IsRetired = table.Column<bool>(type: "bit", nullable: false)
             },
             constraints: table =>
             {
@@ -140,6 +155,7 @@ public partial class TrackerFoundation : Migration
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 GroupId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 OccurredOn = table.Column<DateOnly>(type: "date", nullable: false),
+                Description = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
                 RecordedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false, defaultValueSql: "SYSDATETIMEOFFSET()"),
                 RecordedByUserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
                 Version = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
@@ -318,6 +334,14 @@ public partial class TrackerFoundation : Migration
 
         migrationBuilder.DropCheckConstraint(
             name: "CK_Churches_TimeZoneId",
+            table: "Churches");
+
+        migrationBuilder.DropColumn(
+            name: "GroupLabel",
+            table: "Churches");
+
+        migrationBuilder.DropColumn(
+            name: "GroupLabelPlural",
             table: "Churches");
 
         migrationBuilder.DropColumn(

@@ -45,7 +45,7 @@ public static class TrackerEndpoints
             .Produces(StatusCodes.Status429TooManyRequests);
         api.MapPut("/groups/{groupId:guid}/sessions/{sessionId:guid}", async Task<Ok<SessionResponse>> (Guid groupId, Guid sessionId, [FromHeader(Name = IfMatchHeader)] string? ifMatch, AttendeesRequest request, IAttendanceService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdateAttendeesAsync(groupId, sessionId, EntityTag.ParseIfMatch(ifMatch), request, ct)))
-            .Tracker("UpdateGroupSessionAttendees", "Replace who came to a meeting; people taken off the list are kept as history")
+            .Tracker("UpdateGroupSessionAttendees", "Replace who came to a meeting and its description; people taken off the list are kept as history")
             .RequiresIfMatch()
             .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
             .Produces(StatusCodes.Status429TooManyRequests);
@@ -59,15 +59,16 @@ public static class TrackerEndpoints
     {
         api.MapGet("/people/lookup", async Task<Ok<PersonLookupResponse[]>> (string? name, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.LookupAsync(name, ct)))
-            .Tracker("LookupPeople", "Find up to 20 active people by name (2+ characters), returning only name and household label")
+            .Tracker("LookupPeople", "Find up to 20 active people by name (2+ characters), returning only name, household label, and current group names")
             .RequireRateLimiting(RequestSecurityExtensions.LookupRateLimitPolicy)
             .Produces(StatusCodes.Status429TooManyRequests);
         api.MapGet("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetPersonAsync(id, ct)))
-            .Tracker("GetPerson", "Get a scoped Person profile");
-        api.MapPost("/people", async Task<Created<PersonResponse>> (PersonRequest request, IPeopleService s, CancellationToken ct) =>
+            .Tracker("GetPerson", "Get a Person's basic profile with household members' first names");
+        // A similar name returns the confirmation problem with "similarPeople"; resend with ?confirm=true to create anyway.
+        api.MapPost("/people", async Task<Created<PersonResponse>> (PersonRequest request, IPeopleService s, CancellationToken ct, bool confirm = false) =>
             {
-                var result = await s.CreatePersonAsync(request, ct);
+                var result = await s.CreatePersonAsync(request, confirm, ct);
                 return TypedResults.Created($"/api/church/people/{result.Id}", result);
             })
             .Tracker("CreatePerson", "Staff create a Person without required contacts or household").RequirePermission(Permission.PeopleManage);
@@ -92,7 +93,7 @@ public static class TrackerEndpoints
             .Tracker("CreateGroupType", "Staff create a group type").Manage();
         api.MapPut("/group-types/{id:guid}", async Task<Ok<GroupTypeResponse>> (Guid id, GroupTypeRequest request, IGroupService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdateTypeAsync(id, request, ct)))
-            .Tracker("UpdateGroupType", "Staff rename a group type").Manage();
+            .Tracker("UpdateGroupType", "Staff rename or retire a group type; groups keep a retired type, but no group can be given it").Manage();
         api.MapGet("/groups", async Task<Ok<PagedResponse<GroupResponse>>> (int? offset, int? limit, IGroupService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetGroupsAsync(PageRequest.From(offset, limit), ct)))
             .Tracker("GetGroups", "List accessible groups, including retained ended groups for Staff");

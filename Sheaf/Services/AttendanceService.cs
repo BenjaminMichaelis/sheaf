@@ -76,6 +76,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         {
             GroupId = groupId,
             OccurredOn = request.OccurredOn,
+            Description = Optional(request.Description, GroupMeeting.MaxDescriptionLength),
             RecordedAt = scope.Now,
             RecordedByUserId = actor.UserId
         };
@@ -94,7 +95,9 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var session = await db.GroupMeetings.SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
         RequireVersion(session.Version, expectedVersion);
         RequireEditWindow(actor, session);
+        var description = Optional(request.Description, GroupMeeting.MaxDescriptionLength);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, [], ct);
+        session.Description = description;
         session.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
         return await ResponseAsync(session, ct);
@@ -153,7 +156,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var current = await db.Attendances.Where(a => a.MeetingId == session.Id && a.RemovedAt == null).ToListAsync(ct);
         var added = listed.Except(current.Select(a => a.PersonId)).ToArray();
         // Someone newly marked present must be an active person in this church. Marking someone present lets the
-        // group's Leaders read their full profile for 90 days (TrackerScope.VisiblePeople), so a Leader could unlock
+        // group's Leaders read their basic profile for 90 days (TrackerScope.VisiblePeople), so a Leader could unlock
         // read access to anyone found by name lookup; it never grants edit, roster, or household access. That is an
         // accepted risk: it is detected, not prevented, through the recorder on each row and the Staff
         // attendance-records report.
@@ -165,7 +168,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var created = newPeople.Select(request => request.IsActive == false
             ? throw Invalid()
             : PersonRecords.Create(request, actor, now)).ToArray();
-        if (!confirm && await PersonNameSearch.SimilarAsync(db, [.. created.Select(p => p.Name)], ct) is { Length: > 0 } similar)
+        if (!confirm && await PersonNameSearch.SimilarAsync(db, actor, [.. created.Select(p => p.Name)], now, ct) is { Length: > 0 } similar)
             reasons["similarPeople"] = similar;
         if (reasons.Count > 0)
             throw ConfirmationRequired(reasons);
@@ -197,6 +200,6 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
                     && a.StartsAt < end && (a.EndsAt == null || a.EndsAt > start)))
             .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
             .Select(NameOf).ToArrayAsync(ct);
-        return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, attendees, absent, session.Version);
+        return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, session.Description, attendees, absent, session.Version);
     }
 }

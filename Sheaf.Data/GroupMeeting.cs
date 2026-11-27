@@ -20,6 +20,12 @@ public sealed class GroupMeeting : ITenanted
     public Guid GroupId { get; set; }
     /// <summary>The meeting's calendar date in the church's time zone (see <see cref="ChurchCalendar"/>).</summary>
     public DateOnly OccurredOn { get; set; }
+    /// <summary>
+    /// An optional note about the meeting. It can describe spiritual activity, so it is shown only to those who can see
+    /// the group and is never part of lookups or reports.
+    /// </summary>
+    [MaxLength(MaxDescriptionLength)]
+    public string? Description { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
     /// <summary>
     /// The account that recorded the meeting, or null for imports. Not a foreign key, so the audit trail survives the
@@ -30,4 +36,6 @@ public sealed class GroupMeeting : ITenanted
     /// <summary>Changes on every write to the meeting or its attendance; clients send it back as If-Match.</summary>
     [ConcurrencyCheck]
     public Guid Version { get; set; } = Guid.NewGuid();
+
+    public const int MaxDescriptionLength = 2000;
 }

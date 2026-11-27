@@ -303,13 +303,12 @@ public class TrackerTests : ChurchApiTestBase
         await Assert.That(await structure.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
         using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Full%20Name");
         var found = await TrackerReadAsync<PersonLookupResponse[]>(lookup);
-        // A Leader finds any active person by name, including people outside their groups, but sees only name and
-        // household label. The member was renamed above and the inactive person is excluded.
+        // A Leader finds any active person by name, including people outside their groups, but sees only name,
+        // household label, never group names. The member was renamed above and the inactive person is excluded.
         await Assert.That(found.Select(p => p.Id)).IsEquivalentTo([leader.Id, outside.Id]);
         await Assert.That(found.Single(p => p.Id == outside.Id).HouseholdLabel).IsEqualTo("Renamed");
-        var lookupBody = await lookup.Content.ReadAsStringAsync();
-        await Assert.That(lookupBody).DoesNotContain("private@example.com");
-        await Assert.That(lookupBody).DoesNotContain(group.Name);
+        await Assert.That(found.Where(p => p.Groups is not null)).IsEmpty();
+        await Assert.That(await lookup.Content.ReadAsStringAsync()).DoesNotContain("private@example.com");
         using var ending = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Post, $"/groups/{group.Id}/end", new EndRequest(Time.GetUtcNow()), group.Version);
         await Assert.That(ending.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
         await InChurchAsync(membership.ChurchId, async db =>
@@ -430,6 +429,133 @@ public class TrackerTests : ChurchApiTestBase
         var group = await TrackerReadAsync<GroupResponse>(groupResult, HttpStatusCode.Created);
         using var updated = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Put, $"/groups/{group.Id}", new GroupRequest("Renamed", start), group.Version);
         await Assert.That((await TrackerReadAsync<GroupResponse>(updated)).GroupTypeId).IsNull();
+    }
+
+    [Test]
+    public async Task UpdateGroupType_Retired_GroupsKeepTypeButCannotBeGivenIt()
+    {
+        using var staff = await SignInStaffAsync();
+        var type = await CreateGroupTypeAsync(staff, "Freshmen");
+        using var createdGroup = await staff.SendAsync(HttpMethod.Post, "/groups", new GroupRequest("Kept", staff.Start, type.Id));
+        var kept = await TrackerReadAsync<GroupResponse>(createdGroup, HttpStatusCode.Created);
+        using var createdOther = await staff.SendAsync(HttpMethod.Post, "/groups", new GroupRequest("Untyped", staff.Start));
+        var untyped = await TrackerReadAsync<GroupResponse>(createdOther, HttpStatusCode.Created);
+
+        using var retire = await staff.SendAsync(HttpMethod.Put, $"/group-types/{type.Id}", new GroupTypeRequest("Freshmen", IsRetired: true));
+        await Assert.That((await TrackerReadAsync<GroupTypeResponse>(retire)).IsRetired).IsTrue();
+        using var newGroup = await staff.SendAsync(HttpMethod.Post, "/groups", new GroupRequest("New", staff.Start, type.Id));
+        using var giveType = await staff.SendAsync(HttpMethod.Put, $"/groups/{untyped.Id}", new GroupRequest("Untyped", staff.Start, type.Id), untyped.Version);
+        using var keepType = await staff.SendAsync(HttpMethod.Put, $"/groups/{kept.Id}", new GroupRequest("Kept renamed", staff.Start, type.Id), kept.Version);
+
+        await Assert.That(newGroup.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await Assert.That(giveType.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await Assert.That((await TrackerReadAsync<GroupResponse>(keepType)).GroupTypeId).IsEqualTo(type.Id);
+        using var groups = await staff.SendAsync(HttpMethod.Get, "/groups");
+        var stored = await TrackerReadAsync<PagedResponse<GroupResponse>>(groups);
+        await Assert.That(stored.Items.Select(g => g.Name)).IsEquivalentTo(["Kept renamed", "Untyped"]);
+        await Assert.That(stored.Items.Single(g => g.Id == untyped.Id).GroupTypeId).IsNull();
+    }
+
+    [Test]
+    public async Task UpdateGroupType_RenamedWithoutRetiredFlagThenUnretired_KeepsThenClearsRetirement()
+    {
+        using var staff = await SignInStaffAsync();
+        var type = await CreateGroupTypeAsync(staff, "Freshmen");
+        using var retire = await staff.SendAsync(HttpMethod.Put, $"/group-types/{type.Id}", new GroupTypeRequest("Freshmen", IsRetired: true));
+        await Assert.That((await TrackerReadAsync<GroupTypeResponse>(retire)).IsRetired).IsTrue();
+
+        using var rename = await staff.SendAsync(HttpMethod.Put, $"/group-types/{type.Id}", new GroupTypeRequest("Class of 2026"));
+        await Assert.That((await TrackerReadAsync<GroupTypeResponse>(rename)).IsRetired).IsTrue();
+        using var unretire = await staff.SendAsync(HttpMethod.Put, $"/group-types/{type.Id}", new GroupTypeRequest("Class of 2026", IsRetired: false));
+        await Assert.That((await TrackerReadAsync<GroupTypeResponse>(unretire)).IsRetired).IsFalse();
+
+        using var assigned = await staff.SendAsync(HttpMethod.Post, "/groups", new GroupRequest("New", staff.Start, type.Id));
+        await Assert.That((await TrackerReadAsync<GroupResponse>(assigned, HttpStatusCode.Created)).GroupTypeId).IsEqualTo(type.Id);
+    }
+
+    /// <summary>A signed-in Staff member of a new church, with a past date groups can start on.</summary>
+    private sealed record StaffSession(HttpClient Client, string Cookie, Guid ChurchId, DateTimeOffset Start) : IDisposable
+    {
+        public Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null, Guid? ifMatch = null) =>
+            TrackerRequestAsync(Client, Cookie, ChurchId, method, path, body, ifMatch);
+
+        public void Dispose() => Client.Dispose();
+    }
+
+    private async Task<StaffSession> SignInStaffAsync()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+        return new StaffSession(client, cookie, membership.ChurchId, Time.GetUtcNow().AddDays(-2));
+    }
+
+    private static async Task<GroupTypeResponse> CreateGroupTypeAsync(StaffSession staff, string name)
+    {
+        using var created = await staff.SendAsync(HttpMethod.Post, "/group-types", new GroupTypeRequest(name));
+        return await TrackerReadAsync<GroupTypeResponse>(created, HttpStatusCode.Created);
+    }
+
+    [Test]
+    public async Task LookupAsync_StaffFindPersonInCurrentEndedAndLeftGroups_ReturnsOnlyCurrentGroupNames()
+    {
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Staff);
+        var now = Time.GetUtcNow();
+        var person = new Person { FirstName = "Grace", LastName = "Hopper" };
+        var current = new Group { Name = "Current group", StartsAt = now.AddDays(-30) };
+        var leading = new Group { Name = "Another group", StartsAt = now.AddDays(-30) };
+        // Ending a group leaves open assignments in place, so only the group's own end excludes it.
+        var ended = new Group { Name = "Ended group", StartsAt = now.AddDays(-30), EndsAt = now.AddDays(-1) };
+        var left = new Group { Name = "Left group", StartsAt = now.AddDays(-30) };
+        var steppedDown = new Group { Name = "Stepped-down group", StartsAt = now.AddDays(-30) };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(person, current, leading, ended, left, steppedDown);
+            db.GroupAssignments.AddRange(
+                new GroupAssignment { GroupId = current.Id, PersonId = person.Id, Role = GroupRole.Member, StartsAt = current.StartsAt },
+                new GroupAssignment { GroupId = left.Id, PersonId = person.Id, Role = GroupRole.Member, StartsAt = left.StartsAt, EndsAt = now.AddDays(-2) });
+            db.GroupAssignments.AddRange(
+                new GroupAssignment { GroupId = leading.Id, PersonId = person.Id, Role = GroupRole.Leader, StartsAt = leading.StartsAt },
+                new GroupAssignment { GroupId = ended.Id, PersonId = person.Id, Role = GroupRole.Leader, StartsAt = ended.StartsAt },
+                new GroupAssignment { GroupId = steppedDown.Id, PersonId = person.Id, Role = GroupRole.Leader, StartsAt = steppedDown.StartsAt, EndsAt = now.AddDays(-2) });
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var response = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Grace");
+
+        var found = (await TrackerReadAsync<PersonLookupResponse[]>(response)).Single();
+        var groups = await Assert.That(found.Groups).IsNotNull();
+        await Assert.That(groups).IsEquivalentTo(["Another group", "Current group"]);
+    }
+
+    [Test]
+    public async Task CreatePerson_SimilarNameUnconfirmedThenConfirmed_WarnsWithMatchGroupsThenCreates()
+    {
+        using var staff = await SignInStaffAsync();
+        var existing = new Person { FirstName = "Ada", LastName = "Lovelace", Email = "ada@example.com" };
+        var group = new Group { Name = "Engine group", StartsAt = staff.Start };
+        await InChurchAsync(staff.ChurchId, async db =>
+        {
+            db.AddRange(existing, group);
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = group.Id, PersonId = existing.Id, Role = GroupRole.Member, StartsAt = group.StartsAt });
+            await db.SaveChangesAsync();
+        });
+
+        using var warned = await staff.SendAsync(HttpMethod.Post, "/people", new PersonRequest("Ada", "Lovelace"));
+        var match = (await ReadSimilarPeopleAsync(warned))[0].Matches[0];
+        await Assert.That(match.Id).IsEqualTo(existing.Id);
+        await Assert.That(await Assert.That(match.Groups).IsNotNull()).IsEquivalentTo([group.Name]);
+        await Assert.That(await warned.Content.ReadAsStringAsync()).DoesNotContain("ada@example.com");
+        await InChurchAsync(staff.ChurchId, async db => await Assert.That(await db.People.CountAsync()).IsEqualTo(1));
+
+        using var confirmed = await staff.SendAsync(HttpMethod.Post, "/people?confirm=true", new PersonRequest("Ada", "Lovelace"));
+        var created = await TrackerReadAsync<PersonResponse>(confirmed, HttpStatusCode.Created);
+        await Assert.That(created.Id).IsNotEqualTo(existing.Id);
+        await Assert.That(created.CanEdit).IsTrue();
     }
 
     [Test]

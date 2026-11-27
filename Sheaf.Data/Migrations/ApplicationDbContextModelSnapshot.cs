@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261127221933_TrackerFoundation";
+    public override string LastMigrationId => "20261127233847_TrackerFoundation";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -350,6 +350,14 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
+                b.Property<string>("GroupLabel")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<string>("GroupLabelPlural")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
                 b.Property<string>("Name")
                     .IsRequired()
                     .HasColumnType("nvarchar(max)");
@@ -485,6 +493,10 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
+                b.Property<string>("Description")
+                    .HasMaxLength(2000)
+                    .HasColumnType("nvarchar(2000)");
+
                 b.Property<Guid>("GroupId")
                     .HasColumnType("uniqueidentifier");
 
@@ -518,6 +530,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("IsRetired")
+                    .HasColumnType("bit");
 
                 b.Property<string>("Name")
                     .IsRequired()

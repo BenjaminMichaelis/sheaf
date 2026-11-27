@@ -13,7 +13,7 @@ using Sheaf.Data;
 namespace Sheaf.Data.Migrations;
 
 [DbContext(typeof(ApplicationDbContext))]
-[Migration("20261127221933_TrackerFoundation")]
+[Migration("20261127233847_TrackerFoundation")]
 partial class TrackerFoundation
 {
     /// <inheritdoc />
@@ -348,6 +348,14 @@ partial class TrackerFoundation
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
+                b.Property<string>("GroupLabel")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<string>("GroupLabelPlural")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
                 b.Property<string>("Name")
                     .IsRequired()
                     .HasColumnType("nvarchar(max)");
@@ -483,6 +491,10 @@ partial class TrackerFoundation
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
+                b.Property<string>("Description")
+                    .HasMaxLength(2000)
+                    .HasColumnType("nvarchar(2000)");
+
                 b.Property<Guid>("GroupId")
                     .HasColumnType("uniqueidentifier");
 
@@ -516,6 +528,9 @@ partial class TrackerFoundation
 
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("IsRetired")
+                    .HasColumnType("bit");
 
                 b.Property<string>("Name")
                     .IsRequired()

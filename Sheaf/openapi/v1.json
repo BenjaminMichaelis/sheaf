@@ -230,7 +230,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Find up to 20 active people by name (2+ characters), returning only name and household label",
+        "summary": "Find up to 20 active people by name (2+ characters), returning only name, household label, and current group names",
         "operationId": "LookupPeople",
         "parameters": [
           {
@@ -311,7 +311,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Get a scoped Person profile",
+        "summary": "Get a Person's basic profile with household members' first names",
         "operationId": "GetPerson",
         "parameters": [
           {
@@ -502,6 +502,16 @@
         ],
         "summary": "Staff create a Person without required contacts or household",
         "operationId": "CreatePerson",
+        "parameters": [
+          {
+            "name": "confirm",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -817,7 +827,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Staff rename a group type",
+        "summary": "Staff rename or retire a group type; groups keep a retired type, but no group can be given it",
         "operationId": "UpdateGroupType",
         "parameters": [
           {
@@ -2743,7 +2753,7 @@
         "tags": [
           "Tracker"
         ],
-        "summary": "Replace who came to a meeting; people taken off the list are kept as history",
+        "summary": "Replace who came to a meeting and its description; people taken off the list are kept as history",
         "operationId": "UpdateGroupSessionAttendees",
         "parameters": [
           {
@@ -2976,7 +2986,7 @@
         "tags": [
           "Church"
         ],
-        "summary": "Get the selected church's name and the time zone its meeting dates are kept in",
+        "summary": "Get the selected church's name, the time zone its meeting dates are kept in, and its group labels",
         "operationId": "GetChurchSettings",
         "responses": {
           "200": {
@@ -3003,7 +3013,7 @@
         "tags": [
           "Church"
         ],
-        "summary": "Admins set the IANA time zone the church's meeting dates are kept in",
+        "summary": "Admins set the church's time zone and its own words for a group; omitted labels reset to Group/Groups",
         "operationId": "UpdateChurchSettings",
         "requestBody": {
           "content": {
@@ -3197,6 +3207,12 @@
           "confirm": {
             "type": "boolean",
             "default": false
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3236,13 +3252,27 @@
         "properties": {
           "timeZoneId": {
             "type": "string"
+          },
+          "groupLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "groupLabelPlural": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
       "ChurchSettingsResponse": {
         "required": [
           "name",
-          "timeZoneId"
+          "timeZoneId",
+          "groupLabel",
+          "groupLabelPlural"
         ],
         "type": "object",
         "properties": {
@@ -3250,6 +3280,12 @@
             "type": "string"
           },
           "timeZoneId": {
+            "type": "string"
+          },
+          "groupLabel": {
+            "type": "string"
+          },
+          "groupLabelPlural": {
             "type": "string"
           }
         }
@@ -3345,13 +3381,20 @@
         "properties": {
           "name": {
             "type": "string"
+          },
+          "isRetired": {
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         }
       },
       "GroupTypeResponse": {
         "required": [
           "id",
-          "name"
+          "name",
+          "isRetired"
         ],
         "type": "object",
         "properties": {
@@ -3361,6 +3404,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "isRetired": {
+            "type": "boolean"
           }
         }
       },
@@ -3624,7 +3670,8 @@
         "required": [
           "id",
           "name",
-          "householdLabel"
+          "householdLabel",
+          "groups"
         ],
         "type": "object",
         "properties": {
@@ -3640,6 +3687,15 @@
               "null",
               "string"
             ]
+          },
+          "groups": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -3687,7 +3743,10 @@
           "email",
           "phone",
           "householdId",
+          "householdLabel",
+          "householdMembers",
           "isActive",
+          "canEdit",
           "version"
         ],
         "type": "object",
@@ -3727,7 +3786,22 @@
             ],
             "format": "uuid"
           },
+          "householdLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "householdMembers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HouseholdMemberResponse"
+            }
+          },
           "isActive": {
+            "type": "boolean"
+          },
+          "canEdit": {
             "type": "boolean"
           },
           "version": {
@@ -3857,6 +3931,12 @@
           "confirm": {
             "type": "boolean",
             "default": false
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3865,6 +3945,7 @@
           "id",
           "groupId",
           "occurredOn",
+          "description",
           "attendees",
           "absent",
           "version"
@@ -3882,6 +3963,12 @@
           "occurredOn": {
             "type": "string",
             "format": "date"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "attendees": {
             "type": "array",
