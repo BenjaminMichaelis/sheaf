@@ -40,7 +40,8 @@ internal static class PersonRecords
 
 /// <summary>
 /// The one definition of "people whose name matches", shared by name lookup and the possible-duplicate check when
-/// someone is added during attendance. Both return only <see cref="PersonLookupResponse"/>, never profile details.
+/// someone is created (by Staff, or during attendance). Both return only <see cref="PersonLookupResponse"/>, never
+/// profile details.
 /// </summary>
 internal static class PersonNameSearch
 {
@@ -50,19 +51,60 @@ internal static class PersonNameSearch
             ? people.Where(p => p.FirstName.StartsWith(term) || (p.LastName != null && p.LastName.StartsWith(term)))
             : people.Where(p => (p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName)).Contains(term));
 
-    /// <summary>The first <see cref="PeopleService.LookupMaxResults"/> matches in name order, with their household label.</summary>
-    public static Task<PersonLookupResponse[]> ToLookupAsync(this IQueryable<Person> matches, ApplicationDbContext db, CancellationToken ct) =>
-        matches.Top()
-            .Select(p => new PersonLookupResponse(p.Id,
-                p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
-                db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()))
+    /// <summary>
+    /// The first <see cref="PeopleService.LookupMaxResults"/> matches in name order, with their household label and,
+    /// for actors who manage every group, the groups they are in at <paramref name="now"/>.
+    /// </summary>
+    public static async Task<PersonLookupResponse[]> ToLookupAsync(this IQueryable<Person> matches, ApplicationDbContext db, ChurchActor actor, DateTimeOffset now, CancellationToken ct)
+    {
+        var rows = await matches.Top()
+            .Select(p => new
+            {
+                p.Id,
+                Name = p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
+                HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()
+            })
             .ToArrayAsync(ct);
+        var groups = await CurrentGroupsAsync(db, actor, [.. rows.Select(r => r.Id)], now, ct);
+        return [.. rows.Select(r => new PersonLookupResponse(r.Id, r.Name, r.HouseholdLabel, GroupsOf(groups, r.Id)))];
+    }
+
+    /// <summary>
+    /// Names of the active groups each person is a member or leader of at <paramref name="now"/>, in name order, or null
+    /// when the actor does not manage every group. Group membership can itself be sensitive ("Grief support"), so only
+    /// those who already see every group get it; a Leader tells similar names apart by household label alone.
+    /// </summary>
+    private static async Task<Dictionary<Guid, string[]>?> CurrentGroupsAsync(ApplicationDbContext db, ChurchActor actor, Guid[] personIds, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!TrackerScope.ManagesGroups(actor))
+            return null;
+        if (personIds.Length == 0)
+            return [];
+        var active = db.Contexts.ActiveAt(now);
+        var members =
+            from m in db.ContextMembers.CurrentAt(now)
+            join g in active on m.ContextId equals g.Id
+            where personIds.Contains(m.PersonId)
+            select new { m.PersonId, g.Name };
+        var leaders =
+            from l in db.ContextLeaders.CurrentAt(now)
+            join g in active on l.ContextId equals g.Id
+            where personIds.Contains(l.PersonId)
+            select new { l.PersonId, g.Name };
+        // Union drops a group listed twice for someone who both leads and attends it; the database orders the names.
+        var rows = await members.Union(leaders).OrderBy(r => r.Name).ToArrayAsync(ct);
+        return rows.GroupBy(r => r.PersonId).ToDictionary(g => g.Key, g => g.Select(r => r.Name).ToArray());
+    }
+
+    /// <summary>The person's current group names, empty when they are in none, or null when the actor may not see groups.</summary>
+    private static string[]? GroupsOf(Dictionary<Guid, string[]>? groups, Guid personId) =>
+        groups is null ? null : groups.GetValueOrDefault(personId, []);
 
     /// <summary>
     /// Active people matching each name, in one query: for each name at least <see cref="PeopleService.LookupMinLength"/>
     /// long, the same matches <see cref="ToLookupAsync"/> would return for it, keyed by the name's index.
     /// </summary>
-    public static async Task<SimilarPeopleResponse[]> SimilarAsync(ApplicationDbContext db, IReadOnlyList<string> names, CancellationToken ct)
+    public static async Task<SimilarPeopleResponse[]> SimilarAsync(ApplicationDbContext db, ChurchActor actor, IReadOnlyList<string> names, DateTimeOffset now, CancellationToken ct)
     {
         IQueryable<SimilarMatch>? query = null;
         for (var i = 0; i < names.Count; i++)
@@ -86,8 +128,10 @@ internal static class PersonNameSearch
         var rows = await query
             .OrderBy(m => m.Index).ThenBy(m => m.FirstName).ThenBy(m => m.LastName).ThenBy(m => m.Id)
             .ToArrayAsync(ct);
+        var groups = await CurrentGroupsAsync(db, actor, [.. rows.Select(m => m.Id).Distinct()], now, ct);
         return [.. rows.GroupBy(m => m.Index).Select(g => new SimilarPeopleResponse(g.Key,
-            [.. g.Select(m => new PersonLookupResponse(m.Id, m.LastName is null ? m.FirstName : $"{m.FirstName} {m.LastName}", m.HouseholdLabel))]))];
+            [.. g.Select(m => new PersonLookupResponse(m.Id, m.LastName is null ? m.FirstName : $"{m.FirstName} {m.LastName}", m.HouseholdLabel,
+                GroupsOf(groups, m.Id)))]))];
     }
 
     private static IQueryable<Person> Top(this IQueryable<Person> matches) =>

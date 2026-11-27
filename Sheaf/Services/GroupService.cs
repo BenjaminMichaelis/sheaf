@@ -26,29 +26,31 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
     public async Task<PagedResponse<GroupTypeResponse>> GetTypesAsync(PageRequest page, CancellationToken ct)
     {
         return await db.GroupTypes.OrderBy(t => t.Name).ThenBy(t => t.Id)
-            .Select(t => new GroupTypeResponse(t.Id, t.Name)).PageAsync(page, ct);
+            .Select(t => new GroupTypeResponse(t.Id, t.Name, t.IsRetired)).PageAsync(page, ct);
     }
 
     public async Task<GroupTypeResponse> GetTypeAsync(Guid id, CancellationToken ct)
     {
-        return await db.GroupTypes.Where(t => t.Id == id).Select(t => new GroupTypeResponse(t.Id, t.Name))
+        return await db.GroupTypes.Where(t => t.Id == id).Select(t => new GroupTypeResponse(t.Id, t.Name, t.IsRetired))
             .SingleOrDefaultAsync(ct) ?? throw Missing();
     }
 
     public async Task<GroupTypeResponse> CreateTypeAsync(GroupTypeRequest request, CancellationToken ct)
     {
-        var type = new GroupType { Name = RequiredName(request.Name) };
+        var type = new GroupType { Name = RequiredName(request.Name), IsRetired = request.IsRetired ?? false };
         db.GroupTypes.Add(type);
         await scope.SaveAsync(ct);
-        return new(type.Id, type.Name);
+        return new(type.Id, type.Name, type.IsRetired);
     }
 
     public async Task<GroupTypeResponse> UpdateTypeAsync(Guid id, GroupTypeRequest request, CancellationToken ct)
     {
         var type = await db.GroupTypes.SingleOrDefaultAsync(t => t.Id == id, ct) ?? throw Missing();
         type.Name = RequiredName(request.Name);
+        // An omitted IsRetired keeps the current value, so renaming never brings a retired type back by accident.
+        type.IsRetired = request.IsRetired ?? type.IsRetired;
         await scope.SaveAsync(ct);
-        return new(type.Id, type.Name);
+        return new(type.Id, type.Name, type.IsRetired);
     }
 
     public async Task<PagedResponse<GroupResponse>> GetGroupsAsync(PageRequest page, CancellationToken ct)
@@ -66,8 +68,14 @@ public sealed class GroupService(ApplicationDbContext db, TrackerScope scope) : 
         if (request.StartsAt == default)
             throw Invalid();
         // A type from another church is filtered out by tenancy, so it reads as not found rather than revealing it exists.
-        if (request.GroupTypeId is { } typeId && !await db.GroupTypes.AnyAsync(t => t.Id == typeId, ct))
-            throw Missing();
+        if (request.GroupTypeId is { } typeId)
+        {
+            var retired = await db.GroupTypes.Where(t => t.Id == typeId).Select(t => (bool?)t.IsRetired).SingleOrDefaultAsync(ct)
+                ?? throw Missing();
+            // A group keeps a type retired after it was given; only giving a retired type to a group is refused.
+            if (retired && group.GroupTypeId != typeId)
+                throw Invalid();
+        }
         group.StartsAt = request.StartsAt;
         group.GroupTypeId = request.GroupTypeId;
     }

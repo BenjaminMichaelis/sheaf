@@ -128,7 +128,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Find up to 20 active people by name (2+ characters), returning only name and household label */
+        /** Find up to 20 active people by name (2+ characters), returning only name, household label, and current group names */
         get: operations["LookupPeople"];
         put?: never;
         post?: never;
@@ -145,7 +145,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a scoped Person profile */
+        /** Get a Person's basic profile with household members' first names */
         get: operations["GetPerson"];
         /** Update a scoped Person profile without changing account links */
         put: operations["UpdatePerson"];
@@ -200,7 +200,7 @@ export interface paths {
         };
         /** Get a church-local group type */
         get: operations["GetGroupType"];
-        /** Staff rename a group type */
+        /** Staff rename or retire a group type; groups keep a retired type, but no group can be given it */
         put: operations["UpdateGroupType"];
         post?: never;
         delete?: never;
@@ -428,7 +428,7 @@ export interface paths {
         };
         /** Get a meeting with who came and which roster members were absent */
         get: operations["GetGroupSession"];
-        /** Replace who came to a meeting; people taken off the list are kept as history */
+        /** Replace who came to a meeting and its description; people taken off the list are kept as history */
         put: operations["UpdateGroupSessionAttendees"];
         post?: never;
         delete?: never;
@@ -461,9 +461,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get the selected church's name and the time zone its meeting dates are kept in */
+        /** Get the selected church's name, the time zone its meeting dates are kept in, and its group labels */
         get: operations["GetChurchSettings"];
-        /** Admins set the IANA time zone the church's meeting dates are kept in */
+        /** Admins set the church's time zone and its own words for a group; omitted labels reset to Group/Groups */
         put: operations["UpdateChurchSettings"];
         post?: never;
         delete?: never;
@@ -514,6 +514,7 @@ export interface components {
             newPeople?: null | components["schemas"]["PersonRequest"][];
             /** @default false */
             confirm: boolean;
+            description?: null | string;
         };
         ChurchInfo: {
             /** Format: uuid */
@@ -525,10 +526,14 @@ export interface components {
         ChurchMembershipRole: "Leader" | "Coordinator" | "Staff" | "Admin";
         ChurchSettingsRequest: {
             timeZoneId: string;
+            groupLabel?: null | string;
+            groupLabelPlural?: null | string;
         };
         ChurchSettingsResponse: {
             name: string;
             timeZoneId: string;
+            groupLabel: string;
+            groupLabelPlural: string;
         };
         EndRequest: {
             /** Format: date-time */
@@ -556,11 +561,13 @@ export interface components {
         };
         GroupTypeRequest: {
             name: string;
+            isRetired?: null | boolean;
         };
         GroupTypeResponse: {
             /** Format: uuid */
             id: string;
             name: string;
+            isRetired: boolean;
         };
         HouseholdMemberResponse: {
             /** Format: uuid */
@@ -625,6 +632,7 @@ export interface components {
             id: string;
             name: string;
             householdLabel: null | string;
+            groups: null | string[];
         };
         PersonRequest: {
             firstName: string;
@@ -643,7 +651,10 @@ export interface components {
             phone: null | string;
             /** Format: uuid */
             householdId: null | string;
+            householdLabel: null | string;
+            householdMembers: components["schemas"]["HouseholdMemberResponse"][];
             isActive: boolean;
+            canEdit: boolean;
             /** Format: uuid */
             version: string;
         };
@@ -672,6 +683,7 @@ export interface components {
             newPeople?: null | components["schemas"]["PersonRequest"][];
             /** @default false */
             confirm: boolean;
+            description?: null | string;
         };
         SessionResponse: {
             /** Format: uuid */
@@ -680,6 +692,7 @@ export interface components {
             groupId: string;
             /** Format: date */
             occurredOn: string;
+            description: null | string;
             attendees: components["schemas"]["SessionPersonResponse"][];
             absent: components["schemas"]["SessionPersonResponse"][];
             /** Format: uuid */
@@ -1107,7 +1120,9 @@ export interface operations {
     };
     CreatePerson: {
         parameters: {
-            query?: never;
+            query?: {
+                confirm?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

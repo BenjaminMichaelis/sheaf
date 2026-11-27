@@ -12,7 +12,7 @@ namespace Sheaf.Services;
 /// </summary>
 public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurchActor currentActor, TimeProvider clock, ILogger<TrackerScope> logger)
 {
-    /// <summary>How long after attending one of a Leader's groups a person's full profile stays visible to that Leader.</summary>
+    /// <summary>How long after attending one of a Leader's groups a person's basic profile stays visible to that Leader.</summary>
     public const int AttendanceVisibilityDays = 90;
     /// <summary>How long after creating a person a Leader may still correct their details.</summary>
     public const int CreatorEditDays = 7;
@@ -64,9 +64,9 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
         if (ManagesGroups(actor))
             return db.Contexts;
         var now = Now;
-        return db.Contexts.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now)
-            && db.ContextLeaders.Any(l => l.ContextId == g.Id && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)
-                && db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId)));
+        var leading = db.ContextLeaders.CurrentAt(now)
+            .Where(l => db.People.Any(p => p.Id == l.PersonId && p.UserId == actor.UserId));
+        return db.Contexts.ActiveAt(now).Where(g => leading.Any(l => l.ContextId == g.Id));
     }
 
     /// <summary>
@@ -79,10 +79,10 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
             return db.People;
         var groups = Groups(actor).Select(g => g.Id);
         var now = Now;
-        return db.People.Where(p => db.ContextMembers.Any(m => m.PersonId == p.Id && groups.Contains(m.ContextId)
-                && m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now))
-            || db.ContextLeaders.Any(l => l.PersonId == p.Id && groups.Contains(l.ContextId)
-                && l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now)));
+        var members = db.ContextMembers.CurrentAt(now);
+        var leaders = db.ContextLeaders.CurrentAt(now);
+        return db.People.Where(p => members.Any(m => m.PersonId == p.Id && groups.Contains(m.ContextId))
+            || leaders.Any(l => l.PersonId == p.Id && groups.Contains(l.ContextId)));
     }
 
     /// <summary>
@@ -101,7 +101,7 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     }
 
     /// <summary>
-    /// People whose profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
+    /// People whose basic profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
     /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
     /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
     /// </summary>
@@ -193,9 +193,31 @@ public static class EntityTag
     }
 }
 
+/// <summary>
+/// The one definition of "current" for groups, memberships, and leaderships. Access rules and lookups share it, so a
+/// person is never shown as in a group they cannot be reached through, or the reverse.
+/// </summary>
+internal static class TrackerPeriods
+{
+    /// <summary>Groups that have started and not yet ended at <paramref name="now"/>.</summary>
+    public static IQueryable<Context> ActiveAt(this IQueryable<Context> groups, DateTimeOffset now) =>
+        groups.Where(g => g.StartsAt <= now && (g.EndsAt == null || g.EndsAt > now));
+
+    /// <summary>Memberships that have begun and not yet ended at <paramref name="now"/>.</summary>
+    public static IQueryable<ContextMember> CurrentAt(this IQueryable<ContextMember> members, DateTimeOffset now) =>
+        members.Where(m => m.JoinedAt <= now && (m.LeftAt == null || m.LeftAt > now));
+
+    /// <summary>Leaderships that have begun and not yet ended at <paramref name="now"/>.</summary>
+    public static IQueryable<ContextLeader> CurrentAt(this IQueryable<ContextLeader> leaders, DateTimeOffset now) =>
+        leaders.Where(l => l.StartsAt <= now && (l.EndsAt == null || l.EndsAt > now));
+}
+
 /// <summary>Shared tracker failures and input normalization.</summary>
 internal static class TrackerRules
 {
+    /// <summary>The trimmed value, or null when it is missing or only whitespace.</summary>
+    public static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     public static TrackerException Missing() => new(TrackerFailure.NotFound);
     public static TrackerException Denied() => new(TrackerFailure.Forbidden);
     public static TrackerException Invalid() => new(TrackerFailure.InvalidInput);
@@ -214,11 +236,8 @@ internal static class TrackerRules
 
     public static string? Optional(string? value, int length)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return null;
-        if (value.Trim().Length > length)
-            throw Invalid();
-        return value.Trim();
+        var trimmed = Trimmed(value);
+        return trimmed?.Length > length ? throw Invalid() : trimmed;
     }
 
     /// <summary>Throws PreconditionFailed unless the loaded version is the one the client read.</summary>

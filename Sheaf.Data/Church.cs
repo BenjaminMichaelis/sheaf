@@ -21,4 +21,19 @@ public class Church
     /// </summary>
     [MaxLength(64)]
     public required string TimeZoneId { get; set; }
+
+    /// <summary>
+    /// The church's word for one group, such as "Village", or null for <see cref="DefaultGroupLabel"/>. Only a display
+    /// label: every church's groups work the same way. Set together with <see cref="GroupLabelPlural"/>.
+    /// </summary>
+    [MaxLength(MaxLabelLength)]
+    public string? GroupLabel { get; set; }
+
+    /// <summary>The church's word for several groups, such as "Villages", or null for <see cref="DefaultGroupLabelPlural"/>.</summary>
+    [MaxLength(MaxLabelLength)]
+    public string? GroupLabelPlural { get; set; }
+
+    public const string DefaultGroupLabel = "Group";
+    public const string DefaultGroupLabelPlural = "Groups";
+    public const int MaxLabelLength = 50;
 }
