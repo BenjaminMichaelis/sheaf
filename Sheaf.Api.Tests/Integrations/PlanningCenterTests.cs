@@ -585,23 +585,26 @@ public class PlanningCenterTests : ChurchApiTestBase
         }
     }
 
-    // ---- OAuth client ----
-
     [Test]
-    public async Task DisconnectPlanningCenter_ChangedByAnotherAdminMeanwhile_ReturnsConflictAndKeepsTheirChange()
+    public async Task DisconnectPlanningCenter_ChangedByAnotherAdminMeanwhile_ReturnsConflictWithoutRevoking()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
         using (client)
         {
             await ConnectAsync(client, admin, "connected");
+            // Another admin reconnects meanwhile; Planning Center may have handed them the same grant.
             ConflictOnNextSave(admin.ChurchId);
 
             using HttpResponseMessage response = await SendAsync(client, admin, HttpMethod.Delete, "");
 
             await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
+            await Assert.That(RevokedTokens()).IsEmpty();
             await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Active);
+            await Assert.That(await StoredAccessTokenAsync(admin.ChurchId)).IsEqualTo("access-connected");
         }
     }
+
+    // ---- OAuth client ----
 
     [Test]
     public async Task TryRevokeAsync_SuccessWithEmptyBody_ReturnsTrue()
@@ -682,6 +685,7 @@ public class PlanningCenterTests : ChurchApiTestBase
         });
         return token;
     }
+
     private async Task<(HttpClient Client, Session Session)> SignInToChurchAsync(Guid churchId, ChurchMembershipRole role)
     {
         ApplicationUser user = await CreateUserAsync();

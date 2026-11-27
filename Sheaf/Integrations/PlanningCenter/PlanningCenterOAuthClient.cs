@@ -6,8 +6,8 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 namespace Sheaf.Integrations.PlanningCenter;
 
 /// <summary>Planning Center refused an OAuth request. <see cref="Error"/> is the OAuth error code when one was returned.</summary>
-public sealed class PlanningCenterOAuthException(string? error, int statusCode, string? detail = null)
-    : Exception($"Planning Center OAuth request failed with status {statusCode} ({error ?? "no error code"}){(detail is null ? "" : ": " + detail)}.")
+public sealed class PlanningCenterOAuthException(string? error, int statusCode)
+    : Exception($"Planning Center OAuth request failed with status {statusCode} ({error ?? "no error code"}).")
 {
     public string? Error { get; } = error;
 

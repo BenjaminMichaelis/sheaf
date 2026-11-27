@@ -42,7 +42,7 @@ internal sealed class ChurchQueryEndpointFilter : IEndpointFilter
         {
             return TypedResults.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["churchId"] = ["The selected church's id is required."]
+                ["churchId"] = ["The selected church's id is required, as a GUID."]
             });
         }
         return ChurchProblems.IsSelected(context.HttpContext, churchId)

@@ -147,24 +147,24 @@ public sealed partial class PlanningCenterConnectionService(
         if (connection is null)
             return true;
 
-        // Once the revoke starts, finish forgetting the tokens even if the browser goes away; otherwise the row would stay
-        // Active holding a revoked grant.
-        CancellationToken ct = CancellationToken.None;
         db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
-            .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
-        if (store.Read(connection) is { } stored)
-            await oauth.TryRevokeAsync(stored.RefreshToken, ct);
+            .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(requestAborted));
+        string? refreshToken = store.Read(connection)?.RefreshToken;
         connection.Disconnect();
+        // Forget first, revoke second: if another admin's connect saved meanwhile (possibly holding the same grant), this
+        // save fails and nothing is revoked. Once saved, finish the revoke even if the browser goes away.
         try
         {
-            await db.SaveChangesAsync(ct);
-            return true;
+            await db.SaveChangesAsync(requestAborted);
         }
         catch (DbUpdateConcurrencyException)
         {
             // Another admin's connect or disconnect saved first; its result stands and this admin can retry.
             return false;
         }
+        if (refreshToken is not null)
+            await oauth.TryRevokeAsync(refreshToken, CancellationToken.None);
+        return true;
     }
 
     private async Task<ChurchActor> RequireActorAsync(CancellationToken ct) =>

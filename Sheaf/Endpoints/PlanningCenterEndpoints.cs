@@ -25,9 +25,10 @@ public static class PlanningCenterEndpoints
         // (PlanningCenterAuthenticationDefaults.CallbackPath, answered by the handler), which redirects to the frontend
         // with the outcome. Being a navigation it has no church header or Origin, so filters require the selected
         // churchId and a navigation from Sheaf itself.
-        // churchId is read by ChurchQueryEndpointFilter; declaring it documents the query parameter in OpenAPI.
+        // churchId is checked by ChurchQueryEndpointFilter; declaring it documents the query parameter in OpenAPI. It is
+        // nullable so a missing value reaches the filter instead of failing binding first.
         church.MapGet("/connect", async Task<Results<ChallengeHttpResult, ProblemHttpResult>> (
-                    Guid churchId, PlanningCenterConnectionService service, IOptions<PlanningCenterOptions> options,
+                    Guid? churchId, PlanningCenterConnectionService service, IOptions<PlanningCenterOptions> options,
                     CancellationToken ct) =>
                 options.Value.IsConfigured
                     ? TypedResults.Challenge(await service.BeginConnectAsync(ct), [PlanningCenterAuthenticationDefaults.Scheme])

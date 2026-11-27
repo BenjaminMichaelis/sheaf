@@ -2936,8 +2936,8 @@ export interface operations {
     };
     ConnectPlanningCenter: {
         parameters: {
-            query: {
-                churchId: string;
+            query?: {
+                churchId?: string;
             };
             header?: never;
             path?: never;
