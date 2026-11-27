@@ -14,6 +14,9 @@ namespace Sheaf.Data;
 /// </summary>
 public sealed class ChurchIntegration : ITenanted
 {
+    public const int ExternalIdMaxLength = 100;
+    public const int NameMaxLength = 200;
+
     [DatabaseGenerated(DatabaseGeneratedOption.None)]
     public Guid Id { get; private set; } = Guid.CreateVersion7();
 
@@ -28,17 +31,17 @@ public sealed class ChurchIntegration : ITenanted
     /// Uniqueness across churches is enforced by <see cref="IntegrationTenantLink"/>, not here, so this tenanted row has
     /// no cross-church index.
     /// </summary>
-    [MaxLength(100)]
+    [MaxLength(ExternalIdMaxLength)]
     public string? ExternalTenantId { get; set; }
 
-    [MaxLength(200)]
+    [MaxLength(NameMaxLength)]
     public string? ExternalTenantName { get; set; }
 
     /// <summary>The provider account whose permissions the integration acts with.</summary>
-    [MaxLength(100)]
+    [MaxLength(ExternalIdMaxLength)]
     public string? ConnectedAccountId { get; set; }
 
-    [MaxLength(200)]
+    [MaxLength(NameMaxLength)]
     public string? ConnectedAccountName { get; set; }
 
     /// <summary>The Sheaf membership that connected the church. Not a foreign key, so the record survives the membership.</summary>
@@ -46,7 +49,7 @@ public sealed class ChurchIntegration : ITenanted
 
     public DateTimeOffset? ConnectedAt { get; set; }
 
-    [MaxLength(200)]
+    [MaxLength(NameMaxLength)]
     public string? Scopes { get; set; }
 
     /// <summary>
@@ -58,7 +61,63 @@ public sealed class ChurchIntegration : ITenanted
     /// <summary>Changes on every write, so concurrent credential refreshes cannot overwrite each other.</summary>
     [ConcurrencyCheck]
     public Guid Version { get; set; } = Guid.NewGuid();
-}
+
+    /// <summary>Records a new connection. Provider-supplied names are cut to fit their columns rather than failing the save.</summary>
+    public void Connect(
+        string externalTenantId, string? externalTenantName, string connectedAccountId, string? connectedAccountName,
+        Guid connectedByMembershipId, DateTimeOffset connectedAt, string? scopes, string protectedCredentials)
+    {
+        Status = IntegrationStatus.Active;
+        ExternalTenantId = externalTenantId;
+        ExternalTenantName = Fit(externalTenantName);
+        ConnectedAccountId = connectedAccountId;
+        ConnectedAccountName = Fit(connectedAccountName);
+        ConnectedByMembershipId = connectedByMembershipId;
+        ConnectedAt = connectedAt;
+        Scopes = Fit(scopes);
+        ReplaceCredentials(protectedCredentials);
+    }
+
+    /// <summary>Forgets the credentials and who connected; the row stays so a reconnect reuses it.</summary>
+    public void Disconnect()
+    {
+        Status = IntegrationStatus.Disconnected;
+        ExternalTenantId = null;
+        ExternalTenantName = null;
+        ConnectedAccountId = null;
+        ConnectedAccountName = null;
+        ConnectedByMembershipId = null;
+        ConnectedAt = null;
+        Scopes = null;
+        ReplaceCredentials(null);
+    }
+
+    /// <summary>Stores refreshed credentials and makes the connection usable again if it had been given up on.</summary>
+    public void Refresh(string protectedCredentials)
+    {
+        Status = IntegrationStatus.Active;
+        ReplaceCredentials(protectedCredentials);
+    }
+
+    /// <summary>Marks that an admin must connect again.</summary>
+    /// <param name="keepCredentials">
+    /// True when the credentials are unreadable rather than rejected: the status alone stops their use, and keeping the
+    /// ciphertext lets a recovered Data Protection key ring make them readable again.
+    /// </param>
+    public void RequireReauthorization(bool keepCredentials)
+    {
+        Status = IntegrationStatus.NeedsReauthorization;
+        ReplaceCredentials(keepCredentials ? ProtectedCredentials : null);
+    }
+
+    /// <summary>Every state change goes through here, so every write changes <see cref="Version"/>.</summary>
+    private void ReplaceCredentials(string? protectedCredentials)
+    {
+        ProtectedCredentials = protectedCredentials;
+        Version = Guid.NewGuid();
+    }
+
+    private static string? Fit(string? value) => value is { Length: > NameMaxLength } ? value[..NameMaxLength] : value;}
 
 /// <summary>
 /// The global registry of which church each external account is connected to. It is deliberately not tenanted, like
@@ -71,7 +130,7 @@ public sealed class IntegrationTenantLink
 {
     public IntegrationProvider Provider { get; set; }
 
-    [MaxLength(100)]
+    [MaxLength(ChurchIntegration.ExternalIdMaxLength)]
     public required string ExternalTenantId { get; set; }
 
     public Guid ChurchId { get; set; }

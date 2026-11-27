@@ -14,11 +14,38 @@ public static class ChurchEndpoints
             .AddEndpointFilter<ChurchHeaderEndpointFilter>();
 }
 
+internal static class ChurchProblems
+{
+    /// <summary>The request named a church other than the one the session has selected, such as from a stale tab.</summary>
+    public static ProblemHttpResult SelectionConflict() => TypedResults.Problem(
+        statusCode: StatusCodes.Status409Conflict,
+        type: "tag:sheaf,2026:problems/church-header-conflict",
+        title: "Church selection does not match this request.",
+        detail: "Reload the page to use the active church, then retry.");
+
+    public static bool IsSelected(HttpContext http, Guid churchId) =>
+        churchId != Guid.Empty
+        && http.User.ReadChurchClaims(out ChurchSelection? selection) == ChurchClaimState.Selected
+        && selection is not null
+        && selection.ChurchId == churchId;
+}
+
+/// <summary>
+/// For a navigation (which cannot send the church header): requires a <c>churchId</c> query value naming the selected
+/// church, so a stale tab cannot act on whichever church the session switched to.
+/// </summary>
+internal sealed class ChurchQueryEndpointFilter : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+        Guid.TryParseExact(context.HttpContext.Request.Query["churchId"], "D", out Guid churchId)
+        && ChurchProblems.IsSelected(context.HttpContext, churchId)
+            ? await next(context)
+            : ChurchProblems.SelectionConflict();
+}
+
 internal sealed class ChurchHeaderEndpointFilter : IEndpointFilter
 {
     private const string ChurchHeader = "X-Sheaf-Church";
-    private const string ConflictTitle = "Church selection does not match this request.";
-    private const string ConflictDetail = "Reload the page to use the active church, then retry.";
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -32,21 +59,11 @@ internal sealed class ChurchHeaderEndpointFilter : IEndpointFilter
         }
 
         StringValues values = http.Request.Headers[ChurchHeader];
-        if (values.Count != 1
-            || values[0] is not { Length: 36 } value
-            || !Guid.TryParseExact(value, "D", out Guid headerChurchId)
-            || headerChurchId == Guid.Empty
-            || http.User.ReadChurchClaims(out ChurchSelection? selection) != ChurchClaimState.Selected
-            || selection is null
-            || selection.ChurchId != headerChurchId)
-        {
-            return TypedResults.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                type: "tag:sheaf,2026:problems/church-header-conflict",
-                title: ConflictTitle,
-                detail: ConflictDetail);
-        }
-
-        return await next(context);
+        return values.Count == 1
+            && values[0] is { Length: 36 } value
+            && Guid.TryParseExact(value, "D", out Guid headerChurchId)
+            && ChurchProblems.IsSelected(http, headerChurchId)
+                ? await next(context)
+                : ChurchProblems.SelectionConflict();
     }
 }

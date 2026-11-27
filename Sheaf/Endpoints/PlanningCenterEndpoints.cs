@@ -2,19 +2,12 @@ using Microsoft.AspNetCore.Http.HttpResults;
 
 using Sheaf.Authorization;
 using Sheaf.Integrations.PlanningCenter;
+using Sheaf.Middleware;
 
 namespace Sheaf.Endpoints;
 
 public static class PlanningCenterEndpoints
 {
-    /// <summary>
-    /// The default callback, registered with Planning Center as the redirect URI. Microsoft's OpenID Connect handler
-    /// answers it (<see cref="PlanningCenterAuthenticationDefaults.Scheme"/>), so no endpoint is mapped here.
-    /// </summary>
-    public const string CallbackPath = "/api/integrations/planning-center/callback";
-
-    public const string OutcomeQueryName = "planningCenter";
-
     public static void MapPlanningCenter(this IEndpointRouteBuilder app)
     {
         var church = app.MapChurchGroup()
@@ -27,39 +20,26 @@ public static class PlanningCenterEndpoints
             .WithName("GetPlanningCenterStatus")
             .WithSummary("Whether Planning Center is configured and connected for the current church");
 
-        // A top-level browser navigation: the handler redirects to Planning Center, which returns to the callback, which
-        // redirects to the frontend with the outcome. The challenge records the membership starting it, and only that
-        // membership can finish it. Being a GET, it carries no church header and skips the origin check, so it refuses
-        // navigations another site started (Sec-Fetch-Site) and requires the church the page is showing.
+        // A top-level browser navigation: the handler redirects to Planning Center, which returns to the callback
+        // (PlanningCenterAuthenticationDefaults.CallbackPath, answered by the handler), which redirects to the frontend
+        // with the outcome. Being a navigation it has no church header or Origin, so filters require the selected
+        // churchId and a navigation from Sheaf itself.
         church.MapGet("/connect", async Task<Results<ChallengeHttpResult, ProblemHttpResult>> (
-                    HttpContext http, Guid churchId, PlanningCenterConnectionService service, CancellationToken ct) =>
+                    Guid churchId, PlanningCenterConnectionService service, CancellationToken ct) =>
                 {
-                    // same-site stays allowed: the frontend may be a different origin on the same site (in development,
-                    // another localhost port), and a navigation carries no Origin header to check against AllowedOrigins.
-                    // Planning Center's consent screen still stands between any start and a connection.
-                    if (http.Request.Headers["Sec-Fetch-Site"] == "cross-site")
-                    {
-                        return TypedResults.Problem(statusCode: StatusCodes.Status403Forbidden,
-                            title: "Connecting Planning Center must start from Sheaf.");
-                    }
                     try
                     {
                         return TypedResults.Challenge(
-                            await service.BeginConnectAsync(churchId, ct), [PlanningCenterAuthenticationDefaults.Scheme]);
+                            await service.BeginConnectAsync(ct), [PlanningCenterAuthenticationDefaults.Scheme]);
                     }
                     catch (PlanningCenterException exception) when (exception.Failure == PlanningCenterFailure.NotConfigured)
                     {
                         return TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
                             title: "Planning Center is not configured for this Sheaf installation.");
                     }
-                    catch (PlanningCenterException exception) when (exception.Failure == PlanningCenterFailure.ChurchMismatch)
-                    {
-                        return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict,
-                            type: "tag:sheaf,2026:problems/church-header-conflict",
-                            title: "Church selection does not match this request.",
-                            detail: "Reload the page to use the active church, then retry.");
-                    }
                 })
+            .AddEndpointFilter<NavigationOriginEndpointFilter>()
+            .AddEndpointFilter<ChurchQueryEndpointFilter>()
             .Produces(StatusCodes.Status302Found)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)

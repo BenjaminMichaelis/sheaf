@@ -45,6 +45,7 @@ public static class PlanningCenterServiceCollectionExtensions
         services.AddSingleton<PlanningCenterOAuthClient>();
         services.TryAddSingleton<IntegrationCredentialProtector>();
         services.TryAddSingleton<IntegrationRefreshLocks>();
+        services.AddScoped<PlanningCenterConnectionStore>();
         services.AddScoped<PlanningCenterConnectionService>();
         services.AddScoped<PlanningCenterTokenProvider>();
         return services;

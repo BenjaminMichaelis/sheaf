@@ -47,9 +47,9 @@ public sealed class PlanningCenterOptions
 
 /// <summary>
 /// Fails startup on settings that would otherwise fail quietly: a half-configured OAuth application reports itself
-/// unconfigured, a missing return URL strands the admin after connecting, and outside Development and Testing a
-/// User-Agent without contact details may be refused by Planning Center ("app name plus a URL or email", per its
-/// authentication docs).
+/// unconfigured, a missing return URL strands the admin after connecting, a malformed User-Agent would only fail on the
+/// first request, and outside Development a User-Agent without contact details may be refused by Planning Center ("app
+/// name plus a URL or email", per its authentication docs).
 /// </summary>
 public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment) : IValidateOptions<PlanningCenterOptions>
 {
@@ -74,12 +74,24 @@ public sealed class PlanningCenterOptionsValidator(IHostEnvironment environment)
             return ValidateOptionsResult.Fail(
                 "PlanningCenter:ReturnUrl must name the frontend page to return to after connecting.");
         }
-        if (!environment.IsDevelopment() && !environment.IsEnvironment("Testing") && !HasContact(options.UserAgent))
+        if (!IsValidUserAgent(options.UserAgent))
+        {
+            return ValidateOptionsResult.Fail(
+                "PlanningCenter:UserAgent is not a valid User-Agent header value, such as \"Sheaf (ops@example.org)\".");
+        }
+        if (!environment.IsDevelopment() && !HasContact(options.UserAgent))
         {
             return ValidateOptionsResult.Fail(
                 "PlanningCenter:UserAgent must name the app and a contact URL or email, such as \"Sheaf (ops@example.org)\".");
         }
         return ValidateOptionsResult.Success;
+    }
+
+    /// <summary>Parses the value as the HTTP client will when it sets the header, so a bad value fails at start.</summary>
+    private static bool IsValidUserAgent(string userAgent)
+    {
+        using HttpRequestMessage probe = new();
+        return probe.Headers.UserAgent.TryParseAdd(userAgent);
     }
 
     private static bool HasContact(string? userAgent) =>

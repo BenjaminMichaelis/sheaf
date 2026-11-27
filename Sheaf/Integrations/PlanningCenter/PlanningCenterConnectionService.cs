@@ -42,18 +42,21 @@ public enum PlanningCenterConnectOutcome
 /// <summary>Connects and disconnects the current church. Every call runs as the signed-in church actor.</summary>
 public sealed partial class PlanningCenterConnectionService(
     ApplicationDbContext db,
+    PlanningCenterConnectionStore store,
     ICurrentChurchActor currentActor,
     PlanningCenterOAuthClient oauth,
-    IntegrationCredentialProtector credentials,
     IOptions<PlanningCenterOptions> options,
     TimeProvider clock,
     ILogger<PlanningCenterConnectionService> logger)
 {
-    internal const IntegrationProvider Provider = IntegrationProvider.PlanningCenter;
+    private const IntegrationProvider Provider = PlanningCenterConnectionStore.Provider;
+
+    /// <summary>The most times <see cref="DisconnectAsync"/> re-reads and retries after another writer changed the row.</summary>
+    private const int MaxDisconnectAttempts = 5;
 
     public async Task<PlanningCenterStatusResponse> GetStatusAsync(CancellationToken ct)
     {
-        ChurchIntegration? connection = await FindConnection(db).AsNoTracking().SingleOrDefaultAsync(ct);
+        ChurchIntegration? connection = await store.Connection.AsNoTracking().SingleOrDefaultAsync(ct);
         return connection is null
             ? new(options.Value.IsConfigured, IntegrationStatus.Disconnected, null, null, null)
             : new(options.Value.IsConfigured, connection.Status, connection.ExternalTenantName, connection.ConnectedAccountName, connection.ConnectedAt);
@@ -61,35 +64,24 @@ public sealed partial class PlanningCenterConnectionService(
 
     /// <summary>
     /// The properties for a challenge to <see cref="PlanningCenterAuthenticationDefaults.Scheme"/>. They record the
-    /// membership starting the connection; the handler encrypts them into the OAuth state.
+    /// membership starting the connection; the handler encrypts them into the OAuth state, and only that membership can
+    /// finish it (checked by <see cref="PlanningCenterOpenIdConnectEvents"/> before the code is exchanged).
     /// </summary>
-    /// <param name="expectedChurchId">The church the page starting the connection shows; it must be the selected one.</param>
-    public async Task<AuthenticationProperties> BeginConnectAsync(Guid expectedChurchId, CancellationToken ct)
+    /// <exception cref="PlanningCenterException">Sheaf has no Planning Center application configured.</exception>
+    public async Task<AuthenticationProperties> BeginConnectAsync(CancellationToken ct)
     {
         if (!options.Value.IsConfigured)
             throw new PlanningCenterException(PlanningCenterFailure.NotConfigured);
         ChurchActor actor = await RequireActorAsync(ct);
-        if (actor.ChurchId != expectedChurchId)
-            throw new PlanningCenterException(PlanningCenterFailure.ChurchMismatch);
-        AuthenticationProperties properties = new();
-        properties.Items[PlanningCenterAuthenticationDefaults.ChurchIdKey] = actor.ChurchId.ToString("D");
-        properties.Items[PlanningCenterAuthenticationDefaults.MembershipIdKey] = actor.MembershipId.ToString("D");
-        return properties;
+        return PlanningCenterConnectionStart.ToProperties(new(actor.ChurchId, actor.MembershipId));
     }
 
-    /// <summary>Links the church to the organization in a grant the OpenID Connect handler has validated.</summary>
-    public async Task<PlanningCenterConnectOutcome> CompleteConnectAsync(
-        Guid startedByChurchId, Guid startedByMembershipId, PlanningCenterGrant grant, CancellationToken requestAborted)
+    /// <summary>Links the current church to the organization in a grant the OpenID Connect handler has validated.</summary>
+    public async Task<PlanningCenterConnectOutcome> CompleteConnectAsync(PlanningCenterGrant grant, CancellationToken requestAborted)
     {
         ChurchActor actor = await RequireActorAsync(requestAborted);
         // The grant is live in Planning Center already, so the browser going away must not drop it unsaved and unrevoked.
         CancellationToken ct = CancellationToken.None;
-        // The connection must be finished by the membership that started it, so a callback link sent to someone else fails.
-        if (startedByChurchId != actor.ChurchId || startedByMembershipId != actor.MembershipId)
-        {
-            await TryRevokeAsync(grant.RefreshToken, ct);
-            return PlanningCenterConnectOutcome.InvalidRequest;
-        }
 
         IntegrationTenantLink? claim = await db.IntegrationTenantLinks.FindAsync([Provider, grant.OrganizationId], ct);
         // The new token is deliberately not revoked when another church holds the organization. Planning Center does not
@@ -105,27 +97,19 @@ public sealed partial class PlanningCenterConnectionService(
         if (claim is null)
             db.IntegrationTenantLinks.Add(new() { Provider = Provider, ExternalTenantId = grant.OrganizationId, ChurchId = actor.ChurchId });
 
-        ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(ct);
+        ChurchIntegration? connection = await store.Connection.SingleOrDefaultAsync(ct);
         if (connection is null)
         {
             connection = new ChurchIntegration { Provider = Provider };
             db.ChurchIntegrations.Add(connection);
         }
-        string? replacedRefreshToken = credentials
-            .TryUnprotect<PlanningCenterCredentials>(Provider, connection.ProtectedCredentials)?.RefreshToken;
+        string? replacedRefreshToken = store.Read(connection)?.RefreshToken;
 
         DateTimeOffset now = clock.GetUtcNow();
-        connection.Status = IntegrationStatus.Active;
-        connection.ExternalTenantId = grant.OrganizationId;
-        // Provider-supplied text is cut to fit its column rather than failing the save.
-        connection.ExternalTenantName = Truncate(grant.OrganizationName, 200);
-        connection.ConnectedAccountId = Truncate(grant.PersonId, 100);
-        connection.ConnectedAccountName = Truncate(grant.PersonName, 200);
-        connection.ConnectedByMembershipId = actor.MembershipId;
-        connection.ConnectedAt = now;
-        connection.Scopes = Truncate(options.Value.Scopes, 200);
-        SetCredentials(connection,
-            new PlanningCenterCredentials(grant.AccessToken, grant.AccessTokenExpiresAt, grant.RefreshToken, now), credentials);
+        connection.Connect(
+            grant.OrganizationId, grant.OrganizationName, grant.PersonId, grant.PersonName, actor.MembershipId, now,
+            options.Value.Scopes,
+            store.Protect(new PlanningCenterCredentials(grant.AccessToken, grant.AccessTokenExpiresAt, grant.RefreshToken, now)));
 
         try
         {
@@ -152,16 +136,14 @@ public sealed partial class PlanningCenterConnectionService(
 
         // Planning Center may hand back the same grant on a repeat authorization; never revoke the one just stored.
         if (replacedRefreshToken is not null && replacedRefreshToken != grant.RefreshToken)
-            await TryRevokeAsync(replacedRefreshToken, ct);
+            await oauth.TryRevokeAsync(replacedRefreshToken, ct);
         LogConnected(actor.ChurchId, grant.OrganizationId);
         return PlanningCenterConnectOutcome.Connected;
     }
 
-    /// <summary>The most times <see cref="DisconnectAsync"/> re-reads and retries after another writer changed the row.</summary>
-    internal const int MaxDisconnectAttempts = 5;
-
     /// <summary>
     /// Revokes Sheaf's access in Planning Center and forgets the tokens and who connected. Disconnecting twice is harmless.
+    /// A failed revoke does not stop the disconnect: the token still expires in Planning Center, and the client logs it.
     /// </summary>
     public async Task DisconnectAsync(CancellationToken requestAborted)
     {
@@ -171,24 +153,15 @@ public sealed partial class PlanningCenterConnectionService(
         CancellationToken ct = CancellationToken.None;
         for (int attempt = 1; ; attempt++)
         {
-            ChurchIntegration? connection = await FindConnection(db).SingleOrDefaultAsync(ct);
+            ChurchIntegration? connection = await store.Connection.SingleOrDefaultAsync(ct);
             if (connection is null)
                 return;
             db.IntegrationTenantLinks.RemoveRange(await db.IntegrationTenantLinks
                 .Where(link => link.Provider == Provider && link.ChurchId == actor.ChurchId).ToListAsync(ct));
 
-            if (credentials.TryUnprotect<PlanningCenterCredentials>(Provider, connection.ProtectedCredentials) is { } stored)
-                await TryRevokeAsync(stored.RefreshToken, ct);
-
-            connection.Status = IntegrationStatus.Disconnected;
-            connection.ExternalTenantId = null;
-            connection.ExternalTenantName = null;
-            connection.ConnectedAccountId = null;
-            connection.ConnectedAccountName = null;
-            connection.ConnectedByMembershipId = null;
-            connection.ConnectedAt = null;
-            connection.Scopes = null;
-            SetCredentials(connection, null, credentials);
+            if (store.Read(connection) is { } stored)
+                await oauth.TryRevokeAsync(stored.RefreshToken, ct);
+            connection.Disconnect();
             try
             {
                 await db.SaveChangesAsync(ct);
@@ -203,23 +176,8 @@ public sealed partial class PlanningCenterConnectionService(
         }
     }
 
-    /// <summary>The current church's Planning Center row; the tenant filter supplies the church.</summary>
-    internal static IQueryable<ChurchIntegration> FindConnection(ApplicationDbContext db) =>
-        db.ChurchIntegrations.Where(integration => integration.Provider == Provider);
-
-    /// <summary>Stores new credentials, or clears them when null, and bumps the concurrency version.</summary>
-    internal static void SetCredentials(
-        ChurchIntegration connection, PlanningCenterCredentials? value, IntegrationCredentialProtector credentials)
-    {
-        connection.ProtectedCredentials = value is null ? null : credentials.Protect(Provider, value);
-        connection.Version = Guid.NewGuid();
-    }
-
     private async Task<ChurchActor> RequireActorAsync(CancellationToken ct) =>
         await currentActor.GetAsync(ct) ?? throw new UnauthorizedAccessException("A church actor is required.");
-
-    private static string? Truncate(string? value, int maxLength) =>
-        value is { Length: var length } && length > maxLength ? value[..maxLength] : value;
 
     /// <summary>
     /// Revokes a grant that was not saved, unless the church's stored row holds the same refresh token: Planning Center
@@ -227,20 +185,10 @@ public sealed partial class PlanningCenterConnectionService(
     /// </summary>
     private async Task RevokeUnlessStoredAsync(string refreshToken, CancellationToken ct)
     {
-        string? stored = await FindConnection(db).AsNoTracking()
+        string? stored = await store.Connection.AsNoTracking()
             .Select(integration => integration.ProtectedCredentials).SingleOrDefaultAsync(ct);
-        if (credentials.TryUnprotect<PlanningCenterCredentials>(Provider, stored)?.RefreshToken != refreshToken)
-            await TryRevokeAsync(refreshToken, ct);
-    }
-
-    /// <summary>
-    /// Best effort: a failed revoke must not leave Sheaf holding a connection the admin asked to remove. The token
-    /// still expires in Planning Center (90 days for refresh tokens), and the client logs the failure.
-    /// </summary>
-    private async Task TryRevokeAsync(string refreshToken, CancellationToken ct)
-    {
-        // The client logs a failure with its cause.
-        await oauth.TryRevokeAsync(refreshToken, ct);
+        if (store.Read(stored)?.RefreshToken != refreshToken)
+            await oauth.TryRevokeAsync(refreshToken, ct);
     }
 
     [LoggerMessage(LogLevel.Error, "Saving a Planning Center connection failed.")]
@@ -248,5 +196,4 @@ public sealed partial class PlanningCenterConnectionService(
 
     [LoggerMessage(LogLevel.Information, "Church {ChurchId} connected to Planning Center organization {OrganizationId}.")]
     private partial void LogConnected(Guid churchId, string organizationId);
-
 }

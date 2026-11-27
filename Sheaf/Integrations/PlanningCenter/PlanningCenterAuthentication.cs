@@ -10,7 +10,6 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 using Sheaf.Authorization;
-using Sheaf.Endpoints;
 
 namespace Sheaf.Integrations.PlanningCenter;
 
@@ -19,8 +18,37 @@ public static class PlanningCenterAuthenticationDefaults
     /// <summary>The OpenID Connect scheme that runs the connect step. It never signs anyone in.</summary>
     public const string Scheme = "PlanningCenter";
 
-    internal const string ChurchIdKey = "sheaf:churchId";
-    internal const string MembershipIdKey = "sheaf:membershipId";
+    /// <summary>
+    /// The default callback, registered with Planning Center as the redirect URI. The OpenID Connect handler answers it,
+    /// so no endpoint is mapped for it.
+    /// </summary>
+    public const string CallbackPath = "/api/integrations/planning-center/callback";
+
+    /// <summary>The query parameter that carries a <see cref="PlanningCenterConnectOutcome"/> back to the frontend.</summary>
+    public const string OutcomeQueryName = "planningCenter";
+}
+
+/// <summary>The membership that started a connection. It travels in the OAuth state, which the handler encrypts.</summary>
+internal sealed record PlanningCenterConnectionStart(Guid ChurchId, Guid MembershipId)
+{
+    private const string ChurchIdKey = "sheaf:churchId";
+    private const string MembershipIdKey = "sheaf:membershipId";
+
+    public static AuthenticationProperties ToProperties(PlanningCenterConnectionStart start)
+    {
+        AuthenticationProperties properties = new();
+        properties.Items[ChurchIdKey] = start.ChurchId.ToString("D");
+        properties.Items[MembershipIdKey] = start.MembershipId.ToString("D");
+        return properties;
+    }
+
+    /// <summary>The start recorded in <paramref name="properties"/>, or null when there is none.</summary>
+    public static PlanningCenterConnectionStart? From(AuthenticationProperties? properties) =>
+        properties is not null
+        && properties.Items.TryGetValue(ChurchIdKey, out string? churchId) && Guid.TryParse(churchId, out Guid church)
+        && properties.Items.TryGetValue(MembershipIdKey, out string? membershipId) && Guid.TryParse(membershipId, out Guid membership)
+            ? new(church, membership)
+            : null;
 }
 
 /// <summary>
@@ -51,7 +79,7 @@ internal sealed class ConfigurePlanningCenterOpenIdConnect(
         options.Authority = planningCenter.BaseAddress.AbsoluteUri;
         options.ClientId = planningCenter.IsConfigured ? planningCenter.ClientId : UnconfiguredClientId;
         options.ClientSecret = planningCenter.ClientSecret;
-        options.CallbackPath = planningCenter.RedirectUri?.AbsolutePath ?? PlanningCenterEndpoints.CallbackPath;
+        options.CallbackPath = planningCenter.RedirectUri?.AbsolutePath ?? PlanningCenterAuthenticationDefaults.CallbackPath;
         options.ResponseType = OpenIdConnectResponseType.Code;
         options.ResponseMode = OpenIdConnectResponseMode.Query;
         options.UsePkce = true;
@@ -75,11 +103,18 @@ internal sealed class ConfigurePlanningCenterOpenIdConnect(
 /// <summary>
 /// Ends every return from Planning Center with a redirect to the frontend carrying the outcome, instead of signing in.
 /// <see cref="TicketReceived"/> runs after the handler has validated state, correlation, the PKCE exchange, the id
-/// token, and its nonce.
+/// token, and its nonce. The handler resolves this class from the request's services, so it takes scoped dependencies.
 /// </summary>
 internal sealed partial class PlanningCenterOpenIdConnectEvents(
-    IOptions<PlanningCenterOptions> settings, ILogger<PlanningCenterOpenIdConnectEvents> logger) : OpenIdConnectEvents
+    IOptions<PlanningCenterOptions> settings,
+    IAuthorizationService authorization,
+    ICurrentChurchActor currentActor,
+    PlanningCenterConnectionService connections,
+    PlanningCenterOAuthClient oauth,
+    ILogger<PlanningCenterOpenIdConnectEvents> logger) : OpenIdConnectEvents
 {
+    private static readonly object ReachedCodeExchangeKey = new();
+
     public override Task RedirectToIdentityProvider(RedirectContext context)
     {
         // The registered redirect URI, rather than one built from this request's host, so it matches exactly.
@@ -110,15 +145,14 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         return Task.CompletedTask;
     }
 
-    private static readonly object ReachedCodeExchangeKey = new();
-
     /// <summary>
     /// Runs after the handler has checked state and correlation and before it redeems the code, so a return that the
-    /// signed-in admin did not start is refused without exchanging anything.
+    /// signed-in admin did not start is refused without exchanging anything. This is the only place the starter is
+    /// checked; everything after it runs as that admin.
     /// </summary>
     public override async Task AuthorizationCodeReceived(AuthorizationCodeReceivedContext context)
     {
-        if (!await IsStartedByCurrentAdminAsync(context.HttpContext, context.Properties))
+        if (!await IsStartedByCurrentAdminAsync(context.HttpContext, PlanningCenterConnectionStart.From(context.Properties)))
         {
             Redirect(context.HttpContext, PlanningCenterConnectOutcome.InvalidRequest);
             context.HandleResponse();
@@ -156,38 +190,26 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
     /// The handler answers the callback before the authentication middleware reads the Sheaf cookie, so the admin
     /// finishing the connection is authenticated and authorized here, and must be the membership that started it.
     /// </summary>
-    private static async Task<bool> IsStartedByCurrentAdminAsync(HttpContext http, AuthenticationProperties? properties)
+    private async Task<bool> IsStartedByCurrentAdminAsync(HttpContext http, PlanningCenterConnectionStart? start)
     {
-        if (properties is null
-            || !TryReadGuid(properties, PlanningCenterAuthenticationDefaults.ChurchIdKey, out Guid churchId)
-            || !TryReadGuid(properties, PlanningCenterAuthenticationDefaults.MembershipIdKey, out Guid membershipId))
-        {
+        if (start is null)
             return false;
-        }
-
         AuthenticateResult signedIn = await http.AuthenticateAsync(IdentityConstants.ApplicationScheme);
         if (!signedIn.Succeeded || signedIn.Principal is null)
             return false;
         http.User = signedIn.Principal;
-        AuthorizationResult allowed = await http.RequestServices.GetRequiredService<IAuthorizationService>()
-            .AuthorizeAsync(http.User, http, SheafPolicies.ForPermission(Permission.ManageIntegrations));
+        AuthorizationResult allowed = await authorization.AuthorizeAsync(
+            http.User, http, SheafPolicies.ForPermission(Permission.ManageIntegrations));
         return allowed.Succeeded
-            && await http.RequestServices.GetRequiredService<ICurrentChurchActor>().GetAsync(http.RequestAborted) is { } actor
-            && actor.ChurchId == churchId
-            && actor.MembershipId == membershipId;
+            && await currentActor.GetAsync(http.RequestAborted) is { } actor
+            && actor.ChurchId == start.ChurchId
+            && actor.MembershipId == start.MembershipId;
     }
 
-    private static async Task<PlanningCenterConnectOutcome> CompleteAsync(TicketReceivedContext context)
+    private async Task<PlanningCenterConnectOutcome> CompleteAsync(TicketReceivedContext context)
     {
-        HttpContext http = context.HttpContext;
-        AuthenticationProperties? properties = context.Properties;
-        if (context.Principal is not { } principal
-            || properties is null
-            || !TryReadGuid(properties, PlanningCenterAuthenticationDefaults.ChurchIdKey, out Guid churchId)
-            || !TryReadGuid(properties, PlanningCenterAuthenticationDefaults.MembershipIdKey, out Guid membershipId))
-        {
+        if (context.Principal is not { } principal || context.Properties is not { } properties)
             return PlanningCenterConnectOutcome.InvalidRequest;
-        }
 
         if (properties.GetTokenValue(OpenIdConnectParameterNames.AccessToken) is not { Length: > 0 } accessToken
             || properties.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is not { Length: > 0 } refreshToken
@@ -205,26 +227,18 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
             accessToken, expiresAt, refreshToken,
             personId, principal.FindFirstValue("name"),
             organizationId, principal.FindFirstValue("organization_name"));
-        return await http.RequestServices.GetRequiredService<PlanningCenterConnectionService>()
-            .CompleteConnectAsync(churchId, membershipId, grant, http.RequestAborted);
+        return await connections.CompleteConnectAsync(grant, context.HttpContext.RequestAborted);
     }
 
     /// <summary>Revokes the refresh token this callback received, if any; the client logs a failure.</summary>
-    private static async Task<bool> RevokeNewGrantAsync(TicketReceivedContext context) =>
+    private async Task<bool> RevokeNewGrantAsync(TicketReceivedContext context) =>
         context.Properties?.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is { Length: > 0 } refreshToken
-        && await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterOAuthClient>()
-            .TryRevokeAsync(refreshToken, CancellationToken.None);
-
-    private static bool TryReadGuid(AuthenticationProperties properties, string key, out Guid value)
-    {
-        value = Guid.Empty;
-        return properties.Items.TryGetValue(key, out string? text) && Guid.TryParse(text, out value);
-    }
+        && await oauth.TryRevokeAsync(refreshToken, CancellationToken.None);
 
     private void Redirect(HttpContext http, PlanningCenterConnectOutcome outcome) =>
         http.Response.Redirect(QueryHelpers.AddQueryString(
             // Configured whenever a connection can start (validated on start); "/" only for a stray callback otherwise.
-            settings.Value.ReturnUrl ?? "/", PlanningCenterEndpoints.OutcomeQueryName, outcome.ToString()));
+            settings.Value.ReturnUrl ?? "/", PlanningCenterAuthenticationDefaults.OutcomeQueryName, outcome.ToString()));
 
     [LoggerMessage(LogLevel.Warning, "Planning Center connection did not complete.")]
     private partial void LogRemoteFailure(Exception? exception);

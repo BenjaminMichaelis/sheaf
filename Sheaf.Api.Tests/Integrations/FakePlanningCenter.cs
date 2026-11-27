@@ -56,6 +56,10 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
 
+    /// <summary>A refresh response with the given tokens.</summary>
+    public static HttpResponseMessage Tokens(string accessToken, string refreshToken) => Json(HttpStatusCode.OK,
+        $$"""{"access_token":"{{accessToken}}","token_type":"bearer","expires_in":7200,"refresh_token":"{{refreshToken}}","scope":"openid people"}""");
+
     /// <summary>A code-exchange response with the given tokens and a valid id token.</summary>
     public HttpResponseMessage CodeExchange(string accessToken, string refreshToken) => Json(HttpStatusCode.OK,
         $$"""{"access_token":"{{accessToken}}","token_type":"bearer","expires_in":7200,"refresh_token":"{{refreshToken}}","scope":"openid people","id_token":"{{IdToken()}}"}""");

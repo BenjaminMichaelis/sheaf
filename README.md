@@ -269,8 +269,9 @@ returns 503.
 - `GET /api/church/integrations/planning-center` returns the connection status.
 - `GET /api/church/integrations/planning-center/connect?churchId=<selected church>` is
   a browser navigation, not a fetch: it redirects to Planning Center. It returns 409
-  when `churchId` is not the selected church, 403 for a navigation another site
-  started (`Sec-Fetch-Site: cross-site`), and 503 when unconfigured.
+  when `churchId` is not the selected church, 403 unless the navigation comes from
+  Sheaf (`Sec-Fetch-Site: same-origin` or `none`, or a `Referer` in `AllowedOrigins`),
+  and 503 when unconfigured.
 - The callback redirects to `ReturnUrl` with `planningCenter=Connected`, `Denied`,
   `InvalidRequest`, `OrganizationInUse`, or `Failed`. Only the membership that started
   the connection can finish it, checked before the code is exchanged; a return without
