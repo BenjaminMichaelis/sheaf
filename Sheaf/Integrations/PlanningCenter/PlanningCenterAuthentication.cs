@@ -141,12 +141,11 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            LogCompleteFailed(exception);
-            if (context.Properties?.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is { Length: > 0 } refreshToken)
-            {
-                await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterOAuthClient>()
-                    .TryRevokeAsync(refreshToken, CancellationToken.None);
-            }
+            // Unconditional: with the database failing, whether this grant is the one already stored cannot be checked.
+            // Revoking a stored grant here (only possible if Planning Center returned the same grant to two concurrent
+            // connects) is recovered by the next refresh marking the connection for reconnecting.
+            bool revoked = await RevokeNewGrantAsync(context);
+            LogCompleteFailed(exception, revoked);
             outcome = PlanningCenterConnectOutcome.Failed;
         }
         Redirect(context.HttpContext, outcome);
@@ -197,6 +196,8 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
             || principal.FindFirstValue("sub") is not { Length: > 0 } personId
             || principal.FindFirstValue("organization_id") is not { Length: > 0 } organizationId)
         {
+            // Planning Center issued tokens Sheaf cannot use; release them rather than leave them live and unstored.
+            await RevokeNewGrantAsync(context);
             return PlanningCenterConnectOutcome.Failed;
         }
 
@@ -207,6 +208,12 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
         return await http.RequestServices.GetRequiredService<PlanningCenterConnectionService>()
             .CompleteConnectAsync(churchId, membershipId, grant, http.RequestAborted);
     }
+
+    /// <summary>Revokes the refresh token this callback received, if any; the client logs a failure.</summary>
+    private static async Task<bool> RevokeNewGrantAsync(TicketReceivedContext context) =>
+        context.Properties?.GetTokenValue(OpenIdConnectParameterNames.RefreshToken) is { Length: > 0 } refreshToken
+        && await context.HttpContext.RequestServices.GetRequiredService<PlanningCenterOAuthClient>()
+            .TryRevokeAsync(refreshToken, CancellationToken.None);
 
     private static bool TryReadGuid(AuthenticationProperties properties, string key, out Guid value)
     {
@@ -222,6 +229,6 @@ internal sealed partial class PlanningCenterOpenIdConnectEvents(
     [LoggerMessage(LogLevel.Warning, "Planning Center connection did not complete.")]
     private partial void LogRemoteFailure(Exception? exception);
 
-    [LoggerMessage(LogLevel.Error, "Saving a Planning Center connection failed unexpectedly; its new grant was revoked.")]
-    private partial void LogCompleteFailed(Exception exception);
+    [LoggerMessage(LogLevel.Error, "Saving a Planning Center connection failed unexpectedly. New grant revoked: {Revoked}.")]
+    private partial void LogCompleteFailed(Exception exception, bool revoked);
 }

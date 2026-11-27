@@ -673,6 +673,22 @@ public class PlanningCenterTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task PlanningCenterCallback_IdTokenWithoutOrganization_RedirectsFailedAndRevokesGrant()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            Pco.IncludeOrganization = false;
+
+            using HttpResponseMessage callback = await ConnectAsync(client, admin);
+
+            await AssertOutcomeAsync(callback, PlanningCenterConnectOutcome.Failed);
+            await Assert.That(Pco.To("/oauth/revoke").Select(r => r.Form["token"])).IsEquivalentTo(["refresh-1"]);
+            await Assert.That((await GetStatusAsync(client, admin)).Status).IsEqualTo(IntegrationStatus.Disconnected);
+        }
+    }
+
+    [Test]
     public async Task PlanningCenterCallback_DatabaseFailsWhileSaving_RedirectsFailedAndRevokesNewGrant()
     {
         var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);

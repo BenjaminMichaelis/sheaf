@@ -34,6 +34,9 @@ public sealed class FakePlanningCenter : HttpMessageHandler
 
     public string OrganizationId { get; set; } = "4242";
 
+    /// <summary>Whether id tokens carry the organization claims; false simulates a token Sheaf cannot use.</summary>
+    public bool IncludeOrganization { get; set; } = true;
+
     /// <summary>The nonce from the latest authorization request, which the next id token must carry.</summary>
     public string? Nonce { get; set; }
 
@@ -97,10 +100,13 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         {
             ["sub"] = "77",
             ["name"] = "Pat Admin",
-            ["email"] = "pat@example.com",
-            ["organization_id"] = long.Parse(OrganizationId, System.Globalization.CultureInfo.InvariantCulture),
-            ["organization_name"] = "Grace Church"
+            ["email"] = "pat@example.com"
         };
+        if (IncludeOrganization)
+        {
+            claims["organization_id"] = long.Parse(OrganizationId, System.Globalization.CultureInfo.InvariantCulture);
+            claims["organization_name"] = "Grace Church";
+        }
         if (Nonce is not null)
             claims["nonce"] = Nonce;
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
