@@ -1,11 +1,12 @@
-using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Sheaf.Api.Tests.Integrations;
@@ -70,13 +71,7 @@ public sealed class FakePlanningCenter : HttpMessageHandler
 
         return path switch
         {
-            "/.well-known/openid-configuration" => Json(HttpStatusCode.OK, $$"""
-                {"issuer":"{{Issuer}}","authorization_endpoint":"{{Issuer}}/oauth/authorize","token_endpoint":"{{Issuer}}/oauth/token",
-                 "userinfo_endpoint":"{{Issuer}}/oauth/userinfo","jwks_uri":"{{Issuer}}/oauth/discovery/keys",
-                 "response_types_supported":["code"],"response_modes_supported":["query","fragment","form_post"],
-                 "subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],
-                 "code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"]}
-                """),
+            "/.well-known/openid-configuration" => Json(HttpStatusCode.OK, Discovery),
             "/oauth/discovery/keys" => Json(HttpStatusCode.OK, Jwks()),
             "/oauth/token" => IssueTokens(form.GetValueOrDefault("grant_type") == "authorization_code"),
             "/oauth/revoke" => Json(HttpStatusCode.OK, "{}"),
@@ -120,10 +115,35 @@ public sealed class FakePlanningCenter : HttpMessageHandler
         });
     }
 
+    /// <summary>The parts of Planning Center's published discovery document that Sheaf relies on.</summary>
+    private static readonly string Discovery = OpenIdConnectConfiguration.Write(new OpenIdConnectConfiguration
+    {
+        Issuer = Issuer,
+        AuthorizationEndpoint = $"{Issuer}/oauth/authorize",
+        TokenEndpoint = $"{Issuer}/oauth/token",
+        RevocationEndpoint = $"{Issuer}/oauth/revoke",
+        JwksUri = $"{Issuer}/oauth/discovery/keys",
+        ResponseTypesSupported = { "code" },
+        ResponseModesSupported = { "query", "fragment", "form_post" },
+        SubjectTypesSupported = { "public" },
+        IdTokenSigningAlgValuesSupported = { SecurityAlgorithms.RsaSha256 },
+        CodeChallengeMethodsSupported = { "S256" },
+        TokenEndpointAuthMethodsSupported = { "client_secret_basic", "client_secret_post" }
+    });
+
+    /// <summary>The signing key set, built from the public half of the key only.</summary>
     private string Jwks()
     {
-        RSAParameters key = _rsa.ExportParameters(includePrivateParameters: false);
-        return $$"""{"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":"{{_signingKey.KeyId}}","n":"{{Base64Url.EncodeToString(key.Modulus)}}","e":"{{Base64Url.EncodeToString(key.Exponent)}}"}]}""";
+        RsaSecurityKey publicKey = new(_rsa.ExportParameters(includePrivateParameters: false)) { KeyId = _signingKey.KeyId };
+        JsonWebKey key = JsonWebKeyConverter.ConvertFromRSASecurityKey(publicKey);
+        key.Use = JsonWebKeyUseNames.Sig;
+        key.Alg = SecurityAlgorithms.RsaSha256;
+        return JsonSerializer.Serialize(new { keys = new[] { key } }, JwksJson);
     }
+
+    private static readonly JsonSerializerOptions JwksJson = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
 
 }

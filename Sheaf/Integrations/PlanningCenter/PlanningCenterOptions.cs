@@ -24,7 +24,7 @@ public sealed class PlanningCenterOptions
     /// <summary>Where the browser goes after the callback; Sheaf adds a <c>planningCenter</c> query value with the outcome.</summary>
     public string ReturnUrl { get; set; } = "/";
 
-    /// <summary><c>openid</c> lets Sheaf read the organization from the userinfo endpoint.</summary>
+    /// <summary><c>openid</c> makes Planning Center issue the id token Sheaf reads the organization from.</summary>
     public string Scopes { get; set; } = "openid people";
 
     /// <summary>Planning Center requires a User-Agent that identifies the application.</summary>

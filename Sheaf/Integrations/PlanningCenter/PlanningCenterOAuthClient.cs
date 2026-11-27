@@ -1,8 +1,10 @@
-using System.Net.Http.Json;
+using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace Sheaf.Integrations.PlanningCenter;
 
@@ -50,41 +52,52 @@ public sealed class PlanningCenterOAuthException(
 }
 
 /// <summary>
-/// Refreshes and revokes Planning Center tokens; the connect step itself runs in the OpenID Connect handler
-/// (<see cref="PlanningCenterAuthenticationDefaults.Scheme"/>), which has no refresh or revoke. Token requests are not
-/// retried: a refresh rotates the refresh token, so a blind retry could burn the only valid credential.
+/// Refreshes and revokes Planning Center tokens. The connect step runs in the OpenID Connect handler
+/// (<see cref="PlanningCenterAuthenticationDefaults.Scheme"/>), which has no refresh or revoke, so this follows the
+/// handler's own code redemption: endpoints from the handler's discovery document, its client credentials and
+/// backchannel, an <see cref="OpenIdConnectMessage"/> posted as a form and parsed from the JSON response. Token
+/// requests are not retried: a refresh rotates the refresh token, so a blind retry could burn the only valid credential.
 /// </summary>
-public sealed class PlanningCenterOAuthClient(IHttpClientFactory httpClients, IOptions<PlanningCenterOptions> options)
+public sealed class PlanningCenterOAuthClient(
+    IOptionsMonitor<OpenIdConnectOptions> openIdConnect, IOptions<PlanningCenterOptions> options)
 {
     public const string HttpClientName = "PlanningCenter.OAuth";
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
-    public Task<PlanningCenterTokenSet> RefreshAsync(string refreshToken, CancellationToken ct)
+    public async Task<PlanningCenterTokenSet> RefreshAsync(string refreshToken, CancellationToken ct)
     {
-        var settings = RequireConfigured();
-        return RequestTokensAsync(new Dictionary<string, string>
+        OpenIdConnectOptions handler = RequireConfigured();
+        OpenIdConnectConfiguration configuration = await GetConfigurationAsync(handler, ct);
+        OpenIdConnectMessage request = new()
         {
-            ["grant_type"] = "refresh_token",
-            ["refresh_token"] = refreshToken,
-            ["client_id"] = settings.ClientId,
-            ["client_secret"] = settings.ClientSecret
-        }, ct);
+            GrantType = OpenIdConnectGrantTypes.RefreshToken,
+            RefreshToken = refreshToken,
+            ClientId = handler.ClientId,
+            ClientSecret = handler.ClientSecret
+        };
+        OpenIdConnectMessage response = await PostAsync(handler, configuration.TokenEndpoint, request, ct);
+        if (string.IsNullOrEmpty(response.AccessToken) || string.IsNullOrEmpty(response.RefreshToken)
+            || !int.TryParse(response.ExpiresIn, NumberStyles.None, CultureInfo.InvariantCulture, out int expiresIn)
+            || expiresIn <= 0)
+        {
+            throw PlanningCenterOAuthException.InvalidResponse("incomplete token response");
+        }
+        return new(response.AccessToken, response.RefreshToken, TimeSpan.FromSeconds(expiresIn), response.Scope);
     }
 
-    /// <summary>Revokes a refresh token and its access token. Planning Center reports success for already-revoked tokens.</summary>
+    /// <summary>
+    /// Revokes a refresh token and its access token (RFC 7009) at the discovery document's <c>revocation_endpoint</c>.
+    /// Planning Center reports success for already-revoked tokens.
+    /// </summary>
     public async Task RevokeAsync(string refreshToken, CancellationToken ct)
     {
-        var settings = RequireConfigured();
-        using FormUrlEncodedContent form = new(new Dictionary<string, string>
-        {
-            ["token"] = refreshToken,
-            ["token_type_hint"] = "refresh_token",
-            ["client_id"] = settings.ClientId,
-            ["client_secret"] = settings.ClientSecret
-        });
-        using HttpResponseMessage response = await CreateClient().PostAsync(new Uri("oauth/revoke", UriKind.Relative), form, ct);
-        await ThrowIfFailedAsync(response, ct);
+        OpenIdConnectOptions handler = RequireConfigured();
+        OpenIdConnectConfiguration configuration = await GetConfigurationAsync(handler, ct);
+        if (string.IsNullOrEmpty(configuration.RevocationEndpoint))
+            throw PlanningCenterOAuthException.InvalidResponse("discovery document has no revocation_endpoint");
+        OpenIdConnectMessage request = new() { ClientId = handler.ClientId, ClientSecret = handler.ClientSecret };
+        request.SetParameter("token", refreshToken);
+        request.SetParameter("token_type_hint", OpenIdConnectParameterNames.RefreshToken);
+        await PostAsync(handler, configuration.RevocationEndpoint, request, ct);
     }
 
     /// <summary>
@@ -105,55 +118,52 @@ public sealed class PlanningCenterOAuthClient(IHttpClientFactory httpClients, IO
         }
     }
 
-    private async Task<PlanningCenterTokenSet> RequestTokensAsync(Dictionary<string, string> fields, CancellationToken ct)
+    private OpenIdConnectOptions RequireConfigured()
     {
-        using FormUrlEncodedContent form = new(fields);
-        using HttpResponseMessage response = await CreateClient().PostAsync(new Uri("oauth/token", UriKind.Relative), form, ct);
-        await ThrowIfFailedAsync(response, ct);
-        TokenResponse tokens = await response.Content.ReadFromJsonAsync<TokenResponse>(Json, ct)
-            ?? throw PlanningCenterOAuthException.InvalidResponse("empty token response");
-        if (string.IsNullOrEmpty(tokens.AccessToken) || string.IsNullOrEmpty(tokens.RefreshToken) || tokens.ExpiresIn <= 0)
-            throw PlanningCenterOAuthException.InvalidResponse("incomplete token response");
-        return new(tokens.AccessToken, tokens.RefreshToken, TimeSpan.FromSeconds(tokens.ExpiresIn), tokens.Scope);
-    }
-
-    /// <summary>The base address and User-Agent are set where the named client is registered.</summary>
-    private HttpClient CreateClient() => httpClients.CreateClient(HttpClientName);
-
-    private (string ClientId, string ClientSecret) RequireConfigured()
-    {
-        PlanningCenterOptions settings = options.Value;
-        if (!settings.IsConfigured)
+        if (!options.Value.IsConfigured)
             throw new PlanningCenterException(PlanningCenterFailure.NotConfigured);
-        return (settings.ClientId, settings.ClientSecret);
+        return openIdConnect.Get(PlanningCenterAuthenticationDefaults.Scheme);
     }
 
-    private static async Task ThrowIfFailedAsync(HttpResponseMessage response, CancellationToken ct)
+    /// <summary>The handler's cached discovery document; a failure to fetch it is a remote failure.</summary>
+    private static async Task<OpenIdConnectConfiguration> GetConfigurationAsync(OpenIdConnectOptions handler, CancellationToken ct)
     {
-        if (response.IsSuccessStatusCode)
-            return;
-        ErrorResponse? body = null;
+        IConfigurationManager<OpenIdConnectConfiguration> manager = handler.ConfigurationManager
+            ?? throw new InvalidOperationException("The Planning Center OpenID Connect handler has no configuration manager.");
+        try
+        {
+            return await manager.GetConfigurationAsync(ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new PlanningCenterOAuthException(null, 0, "discovery document unavailable: " + exception.Message);
+        }
+    }
+
+    /// <summary>Posts like the handler's code redemption, then parses the body as an <see cref="OpenIdConnectMessage"/>.</summary>
+    private static async Task<OpenIdConnectMessage> PostAsync(
+        OpenIdConnectOptions handler, string endpoint, OpenIdConnectMessage request, CancellationToken ct)
+    {
+        using FormUrlEncodedContent form = new(request.Parameters);
+        using HttpResponseMessage response = await handler.Backchannel.PostAsync(endpoint, form, ct);
+        string body = await response.Content.ReadAsStringAsync(ct);
+        OpenIdConnectMessage? message = null;
         if (response.Content.Headers.ContentType?.MediaType == "application/json")
         {
             try
             {
-                body = await response.Content.ReadFromJsonAsync<ErrorResponse>(Json, ct);
+                message = new OpenIdConnectMessage(body);
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is ArgumentException or JsonException)
             {
-                // An unreadable error body still fails with the status code.
+                // An unreadable body still fails with the status code.
             }
         }
-        throw new PlanningCenterOAuthException(body?.Error, (int)response.StatusCode, errorDescription: body?.ErrorDescription);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new PlanningCenterOAuthException(
+                message?.Error, (int)response.StatusCode, errorDescription: message?.ErrorDescription);
+        }
+        return message ?? throw PlanningCenterOAuthException.InvalidResponse("response was not JSON");
     }
-
-    private sealed record TokenResponse(
-        [property: JsonPropertyName("access_token")] string? AccessToken,
-        [property: JsonPropertyName("refresh_token")] string? RefreshToken,
-        [property: JsonPropertyName("expires_in")] int ExpiresIn,
-        [property: JsonPropertyName("scope")] string? Scope);
-
-    private sealed record ErrorResponse(
-        [property: JsonPropertyName("error")] string? Error,
-        [property: JsonPropertyName("error_description")] string? ErrorDescription);
 }

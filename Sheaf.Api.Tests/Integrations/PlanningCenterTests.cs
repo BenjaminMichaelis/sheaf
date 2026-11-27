@@ -5,6 +5,7 @@ using System.Text;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
 
@@ -531,6 +532,65 @@ public class PlanningCenterTests : ChurchApiTestBase
 
             await Assert.That(token).IsEqualTo("access-winner");
             await Assert.That(Pco.To("/oauth/revoke").Select(r => r.Form["token"])).IsEquivalentTo(["refresh-loser"]);
+        }
+    }
+
+    [Test]
+    public async Task GetAccessTokenAsync_SaveConflictsOnEveryAttempt_RevokesNewTokenAndThrows()
+    {
+        var (client, admin) = await SignInAsync(ChurchMembershipRole.Admin);
+        using (client)
+        {
+            await ConnectAsync(client, admin);
+            Time.Advance(TimeSpan.FromHours(3));
+            // Before every save of the refreshed row, another writer gives up on the connection, so each save conflicts.
+            SaveHook.Before = () => UpdateConnectionAsync(admin.ChurchId, (row, _) =>
+            {
+                row.Status = IntegrationStatus.NeedsReauthorization;
+                row.ProtectedCredentials = null;
+            });
+
+            await Assert.That(async () => { await GetAccessTokenAsync(admin.ChurchId); })
+                .Throws<PlanningCenterException>()
+                .WithMessage(nameof(PlanningCenterFailure.NotConnected));
+            SaveHook.Before = null;
+            await Assert.That(Pco.To("/oauth/revoke").Select(r => r.Form["token"])).IsEquivalentTo(["refresh-2"]);
+        }
+    }
+
+    /// <summary>Runs before a context saves a modified <see cref="ChurchIntegration"/>, outside any save it starts itself.</summary>
+    private IntegrationSaveHook SaveHook { get; } = new();
+
+    private sealed class IntegrationSaveHook
+    {
+        public Func<Task>? Before { get; set; }
+    }
+
+    private static readonly AsyncLocal<bool> InsideBeforeSave = new();
+
+    protected override void ConfigureDatabase(DbContextOptionsBuilder options) =>
+        options.AddInterceptors(new BeforeIntegrationSaveInterceptor(SaveHook));
+
+    private sealed class BeforeIntegrationSaveInterceptor(IntegrationSaveHook hook) : SaveChangesInterceptor
+    {
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!InsideBeforeSave.Value
+                && hook.Before is { } action
+                && eventData.Context?.ChangeTracker.Entries<ChurchIntegration>().Any(entry => entry.State == EntityState.Modified) == true)
+            {
+                InsideBeforeSave.Value = true;
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    InsideBeforeSave.Value = false;
+                }
+            }
+            return result;
         }
     }
 

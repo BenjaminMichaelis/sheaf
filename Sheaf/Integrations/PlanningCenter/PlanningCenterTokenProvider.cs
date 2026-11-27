@@ -67,20 +67,26 @@ public sealed partial class PlanningCenterTokenProvider(
         }
     }
 
-    /// <summary>Saves freshly issued credentials, reconciling with whatever another writer saved in the meantime.</summary>
+    /// <summary>The most saves <see cref="SaveRefreshedAsync"/> attempts before giving up on keeping a new grant.</summary>
+    internal const int MaxSaveAttempts = 3;
+
+    /// <summary>
+    /// Saves freshly issued credentials, reconciling with whatever another writer saved in the meantime. The new grant
+    /// always ends up stored or revoked, never dropped.
+    /// </summary>
     private async Task<string> SaveRefreshedAsync(
         ChurchIntegration connection, PlanningCenterCredentials fresh, CancellationToken ct)
     {
         string? organizationId = connection.ExternalTenantId;
         PlanningCenterConnectionService.SetCredentials(connection, fresh, credentials);
-        for (int attempt = 0; ; attempt++)
+        for (int attempt = 1; ; attempt++)
         {
             try
             {
                 await db.SaveChangesAsync(ct);
                 return fresh.AccessToken;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            catch (DbUpdateConcurrencyException)
             {
                 await db.Entry(connection).ReloadAsync(ct);
             }
@@ -93,7 +99,9 @@ public sealed partial class PlanningCenterTokenProvider(
                 return winner.AccessToken;
             }
 
-            if (connection.Status == IntegrationStatus.NeedsReauthorization && connection.ExternalTenantId == organizationId)
+            if (attempt < MaxSaveAttempts
+                && connection.Status == IntegrationStatus.NeedsReauthorization
+                && connection.ExternalTenantId == organizationId)
             {
                 // A concurrent refresh with the old token was rejected and gave up, but this refresh holds a live grant.
                 connection.Status = IntegrationStatus.Active;
@@ -101,7 +109,8 @@ public sealed partial class PlanningCenterTokenProvider(
                 continue;
             }
 
-            // Disconnected meanwhile: the new grant belongs to nobody, so release it.
+            // Disconnected meanwhile, or still contended after every attempt: the new grant cannot be stored, so
+            // release it rather than leave a live token that nobody holds.
             await RevokeOrLogAsync(fresh.RefreshToken, ct);
             throw new PlanningCenterException(PlanningCenterFailure.NotConnected);
         }
