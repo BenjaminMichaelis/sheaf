@@ -3070,6 +3070,9 @@
         }
       },
       "AttendeesRequest": {
+        "required": [
+          "personIds"
+        ],
         "type": "object",
         "properties": {
           "personIds": {

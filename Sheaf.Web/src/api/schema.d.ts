@@ -510,7 +510,7 @@ export interface components {
             removedAt: null | string;
         };
         AttendeesRequest: {
-            personIds?: null | string[];
+            personIds: null | string[];
             newPeople?: null | components["schemas"]["PersonRequest"][];
             /** @default false */
             confirm: boolean;

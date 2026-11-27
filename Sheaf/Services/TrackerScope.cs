@@ -14,6 +14,8 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
 {
     /// <summary>How long after attending one of a Leader's groups a person's full profile stays visible to that Leader.</summary>
     public const int AttendanceVisibilityDays = 90;
+    /// <summary>How long after creating a person a Leader may still correct their details.</summary>
+    public const int CreatorEditDays = 7;
 
     private ChurchCalendar? _calendar;
 
@@ -68,8 +70,8 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     }
 
     /// <summary>
-    /// People the actor may change, assign to a group, or put in a household. Managers reach every person; everyone else
-    /// reaches the current members and leaders of the groups they lead.
+    /// People the actor may assign to a group or put in a household, and change (see also <see cref="EditablePeople"/>).
+    /// Managers reach every person; everyone else reaches the current members and leaders of the groups they lead.
     /// </summary>
     public IQueryable<Person> People(ChurchActor actor)
     {
@@ -84,7 +86,22 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     }
 
     /// <summary>
-    /// People whose profile the actor may read: everyone in <see cref="People"/>, plus anyone still marked present at
+    /// People whose name and contact details the actor may correct: everyone in <see cref="People"/>, plus people the
+    /// actor created in the last <see cref="CreatorEditDays"/> days, so a Leader can fix a typo in someone they just
+    /// added while recording attendance. Creating someone never lets a Leader add them to a roster or household.
+    /// </summary>
+    public IQueryable<Person> EditablePeople(ChurchActor actor)
+    {
+        if (ManagesPeople(actor))
+            return db.People;
+        var createdSince = Now.AddDays(-CreatorEditDays);
+        var reachable = People(actor).Select(p => p.Id);
+        return db.People.Where(p => reachable.Contains(p.Id)
+            || (p.CreatedByUserId == actor.UserId && p.CreatedAt >= createdSince));
+    }
+
+    /// <summary>
+    /// People whose profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
     /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
     /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
     /// </summary>
@@ -94,7 +111,7 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
             return db.People;
         var groups = Groups(actor).Select(g => g.Id);
         var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
-        var reachable = People(actor).Select(p => p.Id);
+        var reachable = EditablePeople(actor).Select(p => p.Id);
         return db.People.Where(p => reachable.Contains(p.Id)
             || db.Attendances.Any(a => a.PersonId == p.Id && a.RemovedAt == null
                 && db.ContextSessions.Any(s => s.Id == a.SessionId && groups.Contains(s.ContextId) && s.OccurredOn >= attendedSince)));

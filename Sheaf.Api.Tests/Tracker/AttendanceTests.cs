@@ -283,6 +283,117 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    [Arguments(6, HttpStatusCode.OK)]
+    [Arguments(8, HttpStatusCode.NotFound)]
+    public async Task UpdatePerson_LeaderCreatedPersonDaysAgo_EditableOnlyWithinCreatorWindow(int daysAgo, HttpStatusCode expected)
+    {
+        // Someone a Leader added off the roster, such as a newcomer added while recording attendance.
+        using var f = await SeedGroupAsync();
+        var added = new Person { FirstName = "Zedd", LastName = "Newcomer", CreatedByUserId = f.Membership.UserId, CreatedAt = Time.GetUtcNow().AddDays(-daysAgo) };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.People.Add(added);
+            await db.SaveChangesAsync();
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Put, $"/people/{added.Id}", new PersonRequest("Zed", "Newcomer"), added.Version);
+
+        await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
+        await InChurchAsync(f.ChurchId, async db =>
+            await Assert.That((await db.People.SingleAsync(p => p.Id == added.Id)).FirstName).IsEqualTo(expected == HttpStatusCode.OK ? "Zed" : "Zedd"));
+    }
+
+    [Test]
+    public async Task RecordGroupSession_LeaderOfEndedGroup_ReturnsNotFound()
+    {
+        using var f = await SeedGroupAsync();
+        await InChurchAsync(f.ChurchId, db => db.Contexts.Where(g => g.Id == f.Group.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.EndsAt, Time.GetUtcNow().AddDays(-1))));
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today.AddDays(-3), [f.Member.Id]));
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task UpdateGroupSessionAttendees_PersonIdsOmitted_ReturnsBadRequestWithoutChanges()
+    {
+        using var f = await SeedGroupAsync();
+        var session = await AddSessionAsync(f, Today, f.Member.Id);
+
+        using var response = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}",
+            new { newPeople = new[] { new PersonRequest("Zed", "Newcomer") } }, session.Version);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            await Assert.That(await db.Attendances.CountAsync(a => a.RemovedAt == null)).IsEqualTo(1);
+            await Assert.That(await db.People.AnyAsync(p => p.FirstName == "Zed")).IsFalse();
+        });
+    }
+
+    [Test]
+    public async Task UpdateGroupSessionAttendees_NewPersonWithSimilarName_RequiresConfirmation()
+    {
+        using var f = await SeedGroupAsync();
+        var session = await AddSessionAsync(f, Today, f.Member.Id);
+
+        using var response = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}",
+            new AttendeesRequest([f.Member.Id], [new PersonRequest("Max", "Member")]), session.Version);
+
+        var problem = await ReadConfirmationAsync(response);
+        await Assert.That((await ExtensionAsync(problem, "similarPeople"))[0].GetProperty("matches")[0].GetProperty("id").GetGuid()).IsEqualTo(f.Member.Id);
+        await InChurchAsync(f.ChurchId, async db =>
+            await Assert.That(await db.People.CountAsync(p => p.FirstName == "Max")).IsEqualTo(1));
+    }
+
+    [Test]
+    public async Task RecordGroupSession_SeveralNewPeople_ReportsMatchesForEachSimilarName()
+    {
+        using var f = await SeedGroupAsync();
+        var ada = await AddPersonAsync(f, "Ada", "Lovelace");
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today,
+            NewPeople: [new PersonRequest("Max", "Member"), new PersonRequest("Quinn", "Unique"), new PersonRequest("Ada", "Lovelace")]));
+
+        var similar = await ExtensionAsync(await ReadConfirmationAsync(response), "similarPeople");
+        var byIndex = similar.EnumerateArray().ToDictionary(s => s.GetProperty("index").GetInt32(),
+            s => s.GetProperty("matches").EnumerateArray().Select(m => m.GetProperty("id").GetGuid()).ToArray());
+        await Assert.That(byIndex.Keys).IsEquivalentTo([0, 2]);
+        await Assert.That(byIndex[0]).IsEquivalentTo([f.Member.Id]);
+        await Assert.That(byIndex[2]).IsEquivalentTo([ada.Id]);
+    }
+
+    [Test]
+    [Arguments("too many people")]
+    [Arguments("too many new people")]
+    [Arguments("inactive person")]
+    [Arguments("inactive new person")]
+    public async Task RecordGroupSession_InvalidAttendees_ReturnsBadRequestWithoutChanges(string invalid)
+    {
+        using var f = await SeedGroupAsync();
+        var inactive = await AddPersonAsync(f, "Ida", "Inactive");
+        await InChurchAsync(f.ChurchId, db => db.People.Where(p => p.Id == inactive.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsActive, false)));
+        var request = invalid switch
+        {
+            "too many people" => new SessionRequest(Today, [.. Enumerable.Range(0, AttendanceService.MaxAttendees + 1).Select(_ => Guid.NewGuid())]),
+            "too many new people" => new SessionRequest(Today, NewPeople: [.. Enumerable.Range(0, AttendanceService.MaxNewPeople + 1).Select(i => new PersonRequest($"Person{i}"))]),
+            "inactive person" => new SessionRequest(Today, [inactive.Id]),
+            _ => new SessionRequest(Today, NewPeople: [new PersonRequest("Zed", IsActive: false)]),
+        };
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", request with { Confirm = true });
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            await Assert.That(await db.ContextSessions.CountAsync()).IsEqualTo(0);
+            await Assert.That(await db.People.CountAsync()).IsEqualTo(3);
+        });
+    }
+
+    [Test]
     public async Task GetGroupSession_MemberJoinedAfterMeeting_NotListedAbsent()
     {
         using var f = await SeedGroupAsync();

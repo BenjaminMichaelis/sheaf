@@ -19,9 +19,10 @@ public interface IAttendanceService
 }
 
 /// <summary>
-/// Group meetings and who came. Anyone who can see a group (its current Leaders, or Staff for every group) records
-/// its meetings for any past date while the group existed; Leaders may change a meeting for
-/// <see cref="LeaderEditDays"/> days after it was recorded, Staff at any time.
+/// Group meetings and who came. Anyone who can see a group records its meetings for any past date while the group
+/// existed: Staff for every group, Leaders only for active groups they lead now, so once a group ends or a Leader steps
+/// down, only Staff can record or change its meetings. Leaders may change a meeting for <see cref="LeaderEditDays"/>
+/// days after it was recorded, Staff at any time.
 /// Taking someone off a meeting keeps the row as history, so the record of who was marked present, and by whom,
 /// survives every edit.
 /// </summary>
@@ -58,8 +59,8 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     public async Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct)
     {
         var (actor, group) = await scope.GroupAsync(groupId, ct);
-        // Any past date while the group existed may be recorded, so late paperwork can be caught up. The Leader edit
-        // window applies only to changing a meeting once it is recorded.
+        // Any past date while the group existed may be recorded, so late paperwork can be caught up (by a Leader only
+        // while they still lead the group). The Leader edit window applies only to changing a meeting once recorded.
         RequireMeetingDate(group, request.OccurredOn);
 
         // A second meeting the same day needs confirming, which also catches a double submit or a retried request.
@@ -86,6 +87,9 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
 
     public async Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct)
     {
+        // The list replaces who came, so leaving it out would take everyone off; an empty list does that on purpose.
+        if (request.PersonIds is null)
+            throw Invalid();
         var (actor, _) = await scope.GroupAsync(groupId, ct);
         var session = await db.ContextSessions.SingleOrDefaultAsync(s => s.Id == sessionId && s.ContextId == groupId, ct) ?? throw Missing();
         RequireVersion(session.Version, expectedVersion);
@@ -161,20 +165,8 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var created = newPeople.Select(request => request.IsActive == false
             ? throw Invalid()
             : PersonRecords.Create(request, actor, now)).ToArray();
-        if (!confirm)
-        {
-            var similar = new List<SimilarPeopleResponse>();
-            for (var i = 0; i < created.Length; i++)
-            {
-                if (created[i].Name.Length < PeopleService.LookupMinLength)
-                    continue;
-                var matches = await db.People.Where(p => p.IsActive).MatchingName(created[i].Name).ToLookupAsync(db, ct);
-                if (matches.Length > 0)
-                    similar.Add(new SimilarPeopleResponse(i, matches));
-            }
-            if (similar.Count > 0)
-                reasons["similarPeople"] = similar;
-        }
+        if (!confirm && await PersonNameSearch.SimilarAsync(db, [.. created.Select(p => p.Name)], ct) is { Length: > 0 } similar)
+            reasons["similarPeople"] = similar;
         if (reasons.Count > 0)
             throw ConfirmationRequired(reasons);
 

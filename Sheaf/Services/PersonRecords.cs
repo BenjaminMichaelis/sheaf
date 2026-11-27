@@ -52,11 +52,54 @@ internal static class PersonNameSearch
 
     /// <summary>The first <see cref="PeopleService.LookupMaxResults"/> matches in name order, with their household label.</summary>
     public static Task<PersonLookupResponse[]> ToLookupAsync(this IQueryable<Person> matches, ApplicationDbContext db, CancellationToken ct) =>
-        matches
-            .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
-            .Take(PeopleService.LookupMaxResults)
+        matches.Top()
             .Select(p => new PersonLookupResponse(p.Id,
                 p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
                 db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()))
             .ToArrayAsync(ct);
+
+    /// <summary>
+    /// Active people matching each name, in one query: for each name at least <see cref="PeopleService.LookupMinLength"/>
+    /// long, the same matches <see cref="ToLookupAsync"/> would return for it, keyed by the name's index.
+    /// </summary>
+    public static async Task<SimilarPeopleResponse[]> SimilarAsync(ApplicationDbContext db, IReadOnlyList<string> names, CancellationToken ct)
+    {
+        IQueryable<SimilarMatch>? query = null;
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (names[i].Length < PeopleService.LookupMinLength)
+                continue;
+            var index = i;
+            var matches = db.People.Where(p => p.IsActive).MatchingName(names[i]).Top()
+                .Select(p => new SimilarMatch
+                {
+                    Index = index,
+                    Id = p.Id,
+                    FirstName = p.FirstName,
+                    LastName = p.LastName,
+                    HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()
+                });
+            query = query is null ? matches : query.Concat(matches);
+        }
+        if (query is null)
+            return [];
+        var rows = await query
+            .OrderBy(m => m.Index).ThenBy(m => m.FirstName).ThenBy(m => m.LastName).ThenBy(m => m.Id)
+            .ToArrayAsync(ct);
+        return [.. rows.GroupBy(m => m.Index).Select(g => new SimilarPeopleResponse(g.Key,
+            [.. g.Select(m => new PersonLookupResponse(m.Id, m.LastName is null ? m.FirstName : $"{m.FirstName} {m.LastName}", m.HouseholdLabel))]))];
+    }
+
+    private static IQueryable<Person> Top(this IQueryable<Person> matches) =>
+        matches.OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id).Take(PeopleService.LookupMaxResults);
+
+    // An object initializer, not a constructor, so EF can translate the set operation and order its results.
+    private sealed class SimilarMatch
+    {
+        public int Index { get; init; }
+        public Guid Id { get; init; }
+        public required string FirstName { get; init; }
+        public string? LastName { get; init; }
+        public string? HouseholdLabel { get; init; }
+    }
 }

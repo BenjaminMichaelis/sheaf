@@ -36,7 +36,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
     public async Task<PersonResponse> UpdatePersonAsync(Guid id, Guid expectedVersion, PersonRequest request, CancellationToken ct)
     {
         var actor = await scope.ActorAsync(ct);
-        var person = await scope.People(actor).SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing();
+        var person = await scope.EditablePeople(actor).SingleOrDefaultAsync(p => p.Id == id, ct) ?? throw Missing();
         RequireVersion(person.Version, expectedVersion);
         // Leaders may correct names and contacts; activating or deactivating a person is a Staff decision.
         // This depends on the stored value, so it is checked here rather than on the endpoint.

@@ -41,8 +41,11 @@ public sealed record HouseholdMemberResponse(Guid Id, string FirstName);
 /// are rejected with a confirmation problem unless <paramref name="Confirm"/> is true.
 /// </summary>
 public sealed record SessionRequest(DateOnly OccurredOn, Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, bool Confirm = false);
-/// <summary>Replaces who came to a meeting. People left out are taken off the list, which is kept as history.</summary>
-public sealed record AttendeesRequest(Guid[]? PersonIds = null, PersonRequest[]? NewPeople = null, bool Confirm = false);
+/// <summary>
+/// Replaces who came to a meeting. <paramref name="PersonIds"/> is required: people left out are taken off the list,
+/// which is kept as history, and an empty list takes everyone off.
+/// </summary>
+public sealed record AttendeesRequest(Guid[]? PersonIds, PersonRequest[]? NewPeople = null, bool Confirm = false);
 /// <summary>A person named on a meeting: who came, or a roster member who did not.</summary>
 public sealed record SessionPersonResponse(Guid Id, string Name);
 /// <summary>A meeting with who came and which roster members, as of that date, did not.</summary>
