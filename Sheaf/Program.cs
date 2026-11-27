@@ -75,7 +75,10 @@ builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.Appli
         options.TimeProvider = timeProvider;
     });
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>()));
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GroupRole>());
+});
 
 // Add services to the container.
 builder.Services.AddProblemDetails();

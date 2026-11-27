@@ -130,8 +130,9 @@ host for SQL Server. They use isolated, migrated catalogs.
 ### People and groups foundation
 
 The backend tracker endpoints under `/api/church` persist church-owned People,
-optional households, group types, groups (`Context` of kind `Group`), and dated
-Person membership/leadership intervals. See `Sheaf/Tracker.http` for requests.
+optional households, group types, groups, and dated group assignments: one interval in
+which a Person held one role (`Member` or `Leader`) in a group. See `Sheaf/Tracker.http`
+for requests.
 Person `FirstName` and group names/starting instants are required; `LastName`,
 contacts, households, and group types are optional. Display `Name` is the supplied
 first name followed by the optional surname; names are never guessed or split.
@@ -142,16 +143,22 @@ database for imports) and, when created through the API, `CreatedByUserId`. Neit
 foreign key, so the audit survives account deletion and later duplicate review can tell
 an original from a copy.
 
-Staff and Admin create People, manage group types, create/update/end groups, and assign
-leaders.
-Leaders manage membership and edit names and contacts only for people in their currently
-led groups.
+Staff and Admin create People, manage group types, create/update/end groups, and add,
+end, or change the role of leaders.
+What a group role allows within its group is mapped in `GroupRolePermissions`: a
+current Leader may see the group, manage its Members, and record its meetings; a Member
+role grants nothing, so being on a roster never gives an account access.
+Leaders edit names and contacts only for people currently on their groups' rosters.
 A Leader can add only people they can already see; adding a person to a group would
 otherwise unlock that person's profile, so bringing someone new into a group is a Staff
-action. Multiple simultaneous assignments and leave/rejoin history are supported. Ending a
-group retains it and all assignment intervals; group end bounds their effective
-activity without rewriting history. There are no tracker delete or automatic-merge
-endpoints.
+action.
+A person has at most one assignment in a group at any instant. Adding someone already in
+the group returns 409; to promote or step down, `POST .../assignments/{id}/role` ends the
+current assignment and starts one in the new role, so the history keeps both intervals.
+Every role counts toward the roster used for absences. Leave/rejoin history is
+supported. Ending a group retains it and all assignment intervals; group end bounds
+their effective activity without rewriting history. There are no tracker delete or
+automatic-merge endpoints.
 
 People, households and groups carry a `version`, returned in the body and as a strong
 `ETag`. Updating a person, household or group, and ending a group, require that version

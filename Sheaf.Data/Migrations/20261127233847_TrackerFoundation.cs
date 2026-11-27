@@ -6,18 +6,42 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sheaf.Data.Migrations;
 
 /// <inheritdoc />
-public partial class _20261126001848_TrackerFoundation : Migration
+public partial class TrackerFoundation : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.AddColumn<string>(
+            name: "GroupLabel",
+            table: "Churches",
+            type: "nvarchar(50)",
+            maxLength: 50,
+            nullable: true);
+
+        migrationBuilder.AddColumn<string>(
+            name: "GroupLabelPlural",
+            table: "Churches",
+            type: "nvarchar(50)",
+            maxLength: 50,
+            nullable: true);
+
+        migrationBuilder.AddColumn<string>(
+            name: "TimeZoneId",
+            table: "Churches",
+            type: "nvarchar(64)",
+            maxLength: 64,
+            nullable: false,
+            // Existing churches start on UTC (Etc/UTC, the IANA name); an Admin sets the real zone with PUT /api/church/settings.
+            defaultValue: "Etc/UTC");
+
         migrationBuilder.CreateTable(
             name: "GroupTypes",
             columns: table => new
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false)
+                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                IsRetired = table.Column<bool>(type: "bit", nullable: false)
             },
             constraints: table =>
             {
@@ -52,13 +76,12 @@ public partial class _20261126001848_TrackerFoundation : Migration
             });
 
         migrationBuilder.CreateTable(
-            name: "Contexts",
+            name: "Groups",
             columns: table => new
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                Kind = table.Column<int>(type: "int", nullable: false),
                 StartsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
                 EndsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
                 GroupTypeId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
@@ -66,18 +89,17 @@ public partial class _20261126001848_TrackerFoundation : Migration
             },
             constraints: table =>
             {
-                table.PrimaryKey("PK_Contexts", x => new { x.ChurchId, x.Id });
-                table.CheckConstraint("CK_Contexts_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
-                table.CheckConstraint("CK_Contexts_Kind", "[Kind] = 0");
-                table.CheckConstraint("CK_Contexts_Name", "TRIM([Name]) <> ''");
+                table.PrimaryKey("PK_Groups", x => new { x.ChurchId, x.Id });
+                table.CheckConstraint("CK_Groups_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                table.CheckConstraint("CK_Groups_Name", "TRIM([Name]) <> ''");
                 table.ForeignKey(
-                    name: "FK_Contexts_Churches_ChurchId",
+                    name: "FK_Groups_Churches_ChurchId",
                     column: x => x.ChurchId,
                     principalTable: "Churches",
                     principalColumn: "Id",
                     onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
-                    name: "FK_Contexts_GroupTypes_ChurchId_GroupTypeId",
+                    name: "FK_Groups_GroupTypes_ChurchId_GroupTypeId",
                     columns: x => new { x.ChurchId, x.GroupTypeId },
                     principalTable: "GroupTypes",
                     principalColumns: new[] { "ChurchId", "Id" },
@@ -126,34 +148,66 @@ public partial class _20261126001848_TrackerFoundation : Migration
             });
 
         migrationBuilder.CreateTable(
-            name: "ContextLeaders",
+            name: "GroupMeetings",
             columns: table => new
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                ContextId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                PersonId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                StartsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                EndsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true)
+                GroupId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                OccurredOn = table.Column<DateOnly>(type: "date", nullable: false),
+                Description = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                RecordedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false, defaultValueSql: "SYSDATETIMEOFFSET()"),
+                RecordedByUserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
+                Version = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
             },
             constraints: table =>
             {
-                table.PrimaryKey("PK_ContextLeaders", x => new { x.ChurchId, x.Id });
-                table.CheckConstraint("CK_ContextLeaders_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                table.PrimaryKey("PK_GroupMeetings", x => new { x.ChurchId, x.Id });
                 table.ForeignKey(
-                    name: "FK_ContextLeaders_Churches_ChurchId",
+                    name: "FK_GroupMeetings_Churches_ChurchId",
                     column: x => x.ChurchId,
                     principalTable: "Churches",
                     principalColumn: "Id",
                     onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
-                    name: "FK_ContextLeaders_Contexts_ChurchId_ContextId",
-                    columns: x => new { x.ChurchId, x.ContextId },
-                    principalTable: "Contexts",
+                    name: "FK_GroupMeetings_Groups_ChurchId_GroupId",
+                    columns: x => new { x.ChurchId, x.GroupId },
+                    principalTable: "Groups",
+                    principalColumns: new[] { "ChurchId", "Id" },
+                    onDelete: ReferentialAction.Restrict);
+            });
+
+        migrationBuilder.CreateTable(
+            name: "GroupAssignments",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                GroupId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                PersonId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                Role = table.Column<int>(type: "int", nullable: false),
+                StartsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                EndsAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true)
+            },
+            constraints: table =>
+            {
+                table.PrimaryKey("PK_GroupAssignments", x => new { x.ChurchId, x.Id });
+                table.CheckConstraint("CK_GroupAssignments_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                table.CheckConstraint("CK_GroupAssignments_Role", "[Role] IN (0, 1)");
+                table.ForeignKey(
+                    name: "FK_GroupAssignments_Churches_ChurchId",
+                    column: x => x.ChurchId,
+                    principalTable: "Churches",
+                    principalColumn: "Id",
+                    onDelete: ReferentialAction.Restrict);
+                table.ForeignKey(
+                    name: "FK_GroupAssignments_Groups_ChurchId_GroupId",
+                    columns: x => new { x.ChurchId, x.GroupId },
+                    principalTable: "Groups",
                     principalColumns: new[] { "ChurchId", "Id" },
                     onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
-                    name: "FK_ContextLeaders_People_ChurchId_PersonId",
+                    name: "FK_GroupAssignments_People_ChurchId_PersonId",
                     columns: x => new { x.ChurchId, x.PersonId },
                     principalTable: "People",
                     principalColumns: new[] { "ChurchId", "Id" },
@@ -161,63 +215,79 @@ public partial class _20261126001848_TrackerFoundation : Migration
             });
 
         migrationBuilder.CreateTable(
-            name: "ContextMembers",
+            name: "Attendances",
             columns: table => new
             {
                 Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 ChurchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                ContextId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                MeetingId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                 PersonId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                JoinedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                LeftAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true)
+                RecordedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false, defaultValueSql: "SYSDATETIMEOFFSET()"),
+                RecordedByUserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true),
+                RemovedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
+                RemovedByUserId = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: true)
             },
             constraints: table =>
             {
-                table.PrimaryKey("PK_ContextMembers", x => new { x.ChurchId, x.Id });
-                table.CheckConstraint("CK_ContextMembers_Dates", "[LeftAt] IS NULL OR [LeftAt] >= [JoinedAt]");
+                table.PrimaryKey("PK_Attendances", x => new { x.ChurchId, x.Id });
+                table.CheckConstraint("CK_Attendances_Removed", "([RemovedAt] IS NULL AND [RemovedByUserId] IS NULL) OR ([RemovedAt] IS NOT NULL AND [RemovedAt] >= [RecordedAt])");
                 table.ForeignKey(
-                    name: "FK_ContextMembers_Churches_ChurchId",
+                    name: "FK_Attendances_Churches_ChurchId",
                     column: x => x.ChurchId,
                     principalTable: "Churches",
                     principalColumn: "Id",
                     onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
-                    name: "FK_ContextMembers_Contexts_ChurchId_ContextId",
-                    columns: x => new { x.ChurchId, x.ContextId },
-                    principalTable: "Contexts",
+                    name: "FK_Attendances_GroupMeetings_ChurchId_MeetingId",
+                    columns: x => new { x.ChurchId, x.MeetingId },
+                    principalTable: "GroupMeetings",
                     principalColumns: new[] { "ChurchId", "Id" },
                     onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
-                    name: "FK_ContextMembers_People_ChurchId_PersonId",
+                    name: "FK_Attendances_People_ChurchId_PersonId",
                     columns: x => new { x.ChurchId, x.PersonId },
                     principalTable: "People",
                     principalColumns: new[] { "ChurchId", "Id" },
                     onDelete: ReferentialAction.Restrict);
             });
 
-        migrationBuilder.CreateIndex(
-            name: "IX_ContextLeaders_ChurchId_ContextId",
-            table: "ContextLeaders",
-            columns: new[] { "ChurchId", "ContextId" });
+        migrationBuilder.AddCheckConstraint(
+            name: "CK_Churches_TimeZoneId",
+            table: "Churches",
+            sql: "TRIM([TimeZoneId]) <> ''");
 
         migrationBuilder.CreateIndex(
-            name: "IX_ContextLeaders_ChurchId_PersonId",
-            table: "ContextLeaders",
+            name: "IX_Attendances_ChurchId_MeetingId_PersonId",
+            table: "Attendances",
+            columns: new[] { "ChurchId", "MeetingId", "PersonId" },
+            unique: true,
+            filter: "[RemovedAt] IS NULL");
+
+        migrationBuilder.CreateIndex(
+            name: "IX_Attendances_ChurchId_PersonId",
+            table: "Attendances",
             columns: new[] { "ChurchId", "PersonId" });
 
         migrationBuilder.CreateIndex(
-            name: "IX_ContextMembers_ChurchId_ContextId",
-            table: "ContextMembers",
-            columns: new[] { "ChurchId", "ContextId" });
+            name: "IX_GroupAssignments_ChurchId_GroupId_PersonId",
+            table: "GroupAssignments",
+            columns: new[] { "ChurchId", "GroupId", "PersonId" },
+            unique: true,
+            filter: "[EndsAt] IS NULL");
 
         migrationBuilder.CreateIndex(
-            name: "IX_ContextMembers_ChurchId_PersonId",
-            table: "ContextMembers",
+            name: "IX_GroupAssignments_ChurchId_PersonId",
+            table: "GroupAssignments",
             columns: new[] { "ChurchId", "PersonId" });
 
         migrationBuilder.CreateIndex(
-            name: "IX_Contexts_ChurchId_GroupTypeId",
-            table: "Contexts",
+            name: "IX_GroupMeetings_ChurchId_GroupId_OccurredOn",
+            table: "GroupMeetings",
+            columns: new[] { "ChurchId", "GroupId", "OccurredOn" });
+
+        migrationBuilder.CreateIndex(
+            name: "IX_Groups_ChurchId_GroupTypeId",
+            table: "Groups",
             columns: new[] { "ChurchId", "GroupTypeId" });
 
         migrationBuilder.CreateIndex(
@@ -242,21 +312,40 @@ public partial class _20261126001848_TrackerFoundation : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropTable(
-            name: "ContextLeaders");
+            name: "Attendances");
 
         migrationBuilder.DropTable(
-            name: "ContextMembers");
+            name: "GroupAssignments");
 
         migrationBuilder.DropTable(
-            name: "Contexts");
+            name: "GroupMeetings");
 
         migrationBuilder.DropTable(
             name: "People");
 
         migrationBuilder.DropTable(
-            name: "GroupTypes");
+            name: "Groups");
 
         migrationBuilder.DropTable(
             name: "Households");
+
+        migrationBuilder.DropTable(
+            name: "GroupTypes");
+
+        migrationBuilder.DropCheckConstraint(
+            name: "CK_Churches_TimeZoneId",
+            table: "Churches");
+
+        migrationBuilder.DropColumn(
+            name: "GroupLabel",
+            table: "Churches");
+
+        migrationBuilder.DropColumn(
+            name: "GroupLabelPlural",
+            table: "Churches");
+
+        migrationBuilder.DropColumn(
+            name: "TimeZoneId",
+            table: "Churches");
     }
 }

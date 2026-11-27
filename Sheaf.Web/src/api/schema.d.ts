@@ -401,6 +401,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/church/groups/{groupId}/assignments/{assignmentId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Staff move a person's current group assignment to another role, keeping both intervals */
+        post: operations["ChangeGroupRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/church/groups/{groupId}/sessions": {
         parameters: {
             query?: never;
@@ -487,6 +504,7 @@ export interface components {
             id: string;
             /** Format: uuid */
             personId: string;
+            role: components["schemas"]["GroupRole"];
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
@@ -559,6 +577,8 @@ export interface components {
             /** Format: uuid */
             version: string;
         };
+        /** @enum {unknown} */
+        GroupRole: "Member" | "Leader";
         GroupTypeRequest: {
             name: string;
             isRetired?: null | boolean;
@@ -670,6 +690,11 @@ export interface components {
             email: string;
             password: string;
             confirmPassword: string;
+        };
+        RoleChangeRequest: {
+            role: components["schemas"]["GroupRole"];
+            /** Format: date-time */
+            startsAt: string;
         };
         SessionPersonResponse: {
             /** Format: uuid */
@@ -2400,6 +2425,69 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EndRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ChangeGroupRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: string;
+                assignmentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleChangeRequest"];
             };
         };
         responses: {

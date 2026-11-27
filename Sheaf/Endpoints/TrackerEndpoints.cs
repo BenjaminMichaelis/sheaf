@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 
 using Sheaf.Authentication;
 using Sheaf.Authorization;
+using Sheaf.Data;
 using Sheaf.Services;
 
 namespace Sheaf.Endpoints;
@@ -16,8 +17,12 @@ public static class TrackerEndpoints
         MapPeople(api);
         MapGroups(api);
         MapHouseholds(api);
-        MapAssignments(api, "members", AssignmentKind.Member);
-        MapAssignments(api, "leaders", AssignmentKind.Leader);
+        MapAssignments(api, "members", GroupRole.Member);
+        MapAssignments(api, "leaders", GroupRole.Leader);
+        // Every role change involves a Leader today, so it is limited to managers like the other Leader writes.
+        api.MapPost("/groups/{groupId:guid}/assignments/{assignmentId:guid}/role", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, RoleChangeRequest request, IAssignmentService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.ChangeRoleAsync(groupId, assignmentId, request, ct)))
+            .Tracker("ChangeGroupRole", "Staff move a person's current group assignment to another role, keeping both intervals").Manage();
         MapSessions(api);
     }
 
@@ -125,15 +130,15 @@ public static class TrackerEndpoints
             .Tracker("UpdateHousehold", "Manage whole associated households without granting Person profile rights").RequiresIfMatch();
     }
 
-    private static void MapAssignments(RouteGroupBuilder api, string segment, AssignmentKind kind)
+    private static void MapAssignments(RouteGroupBuilder api, string segment, GroupRole kind)
     {
         // Operation names and summaries are kept identical to the published OpenAPI contract.
-        var (plural, singular, noun) = kind == AssignmentKind.Leader
+        var (plural, singular, noun) = kind == GroupRole.Leader
             ? ("GroupLeaders", "GroupLeader", "leadership")
             : ("GroupMembers", "GroupMember", "membership");
-        var historyNoun = kind == AssignmentKind.Leader ? "leaders" : "members";
-        var intervalNoun = kind == AssignmentKind.Leader ? "Person leadership" : "group membership";
-        var addNoun = kind == AssignmentKind.Leader ? "Person leadership" : "Person membership";
+        var historyNoun = kind == GroupRole.Leader ? "leaders" : "members";
+        var intervalNoun = kind == GroupRole.Leader ? "Person leadership" : "group membership";
+        var addNoun = kind == GroupRole.Leader ? "Person leadership" : "Person membership";
 
         api.MapGet($"/groups/{{groupId:guid}}/{segment}", async Task<Ok<PagedResponse<AssignmentResponse>>> (Guid groupId, int? offset, int? limit, IAssignmentService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetAssignmentsAsync(groupId, kind, PageRequest.From(offset, limit), ct)))
@@ -146,10 +151,10 @@ public static class TrackerEndpoints
                 var result = await s.AddAssignmentAsync(groupId, request, kind, ct);
                 return TypedResults.Created($"/api/church/groups/{groupId}/{segment}/{result.Id}", result);
             })
-            .Tracker($"Add{singular}", $"Add a dated {addNoun} assignment").ManageIf(kind == AssignmentKind.Leader);
+            .Tracker($"Add{singular}", $"Add a dated {addNoun} assignment").ManageIf(kind == GroupRole.Leader);
         api.MapPost($"/groups/{{groupId:guid}}/{segment}/{{assignmentId:guid}}/end", async Task<Ok<AssignmentResponse>> (Guid groupId, Guid assignmentId, EndRequest request, IAssignmentService s, CancellationToken ct) =>
             TypedResults.Ok(await s.EndAssignmentAsync(groupId, assignmentId, request, kind, ct)))
-            .Tracker($"End{singular}", $"End a dated {noun} assignment without deleting history").ManageIf(kind == AssignmentKind.Leader);
+            .Tracker($"End{singular}", $"End a dated {noun} assignment without deleting history").ManageIf(kind == GroupRole.Leader);
     }
 
     internal const string IfMatchHeader = "If-Match";
