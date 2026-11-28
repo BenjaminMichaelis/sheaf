@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
+using Sheaf.Authorization;
 using Sheaf.Data;
 
 using static Sheaf.Services.TrackerRules;
@@ -12,6 +13,8 @@ public interface IPeopleService
     Task<PersonResponse> GetPersonAsync(Guid id, CancellationToken ct);
     Task<PersonResponse> UpdatePersonAsync(Guid id, Guid expectedVersion, PersonRequest request, CancellationToken ct);
     Task<PersonLookupResponse[]> LookupAsync(string? name, CancellationToken ct);
+    Task<PersonGroupResponse[]> GetGroupsAsync(Guid id, CancellationToken ct);
+    Task<PagedResponse<PersonAttendanceResponse>> GetAttendanceAsync(Guid id, PageRequest page, CancellationToken ct);
 }
 
 public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) : IPeopleService
@@ -87,5 +90,43 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
             throw Invalid();
         var actor = await scope.ActorAsync(ct);
         return await db.People.Where(p => p.IsActive).MatchingName(term).ToLookupAsync(db, actor, scope.Now, ct);
+    }
+
+    public async Task<PersonGroupResponse[]> GetGroupsAsync(Guid id, CancellationToken ct)
+    {
+        var groups = await HistoryGroupsAsync(id, ct);
+        return await (
+            from a in db.GroupAssignments
+            join g in groups on a.GroupId equals g.Id
+            where a.PersonId == id
+            // Current roles first, then the most recent.
+            orderby a.EndsAt == null descending, a.StartsAt descending, a.Id
+            select new PersonGroupResponse(g.Id, g.Name, a.Role, a.StartsAt, a.EndsAt)).ToArrayAsync(ct);
+    }
+
+    public async Task<PagedResponse<PersonAttendanceResponse>> GetAttendanceAsync(Guid id, PageRequest page, CancellationToken ct)
+    {
+        var groups = await HistoryGroupsAsync(id, ct);
+        return await (
+            from a in db.Attendances
+            join s in db.GroupMeetings on a.MeetingId equals s.Id
+            join g in groups on s.GroupId equals g.Id
+            // Someone taken off a meeting did not come; the removed row stays only as history for Staff review.
+            where a.PersonId == id && a.RemovedAt == null
+            orderby s.OccurredOn descending, s.RecordedAt descending, s.Id descending
+            select new PersonAttendanceResponse(s.Id, g.Id, g.Name, s.OccurredOn)).PageAsync(page, ct);
+    }
+
+    /// <summary>
+    /// A person's group and attendance history is part of their full profile, so it is only for those who may edit them
+    /// (Staff, and Leaders for people in their groups; never Leaders' recent visitors, who get basic details only). Within
+    /// it, Leaders see only groups they can see themselves, because membership of another group can itself be sensitive.
+    /// </summary>
+    private async Task<IQueryable<Group>> HistoryGroupsAsync(Guid id, CancellationToken ct)
+    {
+        var actor = await scope.ActorAsync(ct);
+        if (!await scope.EditablePeople(actor).AnyAsync(p => p.Id == id, ct))
+            throw Missing();
+        return scope.Groups(actor, GroupPermission.View);
     }
 }

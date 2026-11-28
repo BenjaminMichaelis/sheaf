@@ -122,6 +122,10 @@ public sealed record SessionResponse(Guid Id, Guid GroupId, DateOnly OccurredOn,
 public sealed record SessionSummaryResponse(Guid Id, DateOnly OccurredOn, int AttendeeCount, Guid Version) : IVersioned;
 /// <summary>People who may already exist for the new person at <paramref name="Index"/> in the request (0 when creating one person).</summary>
 public sealed record SimilarPeopleResponse(int Index, PersonLookupResponse[] Matches);
+/// <summary>One interval in which a person held <paramref name="Role"/> in a group.</summary>
+public sealed record PersonGroupResponse(Guid GroupId, string GroupName, GroupRole Role, DateTimeOffset StartsAt, DateTimeOffset? EndsAt);
+/// <summary>A meeting a person is marked as having come to.</summary>
+public sealed record PersonAttendanceResponse(Guid SessionId, Guid GroupId, string GroupName, DateOnly OccurredOn);
 /// <summary>One person marked present, by whom, and whether and by whom they were taken off the list.</summary>
 public sealed record AttendanceRecordResponse(Guid SessionId, Guid GroupId, DateOnly OccurredOn, Guid PersonId, string PersonName,
     string? RecordedByUserId, DateTimeOffset RecordedAt, string? RemovedByUserId, DateTimeOffset? RemovedAt);
