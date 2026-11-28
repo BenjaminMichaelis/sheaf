@@ -54,9 +54,11 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var (actor, _) = await scope.GroupAsync(groupId, GroupPermission.View, ct);
         var session = await db.GroupMeetings.AsNoTracking()
             .SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
-        // Seeing a group need not mean recording for it, so that is checked on its own, as UpdateAttendeesAsync does.
-        var records = await scope.Groups(actor, GroupPermission.RecordAttendance).AnyAsync(g => g.Id == groupId, ct);
-        return await ResponseAsync(session, records && InEditWindow(actor, session), ct);
+        // Seeing a group need not mean recording for it, so that is checked on its own, as UpdateAttendeesAsync does,
+        // but only when the window is still open and the caller does not already manage every group.
+        var canEdit = InEditWindow(actor, session) && (TrackerScope.ManagesGroups(actor)
+            || await scope.Groups(actor, GroupPermission.RecordAttendance).AnyAsync(g => g.Id == groupId, ct));
+        return await ResponseAsync(session, canEdit, ct);
     }
 
     public async Task<SessionPersonResponse[]> GetRosterAsync(Guid groupId, DateOnly occurredOn, CancellationToken ct)
