@@ -883,6 +883,7 @@ export interface components {
             description: null | string;
             attendees: components["schemas"]["SessionPersonResponse"][];
             absent: components["schemas"]["SessionPersonResponse"][];
+            canEdit: boolean;
             /** Format: uuid */
             version: string;
         };
