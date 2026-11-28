@@ -314,6 +314,27 @@ describe('Person', () => {
 
     expect(await screen.findByText('You can no longer edit these details.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+    // The person can't be seen any more, so the page says so rather than offering Edit from the old details.
+    expect(await screen.findByText("You can't see this person's details.")).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument()
+  })
+
+  it('Person_EditRefusedAsForbidden_ClosesTheFormAndSaysSo', async () => {
+    mockPersonApi({ reads: [max(), max({ canEdit: false, version: 'v2' })], update: () => problem(403, 'Access denied.') })
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+
+    expect(await screen.findByText('You can no longer edit these details.')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument())
+  })
+
+  it('Person_PhoneWithExtension_LinksOnlyTheNumberToDial', async () => {
+    mockPersonApi({ reads: [max({ phone: '555-0100 ext 2' })] })
+    renderPerson()
+
+    expect(await screen.findByRole('link', { name: '555-0100 ext 2' })).toHaveAttribute('href', 'tel:555-0100')
   })
 
   it('Person_Cancel_KeepsTheDetailsAsTheyWereAndReturnsFocus', async () => {

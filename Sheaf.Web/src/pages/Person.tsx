@@ -26,6 +26,7 @@ import { useChurch } from '@/contexts/ChurchContext'
 import { ApiError } from '@/services/apiClient'
 import { personAttendanceQuery, personGroupsQuery, personKey, personQuery, updatePerson } from '@/services/churchQueries'
 import { formatChurchDate, formatDate } from '@/utils/dates'
+import { telHref } from '@/utils/contact'
 import { fullName, splitName } from '@/utils/names'
 import { pagedState } from '@/utils/paging'
 
@@ -135,8 +136,7 @@ function PersonDetails({ person, editButton, onEdit }: PersonDetailsProps) {
           Phone
         </Typography>
         <Typography component="dd" sx={{ m: 0 }}>
-          {/* A tel: link holds digits, a leading + and the visual separators RFC 3966 allows, so spaces are dropped. */}
-          {person.phone ? <Link href={`tel:${person.phone.replace(/[^\d+().-]/g, '')}`}>{person.phone}</Link> : 'None'}
+          <PhoneNumber phone={person.phone} />
         </Typography>
         <Typography component="dt" color="text.secondary">
           Household
@@ -158,6 +158,14 @@ function PersonDetails({ person, editButton, onEdit }: PersonDetailsProps) {
       )}
     </Stack>
   )
+}
+
+/** A phone number as entered, linked for dialling when it can be dialled as written. */
+function PhoneNumber({ phone }: { phone: string | null }) {
+  if (!phone) return 'None'
+  const href = telHref(phone)
+
+  return href ? <Link href={href}>{phone}</Link> : phone
 }
 
 interface EditPersonProps {
@@ -192,8 +200,12 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
   const nameChanged = name.trim() !== fullName(person)
 
   // The user lost the right to edit while editing (no longer in their group, merged, or the role ended).
-  function closeAsNoLongerEditable() {
-    void queryClient.invalidateQueries({ queryKey: personKey(churchId, person.id) })
+  function closeAsNoLongerEditable(error?: Error) {
+    // A 404 means the user can no longer see the person at all, so what is cached is dropped rather than refreshed:
+    // a failed refresh would keep the old details, and Edit with them.
+    if (error instanceof ApiError && error.status === 404) void queryClient.resetQueries({ queryKey: personKey(churchId, person.id) })
+    else void queryClient.invalidateQueries({ queryKey: personKey(churchId, person.id) })
+
     onDone()
     enqueueSnackbar('You can no longer edit these details.', { variant: 'error' })
   }
@@ -225,7 +237,7 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
       enqueueSnackbar('Details saved.', { variant: 'success' })
     },
     onError: error => {
-      if (lostAccess(error)) closeAsNoLongerEditable()
+      if (lostAccess(error)) closeAsNoLongerEditable(error)
     },
   })
 
@@ -233,7 +245,7 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
     mutationFn: () => queryClient.fetchQuery({ ...personQuery(churchId, person.id), staleTime: 0 }),
     onSuccess: latest => (latest.canEdit ? onReloaded(latest) : closeAsNoLongerEditable()),
     onError: error => {
-      if (lostAccess(error)) closeAsNoLongerEditable()
+      if (lostAccess(error)) closeAsNoLongerEditable(error)
     },
   })
 
