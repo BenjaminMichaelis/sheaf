@@ -43,7 +43,8 @@ export default function ColorModeMenu() {
       >
         {current.icon}
       </IconButton>
-      <Menu id={menuId} anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
+      {/* The id goes on the role="menu" list itself, which is what aria-controls should name. */}
+      <Menu slotProps={{ list: { id: menuId } }} anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
         {MODES.map(option => (
           // menuitemradio makes MUI announce the selected option as checked.
           <MenuItem

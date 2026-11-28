@@ -78,7 +78,7 @@ export default function ConfirmMeetingDialog({ open, groupLabel, sameDay, duplic
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Go back</Button>
-        <Button onClick={onSaveAnyway} disabled={saving} variant="contained">
+        <Button onClick={onSaveAnyway} loading={saving} variant="contained">
           Save anyway
         </Button>
       </DialogActions>

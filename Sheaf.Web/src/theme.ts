@@ -13,6 +13,26 @@ import LinkBehavior from '@/components/LinkBehavior'
 export const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'class' },
   colorSchemes: { light: true, dark: true },
+  // MUI defaults to Roboto, which would have to be downloaded; each device's own UI font needs nothing loaded, works
+  // offline, and looks native on phones (mui.com/material-ui/customization/typography/#font-family).
+  typography: {
+    fontFamily: [
+      '-apple-system',
+      'BlinkMacSystemFont',
+      '"Segoe UI"',
+      'Roboto',
+      'Oxygen',
+      'Ubuntu',
+      'Cantarell',
+      '"Fira Sans"',
+      '"Droid Sans"',
+      '"Helvetica Neue"',
+      'Arial',
+      'sans-serif',
+      '"Apple Color Emoji"',
+      '"Segoe UI Emoji"',
+    ].join(','),
+  },
   components: {
     MuiLink: { defaultProps: { component: LinkBehavior } },
     MuiButtonBase: { defaultProps: { LinkComponent: LinkBehavior } },

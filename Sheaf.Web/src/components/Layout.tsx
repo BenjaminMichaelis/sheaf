@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Link as RouterLink, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom'
 import {
   AppBar,
   Box,
@@ -8,6 +8,7 @@ import {
   Divider,
   Drawer,
   IconButton,
+  Link,
   List,
   ListItemButton,
   ListItemIcon,
@@ -60,17 +61,7 @@ export default function Layout() {
       <Divider />
       <List>
         {navItems.map(item => (
-          <ListItemButton
-            key={item.to}
-            component={NavLink}
-            to={item.to}
-            end={item.to === '/'}
-            onClick={() => setMenuOpen(false)}
-            sx={{ '&.active': { bgcolor: 'action.selected' } }}
-          >
-            <ListItemIcon>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.label} />
-          </ListItemButton>
+          <NavItemButton key={item.to} item={item} onClick={() => setMenuOpen(false)} />
         ))}
       </List>
     </Box>
@@ -87,14 +78,15 @@ export default function Layout() {
             </IconButton>
           )}
           {/* On phones the church name takes this space once the user is acting in a church. */}
-          <Typography
+          <Link
+            href="/"
             variant="h6"
-            component={RouterLink}
-            to="/"
-            sx={{ color: 'inherit', textDecoration: 'none', flexShrink: 0, display: { xs: showNav ? 'none' : 'block', sm: 'block' } }}
+            color="inherit"
+            underline="none"
+            sx={{ flexShrink: 0, display: { xs: showNav ? 'none' : 'block', sm: 'block' } }}
           >
             Sheaf
-          </Typography>
+          </Link>
           <Box sx={{ flexGrow: 1, minWidth: 0, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
             <ChurchSwitcher />
           </Box>
@@ -155,5 +147,21 @@ export default function Layout() {
 
       <ChurchConflictDialog />
     </Box>
+  )
+}
+
+/**
+ * A nav link that MUI shows as selected while its page is open. NavLink marks it aria-current="page" for screen
+ * readers; `end` keeps Home from matching every page, while a section stays selected on the pages under it.
+ */
+function NavItemButton({ item, onClick }: { item: NavItem; onClick: () => void }) {
+  const end = item.to === '/'
+  const selected = useMatch({ path: item.to, end }) !== null
+
+  return (
+    <ListItemButton component={NavLink} to={item.to} end={end} selected={selected} onClick={onClick}>
+      <ListItemIcon>{item.icon}</ListItemIcon>
+      <ListItemText primary={item.label} />
+    </ListItemButton>
   )
 }
