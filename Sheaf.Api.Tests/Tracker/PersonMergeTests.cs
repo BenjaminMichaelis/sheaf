@@ -344,7 +344,7 @@ public class PersonMergeTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task MergePerson_CurrentLeadershipOverlapsMembership_JoinsIntoOneOpenLeaderInterval()
+    public async Task MergePerson_CurrentLeadershipOverlapsEarlierMembership_KeepsMemberTimeBeforeLeadership()
     {
         using var f = await SeedAsync();
         var survivor = await AddPersonAsync(f, "Ann", "Lee");
@@ -356,11 +356,59 @@ public class PersonMergeTests : ChurchApiTestBase
 
         await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
 
+        await Assert.That(await IntervalsAsync(f)).IsEquivalentTo(
+        [
+            (survivor.Id, GroupRole.Member, now.AddDays(-100), (DateTimeOffset?)now.AddDays(-30)),
+            (survivor.Id, GroupRole.Leader, now.AddDays(-30), (DateTimeOffset?)null)
+        ]);
+    }
+
+    [Test]
+    public async Task MergePerson_ScheduledFutureLeadershipOverlapsMembership_GrantsNoLeadershipBeforeItStarts()
+    {
+        using var f = await SeedAsync();
+        var survivor = await AddPersonAsync(f, "Ann", "Lee");
+        var duplicate = await AddPersonAsync(f, "Ann", "Lee");
+        var now = Time.GetUtcNow();
+        await SeedAsync(f,
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Member, StartsAt = now.AddDays(-100) },
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = duplicate.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(10), EndsAt = now.AddDays(20) });
+
+        await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
+
+        await Assert.That(await IntervalsAsync(f)).IsEquivalentTo(
+        [
+            (survivor.Id, GroupRole.Member, now.AddDays(-100), (DateTimeOffset?)now.AddDays(10)),
+            (survivor.Id, GroupRole.Leader, now.AddDays(10), (DateTimeOffset?)now.AddDays(20)),
+            (survivor.Id, GroupRole.Member, now.AddDays(20), (DateTimeOffset?)null)
+        ]);
+    }
+
+    [Test]
+    public async Task MergePerson_MembershipInsideLeadership_LeavesOnlyTheLeadership()
+    {
+        using var f = await SeedAsync();
+        var survivor = await AddPersonAsync(f, "Ann", "Lee");
+        var duplicate = await AddPersonAsync(f, "Ann", "Lee");
+        var now = Time.GetUtcNow();
+        await SeedAsync(f,
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(-300), EndsAt = now.AddDays(-100) },
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = duplicate.Id, Role = GroupRole.Member, StartsAt = now.AddDays(-250), EndsAt = now.AddDays(-200) });
+
+        await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
+
+        await Assert.That(await IntervalsAsync(f)).IsEquivalentTo(
+        [
+            (survivor.Id, GroupRole.Leader, now.AddDays(-300), (DateTimeOffset?)now.AddDays(-100))
+        ]);
+    }
+
+    /// <summary>Every assignment in the fixture's group, in any role, as (person, role, start, end).</summary>
+    private static async Task<(Guid, GroupRole, DateTimeOffset, DateTimeOffset?)[]> IntervalsAsync(Fixture f)
+    {
         var leaders = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/leaders"));
         var members = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/members"));
-        await Assert.That(members.Items).IsEmpty();
-        var leader = await Assert.That(leaders.Items).HasSingleItem();
-        await Assert.That((leader.PersonId, leader.StartsAt, leader.EndsAt)).IsEqualTo((survivor.Id, now.AddDays(-100), (DateTimeOffset?)null));
+        return [.. leaders.Items.Concat(members.Items).Select(a => (a.PersonId, a.Role, a.StartsAt, a.EndsAt))];
     }
 
     [Test]

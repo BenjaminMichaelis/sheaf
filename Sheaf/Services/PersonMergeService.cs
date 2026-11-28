@@ -155,9 +155,9 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
     /// duplicate's account link when it has none; if both have one, nothing is saved and the result is 409.</item>
     /// <item>Attendance moves to the survivor. Where both were present at the same meeting, the earlier record stays and
     /// the other is taken off the list, kept as history like any removal.</item>
-    /// <item>Group assignments move to the survivor. Assignments in the same group whose intervals overlap become one,
-    /// from the earliest start. Across roles Leader wins, but only as long as the leadership lasted, so a past leadership
-    /// never becomes current access (see <see cref="JoinAssignments"/>).</item>
+    /// <item>Group assignments move to the survivor. Assignments in the same group whose intervals overlap are joined.
+    /// Across roles Leader wins, but never longer than the leadership itself, so a past or scheduled leadership never
+    /// becomes current access (see <see cref="Parts"/>).</item>
     /// <item>Dismissed pairs that named the duplicate name the survivor.</item>
     /// <item>A household the merge leaves with nobody in it is deleted.</item>
     /// <item>The duplicate keeps its values, but becomes inactive, leaves its household and account, and records whom
@@ -230,6 +230,11 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
             a.PersonId = survivor.Id;
         foreach (var a in assignments.Except(joined.Absorbed))
             a.PersonId = survivor.Id;
+        foreach (var a in joined.Added)
+        {
+            a.PersonId = survivor.Id;
+            db.GroupAssignments.Add(a);
+        }
         survivor.FirstName = fields.FirstName == PersonMergeChoice.Duplicate ? duplicate.FirstName : survivor.FirstName;
         survivor.LastName = Pick(fields.LastName, survivor.LastName, duplicate.LastName);
         survivor.Email = Pick(fields.Email, survivor.Email, duplicate.Email);
@@ -288,24 +293,21 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         }
     }
 
-    private sealed record JoinedAssignments(List<GroupAssignment> Absorbed, List<AssignmentChange> Changes);
+    /// <summary>
+    /// Absorbed rows are deleted, changed rows are kept with a new interval and role, and added rows are new intervals
+    /// (only when a run needs more intervals than it has rows).
+    /// </summary>
+    private sealed record JoinedAssignments(List<GroupAssignment> Absorbed, List<AssignmentChange> Changes, List<GroupAssignment> Added);
 
     /// <summary>
     /// Plans how two people's assignments become one person's. In each group, sorted by start, an assignment that begins
     /// before the current run ends (an open run never ends) joins that run; intervals that only touch stay separate, as a
-    /// role change leaves them. Each run of two or more becomes one interval from its earliest start:
-    /// <list type="bullet">
-    /// <item>All one role: that role, to the run's latest end.</item>
-    /// <item>Mixed roles, Leader wins: Leader, but never longer than the leadership itself. If a Leader interval is still
-    /// open, the joined Leader interval is open. Otherwise it ends when the last Leader interval did, and any Member time
-    /// after that stays a separate Member interval, so a past leadership never becomes current access.</item>
-    /// </list>
-    /// The run's first assignment and, when needed, one more are kept and changed; the rest are absorbed (deleted).
+    /// role change leaves them. Each run of two or more is rewritten as touching intervals (see <see cref="Parts"/>), using
+    /// the run's rows in start order and absorbing any left over.
     /// </summary>
     private static JoinedAssignments JoinAssignments(List<GroupAssignment> assignments)
     {
-        var absorbed = new List<GroupAssignment>();
-        var changes = new List<AssignmentChange>();
+        var joined = new JoinedAssignments([], [], []);
         foreach (var group in assignments.GroupBy(a => a.GroupId))
         {
             var run = new List<GroupAssignment>();
@@ -314,39 +316,54 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
             {
                 if (run.Count > 0 && runEnd is { } end && a.StartsAt >= end)
                 {
-                    Plan(run, runEnd, absorbed, changes);
+                    Plan(run, runEnd, joined);
                     run = [];
                 }
                 runEnd = run.Count == 0 ? a.EndsAt : Later(runEnd, a.EndsAt);
                 run.Add(a);
             }
-            Plan(run, runEnd, absorbed, changes);
+            Plan(run, runEnd, joined);
         }
-        return new(absorbed, changes);
+        return joined;
     }
 
-    private static void Plan(List<GroupAssignment> run, DateTimeOffset? runEnd, List<GroupAssignment> absorbed, List<AssignmentChange> changes)
+    private static void Plan(List<GroupAssignment> run, DateTimeOffset? runEnd, JoinedAssignments joined)
     {
         if (run.Count < 2)
             return;
-        var first = run[0];
+        var parts = Parts(run, runEnd);
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var (startsAt, endsAt, role) = parts[i];
+            if (i < run.Count)
+                joined.Changes.Add(new(run[i], startsAt, endsAt, role));
+            else
+                joined.Added.Add(new GroupAssignment { GroupId = run[0].GroupId, Role = role, StartsAt = startsAt, EndsAt = endsAt });
+        }
+        joined.Absorbed.AddRange(run.Skip(parts.Count));
+    }
+
+    /// <summary>
+    /// The touching intervals one run becomes. All one role: that role from the earliest start to the latest end. Mixed
+    /// roles, Leader wins, but never longer than the leadership itself: Leader from the first Leader start to the last
+    /// Leader end (open if any Leader interval is open), with Member time before and after it kept as Member. So a past
+    /// leadership never becomes current access, and leadership never starts earlier than it did.
+    /// </summary>
+    private static List<(DateTimeOffset StartsAt, DateTimeOffset? EndsAt, GroupRole Role)> Parts(List<GroupAssignment> run, DateTimeOffset? runEnd)
+    {
+        var start = run[0].StartsAt;
         var leaders = run.Where(a => a.Role == GroupRole.Leader).ToArray();
         if (leaders.Length == 0 || leaders.Length == run.Count)
-        {
-            changes.Add(new(first, first.StartsAt, runEnd, first.Role));
-            absorbed.AddRange(run.Skip(1));
-            return;
-        }
+            return [(start, runEnd, run[0].Role)];
+        var leaderStart = leaders.Min(a => a.StartsAt);
         var leaderEnd = leaders.Select(a => a.EndsAt).Aggregate(Later);
-        changes.Add(new(first, first.StartsAt, leaderEnd, GroupRole.Leader));
-        // Members stayed on after the last leadership ended: that time is kept as Member, starting where Leader ended.
+        var parts = new List<(DateTimeOffset, DateTimeOffset?, GroupRole)>();
+        if (start < leaderStart)
+            parts.Add((start, leaderStart, GroupRole.Member));
+        parts.Add((leaderStart, leaderEnd, GroupRole.Leader));
         if (leaderEnd is { } ended && (runEnd is null || runEnd > ended))
-        {
-            changes.Add(new(run[1], ended, runEnd, GroupRole.Member));
-            absorbed.AddRange(run.Skip(2));
-        }
-        else
-            absorbed.AddRange(run.Skip(1));
+            parts.Add((ended, runEnd, GroupRole.Member));
+        return parts;
     }
 
     /// <summary>The later of two ends, where null (still open) is latest.</summary>

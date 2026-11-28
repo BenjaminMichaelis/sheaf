@@ -173,10 +173,11 @@ the survivor's unless `Duplicate` is chosen. In one transaction, the merge:
 - moves attendance to the survivor. Where both were at the same meeting, the earlier
   record stays and the other is taken off the list as history.
 - moves group assignments. Overlapping intervals in the same group join into one, and
-  separate ones stay separate. Across roles Leader wins, but only for as long as the
-  leadership lasted: if every Leader interval has ended, the joined Leader interval
-  ends there and any later Member time stays a Member interval, so a past leadership
-  never becomes current access.
+  separate ones stay separate. Across roles Leader wins, but never longer than the
+  leadership itself: Leader runs from the first Leader start to the last Leader end, and
+  Member time before or after it stays Member. So leadership never starts earlier or
+  lasts longer than it did, and a past or scheduled leadership never becomes current
+  access.
 - moves the account link if only the duplicate has one. If both have one, it returns
   409 with `reason: bothLinkedToAccounts`.
 - makes the survivor active if either person was.
