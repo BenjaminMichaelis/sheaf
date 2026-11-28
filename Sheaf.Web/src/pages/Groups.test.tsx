@@ -269,10 +269,11 @@ describe('Groups', () => {
     expect(screen.queryByText('Earlier village')).not.toBeInTheDocument()
   })
 
-  it.each([
-    { role: 'Leader' as const, endedOffered: false },
-    { role: 'Staff' as const, endedOffered: true },
-  ])('Groups_$role_OffersAttendanceForCurrentGroupsAndForEndedOnlyToStaff', async ({ role, endedOffered }) => {
+  // %s, not $role: Vitest would read "$role_Offers…" as one property name and print "undefined".
+  it.each<['Leader' | 'Staff', boolean]>([
+    ['Leader', false],
+    ['Staff', true],
+  ])('Groups_%s_OffersAttendanceForCurrentGroupsAndForEndedOnlyToStaff', async (role, endedOffered) => {
     mockApi({
       'GET /api/auth/user': () => json(signedInUser(role)),
       'GET /api/church/settings': () => json(villageSettings),
