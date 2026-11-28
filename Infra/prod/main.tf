@@ -4,6 +4,17 @@ locals {
     {
       "Environment" = local.environment
   })
+
+  # Planning Center stays unconfigured (the API reports configured: false) until var.planning_center is set.
+  planning_center_env = var.planning_center == null ? {} : {
+    PlanningCenter__ClientId    = var.planning_center.client_id
+    PlanningCenter__RedirectUri = var.planning_center.redirect_uri
+    PlanningCenter__ReturnUrl   = var.planning_center.return_url
+    PlanningCenter__UserAgent   = var.planning_center.user_agent
+  }
+  planning_center_secrets = var.planning_center == null ? {} : {
+    PlanningCenter__ClientSecret = var.planning_center.client_secret_key_vault_secret_id
+  }
 }
 
 resource "azurerm_resource_group" "resource_group" {
@@ -42,12 +53,14 @@ module "backend_container_app" {
   identity_id                     = azurerm_user_assigned_identity.app_identity.id
   container_registry_login_server = var.acr_login_server
 
-  env_vars = {
+  env_vars = merge({
     AZURE_CLIENT_ID = azurerm_user_assigned_identity.app_identity.client_id
     # Aspire uses ConnectionStrings__<key> naming convention
-    ConnectionStrings__Database = module.sql.connection_string
+    ConnectionStrings__Database           = module.sql.connection_string
     APPLICATIONINSIGHTS_CONNECTION_STRING = module.application_insights.application_insights.connection_string
-  }
+  }, local.planning_center_env)
+
+  key_vault_secrets = local.planning_center_secrets
 
   depends_on = [module.sql]
 }

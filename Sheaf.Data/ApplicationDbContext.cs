@@ -41,6 +41,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<Attendance> Attendances => Set<Attendance>();
 
+    public DbSet<ChurchIntegration> ChurchIntegrations => Set<ChurchIntegration>();
+
+    public DbSet<IntegrationTenantLink> IntegrationTenantLinks => Set<IntegrationTenantLink>();
+
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
@@ -159,6 +163,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
             entity.HasIndex(attendance => new { attendance.ChurchId, attendance.PersonId });
             entity.ToTable(table => table.HasCheckConstraint("CK_Attendances_Removed",
                 "([RemovedAt] IS NULL AND [RemovedByUserId] IS NULL) OR ([RemovedAt] IS NOT NULL AND [RemovedAt] >= [RecordedAt])"));
+        });
+
+        builder.Entity<ChurchIntegration>(entity =>
+        {
+            entity.Property(integration => integration.Provider).HasConversion<string>().HasMaxLength(50);
+            entity.HasOne<Church>().WithMany().HasForeignKey(integration => integration.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired();
+            entity.HasIndex(integration => new { integration.ChurchId, integration.Provider }).IsUnique();
+        });
+        builder.Entity<IntegrationTenantLink>(entity =>
+        {
+            entity.Property(link => link.Provider).HasConversion<string>().HasMaxLength(50);
+            entity.HasOne<Church>().WithMany().HasForeignKey(link => link.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired();
         });
 
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")

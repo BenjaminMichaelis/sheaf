@@ -32,7 +32,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected const string CookieName = "__Host-sheaf";
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>(), new JsonStringEnumConverter<GroupRole>() }
+        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>(), new JsonStringEnumConverter<GroupRole>(), new JsonStringEnumConverter<IntegrationStatus>() }
     };
 
     private string _connectionString = "";
