@@ -31,7 +31,7 @@ export default function ChurchSwitcher() {
 
     try {
       await switchChurch(churchId)
-      // Pages hold data for the previous church; start again from home.
+      // The current page may not exist, or may not be allowed, in the new church; start again from home.
       navigate('/')
     } catch (error) {
       enqueueSnackbar(error instanceof Error ? error.message : 'Could not switch church.', { variant: 'error' })

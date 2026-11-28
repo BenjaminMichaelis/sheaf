@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { UserInfo } from '@/types'
 
-import { apiClient, CHURCH_CONFLICT_PROBLEM_TYPE, ChurchConflictError, onChurchConflict, setActiveChurch } from './apiClient'
+import {
+  ApiError,
+  apiClient,
+  CHURCH_CONFLICT_PROBLEM_TYPE,
+  ChurchConflictError,
+  churchHeaders,
+  onChurchConflict,
+  setActiveChurch,
+} from './apiClient'
 
 describe('apiClient', () => {
   afterEach(() => {
@@ -171,6 +179,29 @@ describe('apiClient', () => {
     const [churchRequest, authRequest] = fetchMock.mock.calls.map(([request]) => new Request(request))
     expect(churchRequest?.headers.get('X-Sheaf-Church')).toBe(churchId)
     expect(authRequest?.headers.get('X-Sheaf-Church')).toBeNull()
+  })
+
+  it('GET_ChurchRequestNamingItsChurch_KeepsThatChurch', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ items: [], nextOffset: null })))
+
+    setActiveChurch('019a0000-0000-7000-8000-000000000001')
+    await apiClient.GET('/api/church/groups', { headers: churchHeaders('019a0000-0000-7000-8000-000000000002') })
+
+    const [request] = fetchMock.mock.calls.map(([input]) => new Request(input))
+    expect(request?.headers.get('X-Sheaf-Church')).toBe('019a0000-0000-7000-8000-000000000002')
+  })
+
+  it('POST_ValidationProblem_RejectsWithStatusAndProblemDetails', async () => {
+    const problem = { title: 'Confirm these people are new.', status: 409, errors: {}, similar: [{ id: 'p1' }] }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(problem), {
+      status: 409,
+      headers: { 'content-type': 'application/problem+json' },
+    }))
+
+    const failure = apiClient.POST('/api/church/households', { body: { memberIds: [] } })
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({ status: 409, problem })
   })
 
   it('POST_ChurchConflictProblem_RejectsWithChurchConflictAndNotifiesListeners', async () => {

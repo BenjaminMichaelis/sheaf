@@ -1,7 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { components } from '@/api/schema'
 import { can, type Capability } from '@/auth/permissions'
-import { apiClient, setActiveChurch } from '@/services/apiClient'
+import { setActiveChurch } from '@/services/apiClient'
+import { churchSettingsQuery } from '@/services/churchQueries'
 import { useAuth } from './AuthContext'
 
 type ChurchInfo = components['schemas']['ChurchInfo']
@@ -13,12 +15,6 @@ export interface GroupLabels {
 }
 
 const DEFAULT_GROUP_LABELS: GroupLabels = { one: 'Group', many: 'Groups' }
-
-interface ChurchSettings {
-  churchId: string
-  labels: GroupLabels
-  timeZoneId: string
-}
 
 interface ChurchContextType {
   /** The church this page acts for, or null when the account has none selected. */
@@ -41,9 +37,7 @@ export function ChurchProvider({ children }: { children: ReactNode }) {
   const church = user?.isAuthenticated ? (user.currentChurch ?? null) : null
   const churches = user?.isAuthenticated ? user.churches : undefined
   const churchId = church?.churchId ?? null
-  const [settings, setSettings] = useState<ChurchSettings | null>(null)
-  const [failure, setFailure] = useState<{ churchId: string; message: string } | null>(null)
-  const [attempt, setAttempt] = useState(0)
+  const settings = useQuery(churchSettingsQuery(churchId))
 
   // Not documented as an ordering guarantee: this relies on React committing layout effects (this one included)
   // before any passive useEffect, so children's first requests already carry the church. Requests made outside a
@@ -52,54 +46,23 @@ export function ChurchProvider({ children }: { children: ReactNode }) {
     setActiveChurch(churchId)
   }, [churchId])
 
-  useEffect(() => {
-    if (churchId === null) return
-    let cancelled = false
-
-    apiClient
-      .GET('/api/church/settings')
-      .then(({ data }) => {
-        if (cancelled) return
-
-        if (!data) throw new Error('Church settings response is empty.')
-        setSettings({
-          churchId,
-          labels: { one: data.groupLabel, many: data.groupLabelPlural },
-          timeZoneId: data.timeZoneId,
-        })
-        setFailure(null)
-      })
-      // Labels fall back to the defaults, but dates need the church's zone, so the failure is reported for retry.
-      .catch(caught => {
-        if (!cancelled) setFailure({ churchId, message: caught instanceof Error ? caught.message : 'Could not load church settings.' })
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [churchId, attempt])
-
-  const current = settings !== null && settings.churchId === churchId ? settings : null
-  const settingsError = failure !== null && failure.churchId === churchId && current === null ? failure.message : null
-
-  // Clears the old error so it does not linger while the retry is in flight.
-  const reloadSettings = useCallback(() => {
-    setFailure(null)
-    setAttempt(value => value + 1)
-  }, [])
+  // Labels fall back to the defaults, but dates need the church's zone, so a failure is reported for retry. It is
+  // hidden while the retry is in flight, and once settings have loaded a later failed refresh keeps them.
+  const settingsError = settings.data === undefined && settings.isError && !settings.isFetching ? settings.error.message : null
+  const { data, refetch } = settings
 
   const value = useMemo<ChurchContextType>(
     () => ({
       church,
       churches: churches ?? [],
-      labels: current?.labels ?? DEFAULT_GROUP_LABELS,
-      timeZoneId: current?.timeZoneId ?? null,
+      labels: data ? { one: data.groupLabel, many: data.groupLabelPlural } : DEFAULT_GROUP_LABELS,
+      timeZoneId: data?.timeZoneId ?? null,
       settingsError,
-      reloadSettings,
+      reloadSettings: () => void refetch(),
       can: capability => can(church?.role, capability),
       switchChurch,
     }),
-    [church, churches, current, settingsError, reloadSettings, switchChurch],
+    [church, churches, data, settingsError, refetch, switchChurch],
   )
 
   return <ChurchContext value={value}>{children}</ChurchContext>

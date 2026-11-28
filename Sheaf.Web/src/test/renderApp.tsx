@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { SnackbarProvider } from 'notistack'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
@@ -8,6 +9,7 @@ import type { UserInfo } from '@/types'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { ChurchProvider } from '@/contexts/ChurchContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
+import { createQueryClient } from '@/services/queryClient'
 
 export type ChurchRole = NonNullable<UserInfo['currentChurch']>['role']
 
@@ -48,20 +50,28 @@ export function mockApi(routes: Record<string, Handler>) {
   })
 }
 
-/** Renders `ui` inside the app's providers at `path`, with a user-event session set up first as Testing Library recommends. */
+/**
+ * Renders `ui` inside the app's providers at `path`, with a user-event session set up first as Testing Library recommends.
+ * Each render gets its own app query cache with retries off, as TanStack Query's testing guide recommends, so tests
+ * share no cached data and a failure shows at once.
+ */
 export function renderApp(ui: ReactElement, path = '/') {
   const user = userEvent.setup()
+  const queryClient = createQueryClient()
+  queryClient.setDefaultOptions({ queries: { ...queryClient.getDefaultOptions().queries, retry: false } })
 
   const result = render(
-    <ThemeProvider>
-      <SnackbarProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <AuthProvider>
-            <ChurchProvider>{ui}</ChurchProvider>
-          </AuthProvider>
-        </MemoryRouter>
-      </SnackbarProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <SnackbarProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <AuthProvider>
+              <ChurchProvider>{ui}</ChurchProvider>
+            </AuthProvider>
+          </MemoryRouter>
+        </SnackbarProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 
   return { user, ...result }

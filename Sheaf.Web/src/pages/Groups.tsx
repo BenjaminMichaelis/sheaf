@@ -1,16 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { Alert, Box, Button, Chip, CircularProgress, List, ListItem, ListItemText, Paper, Typography } from '@mui/material'
 import type { components } from '@/api/schema'
 import { useChurch } from '@/contexts/ChurchContext'
-import { apiClient } from '@/services/apiClient'
+import { groupsQuery } from '@/services/churchQueries'
 import { formatChurchDate } from '@/utils/dates'
 
 type Group = components['schemas']['GroupResponse']
 
 type Phase = 'upcoming' | 'current' | 'ended'
-
-const PAGE_SIZE = 50
-const FALLBACK_ERROR = 'Could not load.'
 
 /** Where the group is in its life at `now`. Ended groups stay listed as history; Staff can create groups that start later. */
 function phaseOf(group: Group, now: Date): Phase {
@@ -23,64 +21,24 @@ function phaseOf(group: Group, now: Date): Phase {
 export default function Groups() {
   const { church } = useChurch()
 
-  // A new church gets a fresh list: nothing loaded for the previous church can be shown or appended under it.
-  return <ChurchGroups key={church?.churchId ?? 'none'} />
+  // The route only renders this with a church selected.
+  return church ? <ChurchGroups churchId={church.churchId} /> : null
 }
 
-function ChurchGroups() {
+function ChurchGroups({ churchId }: { churchId: string }) {
   const { labels, timeZoneId, settingsError, reloadSettings } = useChurch()
-  const [groups, setGroups] = useState<Group[]>([])
-  const [nextOffset, setNextOffset] = useState<number | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [moreError, setMoreError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
 
-  // The first page; reloads when the user retries.
-  useEffect(() => {
-    let cancelled = false
+  const { data, error, isError, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } =
+    useInfiniteQuery(groupsQuery(churchId))
 
-    fetchGroups(0)
-      .then(page => {
-        if (cancelled) return
-        setGroups(page.items)
-        setNextOffset(page.nextOffset)
-        setError(null)
-      })
-      .catch(caught => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : FALLBACK_ERROR)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [attempt])
-
-  const retry = () => {
-    setLoading(true)
-    setAttempt(value => value + 1)
-  }
-
-  // A failed later page keeps the pages already shown; retrying asks for the same page again.
-  const loadMore = async (offset: number) => {
-    // Hides both "Load more" and the error's Retry, so one page is never requested twice at once.
-    setLoading(true)
-    setMoreError(null)
-
-    try {
-      const page = await fetchGroups(offset)
-      setGroups(previous => [...previous, ...page.items])
-      setNextOffset(page.nextOffset)
-      setMoreError(null)
-    } catch (caught) {
-      setMoreError(caught instanceof Error ? caught.message : FALLBACK_ERROR)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const groups = data?.pages.flatMap(page => page.items) ?? []
+  // Errors are hidden while their retry is in flight. A failed later page, or a failed background refresh, keeps the
+  // pages already shown.
+  const firstPageError = data === undefined && isError && !isFetching ? error.message : null
+  const moreError = isFetchNextPageError && !isFetching ? error.message : null
+  const loading = isFetching && (data === undefined || isFetchingNextPage)
+  // TanStack Query recommends calling fetchNextPage only when nothing else is fetching, so a refresh is not overwritten.
+  const canLoadMore = hasNextPage && !isFetching && moreError === null
 
   const now = new Date()
   const byPhase = (phase: Phase) => groups.filter(group => phaseOf(group, now) === phase)
@@ -100,13 +58,13 @@ function ChurchGroups() {
         </Alert>
       )}
 
-      {error && (
-        <Alert severity="error" action={<RetryButton onClick={retry} />} sx={{ mb: 2 }}>
-          {error}
+      {firstPageError && (
+        <Alert severity="error" action={<RetryButton onClick={() => void refetch()} />} sx={{ mb: 2 }}>
+          {firstPageError}
         </Alert>
       )}
 
-      {!loading && !error && groups.length === 0 && (
+      {data !== undefined && groups.length === 0 && (
         <Typography color="text.secondary">No {labels.many} to show yet.</Typography>
       )}
 
@@ -126,8 +84,8 @@ function ChurchGroups() {
         </GroupSection>
       )}
 
-      {!loading && moreError && nextOffset !== null && (
-        <Alert severity="error" action={<RetryButton onClick={() => void loadMore(nextOffset)} />} sx={{ mt: 2 }}>
+      {moreError && (
+        <Alert severity="error" action={<RetryButton onClick={() => void fetchNextPage()} />} sx={{ mt: 2 }}>
           {moreError}
         </Alert>
       )}
@@ -138,20 +96,13 @@ function ChurchGroups() {
         </Box>
       )}
 
-      {!loading && !moreError && nextOffset !== null && (
+      {canLoadMore && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-          <Button onClick={() => void loadMore(nextOffset)}>Load more</Button>
+          <Button onClick={() => void fetchNextPage()}>Load more</Button>
         </Box>
       )}
     </Box>
   )
-}
-
-/** One page of groups; `nextOffset` is null on the last page. */
-async function fetchGroups(offset: number): Promise<{ items: Group[]; nextOffset: number | null }> {
-  const { data } = await apiClient.GET('/api/church/groups', { params: { query: { offset, limit: PAGE_SIZE } } })
-
-  return { items: data?.items ?? [], nextOffset: data?.nextOffset == null ? null : Number(data.nextOffset) }
 }
 
 /** An alert's action button, styled as MUI's Alert examples show. */
