@@ -1,9 +1,17 @@
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
-using System.Net.Mail;
+
+using MailKit;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 
 using Microsoft.Extensions.Options;
+
+using MimeKit;
+using MimeKit.Text;
+
+using MailAddress = System.Net.Mail.MailAddress;
 
 namespace Sheaf.Email;
 
@@ -32,11 +40,14 @@ internal sealed class SmtpOptions
 }
 
 /// <summary>
-/// Sends through an SMTP server. <see cref="SmtpClient"/> is enough for one plain-text message at a time; Microsoft
-/// recommends MailKit for new development, which is worth switching to if the app needs pooling or richer MIME.
+/// Sends through an SMTP server with MailKit, which Microsoft recommends over <c>System.Net.Mail.SmtpClient</c> for new
+/// development. Works with any SMTP relay, including Mailpit locally and Mailjet or Azure Communication Services.
 /// </summary>
 internal sealed class SmtpEmailTransport(IOptions<EmailOptions> options) : IEmailTransport
 {
+    /// <summary>The submission port that uses TLS from the first byte (RFC 8314) rather than upgrading with STARTTLS.</summary>
+    private const int ImplicitTlsPort = 465;
+
     public async Task SendAsync(EmailMessage message, CancellationToken cancellationToken)
     {
         EmailOptions email = options.Value;
@@ -45,19 +56,33 @@ internal sealed class SmtpEmailTransport(IOptions<EmailOptions> options) : IEmai
         {
             throw new InvalidOperationException("SmtpEmailTransport is only registered when a mail server is configured.");
         }
-        using SmtpClient client = new(smtp.Host, smtp.Port) { EnableSsl = smtp.EnableSsl };
+
+        using MimeMessage mail = new();
+        mail.From.Add(MailboxAddress.Parse(email.From));
+        mail.To.Add(MailboxAddress.Parse(message.To));
+        mail.Subject = message.Subject;
+        mail.Body = new TextPart(TextFormat.Plain) { Text = message.Body };
+
+        using SmtpClient client = new();
+        await client.ConnectAsync(smtp.Host, smtp.Port, SecureSocket(smtp), cancellationToken);
         if (!string.IsNullOrWhiteSpace(smtp.UserName))
         {
-            client.Credentials = new NetworkCredential(smtp.UserName, smtp.Password);
+            await client.AuthenticateAsync(smtp.UserName, smtp.Password ?? "", cancellationToken);
         }
-        using MailMessage mail = new(new MailAddress(email.From), new MailAddress(message.To))
-        {
-            Subject = message.Subject,
-            Body = message.Body,
-            IsBodyHtml = false
-        };
-        await client.SendMailAsync(mail, cancellationToken);
+        await client.SendAsync(mail, cancellationToken);
+        await client.DisconnectAsync(quit: true, cancellationToken);
     }
+
+    /// <summary>
+    /// With TLS on, port 465 connects over TLS and any other port (587 by default) must upgrade with STARTTLS: a server
+    /// that doesn't offer it fails the send rather than getting the code in the clear. Mailpit runs without TLS.
+    /// </summary>
+    private static SecureSocketOptions SecureSocket(SmtpOptions smtp) => smtp switch
+    {
+        { EnableSsl: false } => SecureSocketOptions.None,
+        { Port: ImplicitTlsPort } => SecureSocketOptions.SslOnConnect,
+        _ => SecureSocketOptions.StartTls
+    };
 }
 
 /// <summary>

@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MailKit" />
     <ProjectReference Include="..\Sheaf.Core\Sheaf.Core.csproj" />
     <ProjectReference Include="..\Sheaf.Data\Sheaf.Data.csproj" />
     <ProjectReference Include="..\Sheaf.ServiceDefaults\Sheaf.ServiceDefaults.csproj" />
