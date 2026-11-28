@@ -1,9 +1,10 @@
 import { Route, Routes } from 'react-router-dom'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { components } from '@/api/schema'
 import Person from '@/pages/Person'
-import { json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
+import { personQuery } from '@/services/churchQueries'
+import { FIRST_CHURCH, json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
 
 type PersonResponse = components['schemas']['PersonResponse']
 
@@ -69,7 +70,7 @@ interface ApiOptions {
   /** Returned in turn by each household read: a household, or a function answering with an error. */
   households?: (HouseholdResponse | (() => Response))[]
   lookup?: PersonMatch[]
-  save?: (request: HouseholdRequest, attempt: number) => Response
+  save?: (request: HouseholdRequest, attempt: number) => Response | Promise<Response>
 }
 
 /** Stubs Max's page and household; records every household save and how often each was read. */
@@ -186,6 +187,7 @@ describe('HouseholdSection', () => {
     // The person's page is refreshed, so the new household replaces "Not in a household".
     expect(await screen.findByText('Max and friends')).toBeInTheDocument()
     expect(screen.queryByText('Not in a household.')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Household' })).toHaveFocus()
     expect(saved).toEqual([{ method: 'POST', request: { memberIds: ['p-max'], label: 'Max and friends' }, ifMatch: null }])
   })
 
@@ -200,14 +202,14 @@ describe('HouseholdSection', () => {
     expect(saved[0]?.request).toEqual({ memberIds: ['p-max'], label: null })
   })
 
-  it('HouseholdSection_StartRefused_SaysThisPersonCantBePutInAHousehold', async () => {
+  it('HouseholdSection_StartRefused_ShowsTheServersReason', async () => {
     mockHouseholdApi({ people: [max(noHousehold)], save: () => problem(403, 'Access denied.') })
     const { user } = renderPerson()
 
     await user.click(await screen.findByRole('button', { name: 'Start a household' }))
     await user.click(screen.getByRole('button', { name: 'Start household' }))
 
-    expect(await screen.findByText("You can't start a household for this person.")).toBeInTheDocument()
+    expect(await screen.findByText('Access denied.')).toBeInTheDocument()
   })
 
   it('HouseholdSection_AddSomeoneWithoutAHousehold_SavesThemForTheVersionShownAndRefreshesTheProfile', async () => {
@@ -229,7 +231,10 @@ describe('HouseholdSection', () => {
     ['WithoutALabel', zoe({ inHousehold: true }), /Zoe Visitor is in another household/],
   ])('HouseholdSection_AddSomeoneFromAnotherHousehold%s_MovesThemOnlyWhenConfirmed', async (_, match, question) => {
     const { saved } = mockHouseholdApi({ lookup: [match] })
-    const { user } = renderPerson()
+    const { user, queryClient } = renderPerson()
+    // The page of someone still in the household Zoe leaves, as if opened earlier.
+    const leftBehind = personQuery(FIRST_CHURCH, 'p-left-behind').queryKey
+    queryClient.setQueryData(leftBehind, max({ id: 'p-left-behind' }))
 
     await user.type(await addBox(), 'Zo')
     await user.click(await screen.findByRole('option', { name: /^Zoe Visitor/ }))
@@ -240,6 +245,22 @@ describe('HouseholdSection', () => {
 
     expect(await screen.findByText('Zoe Visitor moved here.')).toBeInTheDocument()
     expect(saved[0]?.request.memberIds).toEqual(['p-max', 'p-mia', 'p-zoe'])
+    // That household's members (unknown here) list Zoe until refreshed, so every person's page is marked out of date.
+    expect(queryClient.getQueryState(leftBehind)?.isInvalidated).toBe(true)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Household' })).toHaveFocus())
+  })
+
+  it('HouseholdSection_RemoveDoubleClicked_SendsOneChange', async () => {
+    const { saved } = mockHouseholdApi({ save: () => new Promise<Response>(() => {}) })
+    renderPerson()
+
+    // Two clicks in the same tick, before the page can show the first change is saving, as a fast double click can be.
+    const remove = await screen.findByRole('button', { name: 'Remove Mia' })
+    fireEvent.click(remove)
+    fireEvent.click(remove)
+
+    await waitFor(() => expect(saved).toHaveLength(1))
+    expect(saved).toHaveLength(1)
   })
 
   it('HouseholdSection_MoveCancelled_SavesNothing', async () => {

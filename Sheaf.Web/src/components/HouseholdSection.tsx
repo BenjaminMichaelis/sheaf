@@ -57,7 +57,7 @@ export default function HouseholdSection({ churchId, person, canManage }: Househ
         Household
       </Typography>
       {person.householdId === null ? (
-        <NoHousehold churchId={churchId} person={person} canManage={canManage} />
+        <NoHousehold churchId={churchId} person={person} canManage={canManage} heading={heading} />
       ) : (
         <Household churchId={churchId} householdId={person.householdId} person={person} canManage={canManage} heading={heading} />
       )}
@@ -65,7 +65,7 @@ export default function HouseholdSection({ churchId, person, canManage }: Househ
   )
 }
 
-function NoHousehold({ churchId, person, canManage }: HouseholdSectionProps) {
+function NoHousehold({ churchId, person, canManage, heading }: HouseholdSectionProps & { heading: RefObject<HTMLHeadingElement | null> }) {
   const queryClient = useQueryClient()
   const { enqueueSnackbar } = useSnackbar()
   const [starting, setStarting] = useState(false)
@@ -77,13 +77,10 @@ function NoHousehold({ churchId, person, canManage }: HouseholdSectionProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: personKey(churchId, person.id) })
       enqueueSnackbar('Household started.', { variant: 'success' })
+      // The buttons used are replaced by the new household, so focus moves to the section, as after other changes.
+      heading.current?.focus()
     },
   })
-
-  // A 403 means the API won't let this user put the person in a household (for example someone a Leader created who is
-  // in none of their groups), so it is said plainly rather than as the bare refusal.
-  const startError =
-    start.error instanceof ApiError && start.error.status === 403 ? "You can't start a household for this person." : start.error?.message
 
   return (
     <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
@@ -102,7 +99,7 @@ function NoHousehold({ churchId, person, canManage }: HouseholdSectionProps) {
             helperText={person.lastName ? `Left empty, it is called "The ${person.lastName} Family".` : undefined}
             sx={{ alignSelf: 'stretch' }}
           />
-          {startError && <Alert severity="error">{startError}</Alert>}
+          {start.error && <Alert severity="error">{start.error.message}</Alert>}
           <Box sx={{ display: 'flex', gap: 2 }}>
             {/* Stays disabled once started, until the page shows the new household, so it is never started twice. */}
             <Button variant="contained" onClick={() => start.mutate()} disabled={start.isPending || start.isSuccess}>
@@ -319,6 +316,8 @@ function ManageHousehold({ churchId, household, person, heading }: ManageHouseho
           <Button onClick={closeMoving}>Cancel</Button>
           <Button
             variant="contained"
+            // Waits for any change still saving, so the move is never dropped by the double-click guard.
+            disabled={change.isPending}
             onClick={() => {
               if (moving) send({ memberIds: [...memberIds, moving.match.id], moved: true, done: `${moving.match.name} moved here.` })
               closeMoving()
