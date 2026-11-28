@@ -1,0 +1,87 @@
+import { Route, Routes } from 'react-router-dom'
+import { screen, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { FIRST_CHURCH, SECOND_CHURCH, json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
+import { setScreenWidth } from '@/test/screen'
+import Layout from './Layout'
+
+const villageSettings = {
+  name: 'Church 1',
+  timeZoneId: 'America/Chicago',
+  groupLabel: 'Village',
+  groupLabelPlural: 'Villages',
+}
+
+function renderLayout() {
+  return renderApp(
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<p>Home page</p>} />
+      </Route>
+    </Routes>,
+  )
+}
+
+describe('Layout', () => {
+  it('Layout_SignedInToOneChurch_ShowsChurchNameAndChurchLabelsInNavigation', async () => {
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser()),
+      'GET /api/church/settings': () => json(villageSettings),
+    })
+
+    const { user } = renderLayout()
+
+    expect(await screen.findByText('Church 1')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(await within(nav).findByText('Villages')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /switch church/ })).not.toBeInTheDocument()
+  })
+
+  it('Layout_SignedInToSeveralChurches_SwitchesToChosenChurch', async () => {
+    const account = signedInUser('Leader', [FIRST_CHURCH, SECOND_CHURCH])
+    const switched = { ...account, currentChurch: account.churches?.[1] ?? null }
+
+    const fetchMock = mockApi({
+      'GET /api/auth/user': () => json(account),
+      'GET /api/church/settings': () => json(villageSettings),
+      [`POST /api/auth/church/${SECOND_CHURCH}`]: () => json(switched),
+    })
+
+    const { user } = renderLayout()
+    await user.click(await screen.findByRole('button', { name: 'Church 1, switch church' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Church 2' }))
+
+    expect(await screen.findByRole('button', { name: 'Church 2, switch church' })).toBeInTheDocument()
+
+    const switchRequest = fetchMock.mock.calls
+      .map(([request]) => new Request(request))
+      .find(request => request.method === 'POST')
+
+    expect(new URL(switchRequest?.url ?? 'http://x').pathname).toBe(`/api/auth/church/${SECOND_CHURCH}`)
+  })
+
+  it('Layout_DesktopWidth_ShowsNavigationWithoutMenuButton', async () => {
+    setScreenWidth(1280)
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser()),
+      'GET /api/church/settings': () => json(villageSettings),
+    })
+
+    renderLayout()
+
+    const nav = await screen.findByRole('navigation', { name: 'Main' })
+    expect(await within(nav).findByText('Villages')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Open navigation' })).not.toBeInTheDocument()
+  })
+
+  it('Layout_SignedInWithoutChurch_HidesNavigation', async () => {
+    mockApi({ 'GET /api/auth/user': () => json({ ...signedInUser(), churches: [], currentChurch: null }) })
+
+    renderLayout()
+
+    expect(await screen.findByRole('button', { name: 'Logout' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open navigation' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+  })
+})
