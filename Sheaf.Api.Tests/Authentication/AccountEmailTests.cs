@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,6 +33,9 @@ public partial class AccountEmailTests : InMemoryApiTest
         base.ConfigureTestServices(services);
         services.RemoveAll<IEmailOutbox>();
         services.AddSingleton<IEmailOutbox>(_outbox);
+        // Run queued account work before the response, so a test sees its emails as soon as the request returns.
+        services.RemoveAll<IAccountWorkScheduler>();
+        services.AddSingleton<IAccountWorkScheduler, InlineAccountWorkScheduler>();
     }
 
     [Test]
@@ -316,6 +320,42 @@ public partial class AccountEmailTests : InMemoryApiTest
         using HttpResponseMessage confirmed = await ConfirmAsync(client, Address(user), Password, LatestCode(Address(user)));
 
         await Assert.That(confirmed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task Login_UnverifiedAfterSignInAllowanceUsedUp_SendsNoCode()
+    {
+        // Someone who registered another person's address knows the password; signing in must not send codes without end.
+        using HttpClient client = CreateClient();
+        ApplicationUser user = await CreateUserAsync(confirmed: false);
+        await IssueConfirmationCodesAsync(user, EmailCodeTokenProvider.MaxIssuedPerDayWithPassword);
+
+        await LoginRequiresVerificationAsync(client, Address(user), Password);
+
+        await Assert.That(_outbox.Messages).IsEmpty();
+    }
+
+    [Test]
+    public async Task ValidateAsync_StoredCodeWithoutTheAppsKeys_Rejected()
+    {
+        // Reading the database isn't enough to check guesses offline: the stored code needs the app's Data Protection keys.
+        ApplicationUser created = await CreateUserAsync(confirmed: false);
+        bool withoutKeys = true;
+        bool withKeys = false;
+        await InScopeAsync(async services =>
+        {
+            UserManager<ApplicationUser> users = services.GetRequiredService<UserManager<ApplicationUser>>();
+            ApplicationUser user = await users.FindByIdAsync(created.Id) ?? throw new InvalidOperationException("Not stored.");
+            const string purpose = UserManager<ApplicationUser>.ConfirmEmailTokenPurpose;
+            string code = await users.GenerateEmailConfirmationTokenAsync(user);
+
+            withoutKeys = await new EmailCodeTokenProvider(Time, new EphemeralDataProtectionProvider())
+                .ValidateAsync(purpose, code, users, user);
+            withKeys = await services.GetRequiredService<EmailCodeTokenProvider>().ValidateAsync(purpose, code, users, user);
+        });
+
+        await Assert.That(withoutKeys).IsFalse();
+        await Assert.That(withKeys).IsTrue();
     }
 
     [Test]
@@ -724,13 +764,17 @@ public partial class AccountEmailTests : InMemoryApiTest
         CodePattern().Match(message.Body) is { Success: true } match ? match.Value : null;
 
     /// <summary>Issues the day's anonymous allowance of confirmation codes, as an attacker calling resend would.</summary>
-    private async Task UseUpDailyConfirmationCodesAsync(ApplicationUser created)
+    private Task UseUpDailyConfirmationCodesAsync(ApplicationUser created) =>
+        IssueConfirmationCodesAsync(created, EmailCodeTokenProvider.MaxIssuedPerDay);
+
+    /// <summary>Issues <paramref name="count"/> confirmation codes, then waits out the email cooldown.</summary>
+    private async Task IssueConfirmationCodesAsync(ApplicationUser created, int count)
     {
         await InScopeAsync(async services =>
         {
             UserManager<ApplicationUser> users = services.GetRequiredService<UserManager<ApplicationUser>>();
             ApplicationUser user = await users.FindByIdAsync(created.Id) ?? throw new InvalidOperationException("Not stored.");
-            for (int sent = 0; sent < EmailCodeTokenProvider.MaxIssuedPerDay; sent++)
+            for (int sent = 0; sent < count; sent++)
             {
                 await users.GenerateEmailConfirmationTokenAsync(user);
             }
@@ -765,6 +809,15 @@ public partial class AccountEmailTests : InMemoryApiTest
 
     [GeneratedRegex(@"\b\d{6}\b")]
     private static partial Regex CodePattern();
+
+    private sealed class InlineAccountWorkScheduler(IServiceScopeFactory scopes) : IAccountWorkScheduler
+    {
+        public async ValueTask EnqueueAsync(Func<IServiceProvider, Task> work)
+        {
+            await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+            await work(scope.ServiceProvider);
+        }
+    }
 
     private sealed class CapturingOutbox : IEmailOutbox
     {

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 
 using Sheaf.Data;
@@ -18,9 +19,15 @@ namespace Sheaf.Core.Authentication;
 /// only after it is emailed, works once, expires after <see cref="Lifetime"/>, and is discarded after
 /// <see cref="MaxFailures"/> guesses. Each guess is recorded before it is compared, so parallel guesses can't skip the
 /// count. At most <see cref="MaxIssuedPerDay"/> codes per purpose per day may be sent on request of someone who hasn't
-/// proven anything (<see cref="CanIssueAsync"/>), so an attacker gets a bounded number of guesses, each batch sent to the
-/// owner's inbox. Wrong codes don't count toward sign-in lockout, so guessing can't lock someone out.
+/// proven anything, and at most <see cref="MaxIssuedPerDayWithPassword"/> in all (<see cref="CanIssueAsync"/>), so
+/// guesses are bounded per day even for someone who knows the password, and each batch goes to the owner's inbox.
+/// Wrong codes don't count toward sign-in lockout, so guessing can't lock someone out.
 /// A code is also tied to the account's email and security stamp when it was sent: changing either voids it.
+/// </para>
+/// <para>
+/// What is stored is protected with ASP.NET Core Data Protection, whose keys are themselves encrypted outside the
+/// database in production. Someone who can only read the database therefore can't test the million possible codes
+/// offline.
 /// </para>
 /// <para>
 /// Storing and checking a code saves the user through <see cref="UserManager{TUser}.SetAuthenticationTokenAsync"/>,
@@ -28,20 +35,29 @@ namespace Sheaf.Core.Authentication;
 /// changes are saved too.
 /// </para>
 /// </remarks>
-public sealed class EmailCodeTokenProvider(TimeProvider time) : IUserTwoFactorTokenProvider<ApplicationUser>
+public sealed class EmailCodeTokenProvider(TimeProvider time, IDataProtectionProvider dataProtection)
+    : IUserTwoFactorTokenProvider<ApplicationUser>
 {
     public const string ProviderName = "SheafEmailCode";
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
     public const int MaxFailures = 5;
     public const int MaxIssuedPerDay = 10;
+    public const int MaxIssuedPerDayWithPassword = 20;
     private static readonly TimeSpan IssueWindow = TimeSpan.FromDays(1);
     private const string ChangeEmailPrefix = "ChangeEmail:";
+    private readonly IDataProtector _protector = dataProtection.CreateProtector("Sheaf.Authentication.EmailCode");
 
-    /// <summary>Whether another code may be sent for <paramref name="purpose"/> today on an unproven request.</summary>
-    public async Task<bool> CanIssueAsync(UserManager<ApplicationUser> manager, ApplicationUser user, string purpose)
+    /// <summary>
+    /// Whether another code may be sent for <paramref name="purpose"/> today. <paramref name="passwordProven"/> is for a
+    /// request that proved the account's password, which may send more, so someone who used up the anonymous allowance
+    /// can't keep the owner from verifying; the total is still capped.
+    /// </summary>
+    public async Task<bool> CanIssueAsync(
+        UserManager<ApplicationUser> manager, ApplicationUser user, string purpose, bool passwordProven = false)
     {
         CodeState? state = await LoadAsync(manager, user, purpose);
-        return state is null || time.GetUtcNow() - state.WindowStart >= IssueWindow || state.Issued < MaxIssuedPerDay;
+        int limit = passwordProven ? MaxIssuedPerDayWithPassword : MaxIssuedPerDay;
+        return state is null || time.GetUtcNow() - state.WindowStart >= IssueWindow || state.Issued < limit;
     }
 
     /// <summary>
@@ -57,7 +73,7 @@ public sealed class EmailCodeTokenProvider(TimeProvider time) : IUserTwoFactorTo
             : (previous.WindowStart, previous.Issued);
 
         string code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
-        CodeState state = new(Convert.ToBase64String(Hash(purpose, user, code)), now + Lifetime, 0, issued + 1, windowStart);
+        CodeState state = new(_protector.Protect(Convert.ToBase64String(Hash(purpose, user, code))), now + Lifetime, 0, issued + 1, windowStart);
         return (await SaveAsync(manager, user, purpose, state)).Succeeded ? code : null;
     }
 
@@ -71,7 +87,7 @@ public sealed class EmailCodeTokenProvider(TimeProvider time) : IUserTwoFactorTo
     {
         token = string.Concat(token.Where(c => !char.IsWhiteSpace(c)));
         CodeState? state = await LoadAsync(manager, user, purpose);
-        if (state?.Hash is null || time.GetUtcNow() >= state.ExpiresAt || state.Failures >= MaxFailures)
+        if (state?.Code is null || time.GetUtcNow() >= state.ExpiresAt || state.Failures >= MaxFailures)
         {
             return false;
         }
@@ -84,29 +100,39 @@ public sealed class EmailCodeTokenProvider(TimeProvider time) : IUserTwoFactorTo
             return false;
         }
 
-        if (!CryptographicOperations.FixedTimeEquals(Convert.FromBase64String(state.Hash), Hash(purpose, user, token)))
+        if (!CryptographicOperations.FixedTimeEquals(Unprotect(state.Code), Hash(purpose, user, token)))
         {
             if (counted.Failures >= MaxFailures)
             {
-                await SaveAsync(manager, user, purpose, counted with { Hash = null });
+                await SaveAsync(manager, user, purpose, counted with { Code = null });
             }
             return false;
         }
 
         // Single use. If a concurrent request saved first, this save fails and only that request succeeds.
-        return (await SaveAsync(manager, user, purpose, counted with { Hash = null, Failures = state.Failures })).Succeeded;
+        return (await SaveAsync(manager, user, purpose, counted with { Code = null, Failures = state.Failures })).Succeeded;
     }
 
     public Task<bool> CanGenerateTwoFactorTokenAsync(UserManager<ApplicationUser> manager, ApplicationUser user) =>
         Task.FromResult(false);
 
-    /// <summary>
-    /// Binds the code to its purpose, account, email and security stamp. Not salted: with a million possible codes,
-    /// anyone who can read the table can try them all anyway, so a salt would add nothing. Guess limits are the defense.
-    /// </summary>
+    /// <summary>Binds the code to its purpose, account, email and security stamp. Stored only under Data Protection.</summary>
     private static byte[] Hash(string purpose, ApplicationUser user, string code) =>
         SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join('\n', purpose, user.Id, user.NormalizedEmail ?? "", user.SecurityStamp ?? "", code)));
+
+    /// <summary>The stored hash, or an empty array (which matches nothing) if it can't be unprotected, e.g. its key was revoked.</summary>
+    private byte[] Unprotect(string stored)
+    {
+        try
+        {
+            return Convert.FromBase64String(_protector.Unprotect(stored));
+        }
+        catch (CryptographicException)
+        {
+            return [];
+        }
+    }
 
     /// <summary>
     /// Where a purpose's state is stored. Email-change purposes include the new address, which can be longer than the
@@ -125,6 +151,9 @@ public sealed class EmailCodeTokenProvider(TimeProvider time) : IUserTwoFactorTo
     private static Task<IdentityResult> SaveAsync(UserManager<ApplicationUser> manager, ApplicationUser user, string purpose, CodeState state) =>
         manager.SetAuthenticationTokenAsync(user, ProviderName, StorageName(purpose), JsonSerializer.Serialize(state));
 
-    /// <summary>What is stored for one purpose. <see cref="Hash"/> is null when no code is outstanding.</summary>
-    private sealed record CodeState(string? Hash, DateTimeOffset ExpiresAt, int Failures, int Issued, DateTimeOffset WindowStart);
+    /// <summary>
+    /// What is stored for one purpose. <see cref="Code"/> is the code's hash under Data Protection, or null when no code
+    /// is outstanding.
+    /// </summary>
+    private sealed record CodeState(string? Code, DateTimeOffset ExpiresAt, int Failures, int Issued, DateTimeOffset WindowStart);
 }

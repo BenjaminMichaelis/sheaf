@@ -83,12 +83,18 @@ Codes exist only once emailed (`EmailCodeTokenProvider`, stored in `AspNetUserTo
 Each works once, expires after 10 minutes, is discarded after 5 wrong guesses, and becomes
 invalid if the account's email or security stamp changes. Each guess is recorded before it
 is compared, so parallel guesses can't exceed the limit. Anonymous requests (register,
-resend, forgot password) send at most 10 codes per account and purpose per day; signing in
-with the correct password still sends one, so using up that cap can't stop the owner from
-verifying. A stranger can still use up the cap to block forgot-password for a day. Wrong
-codes don't count toward sign-in lockout, so guessing can't lock someone out. Emails are unique (`EmailIndex` is a unique index).
+resend, forgot password) send at most 10 codes per account and purpose per day. Signing in
+with the correct password can send codes up to 20 a day in all, so using up the anonymous
+allowance can't stop the owner from verifying, and knowing the password still doesn't give
+unlimited guesses. A stranger can still use up the cap to block forgot-password for a day.
+Wrong codes don't count toward sign-in lockout, so guessing can't lock someone out. Stored
+codes are protected with Data Protection, so reading the database isn't enough to test
+guesses offline. Emails are unique (`EmailIndex` is a unique index).
 
-Email is queued and sent after the response. Locally the AppHost runs Mailpit; open its
+For register, resend and forgot password, everything that depends on whether the address
+has an account (the lookup, creating the account, storing a code) runs on a background
+queue after the response, so neither the answer nor its timing reveals the account. Email
+is likewise queued and sent after the response. Locally the AppHost runs Mailpit; open its
 web UI from the dashboard to read codes. Without the AppHost, Development logs each
 message instead. Outside Development and Testing, startup requires:
 

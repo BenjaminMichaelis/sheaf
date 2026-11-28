@@ -21,11 +21,12 @@ internal sealed class EmailCooldown(TimeProvider time)
         DateTimeOffset now = time.GetUtcNow();
         if (_lastSent.Count > PruneThreshold)
         {
-            foreach ((string stale, DateTimeOffset sent) in _lastSent)
+            foreach (KeyValuePair<string, DateTimeOffset> entry in _lastSent)
             {
-                if (now - sent >= Interval)
+                // Removes the entry only if it still holds the time read here, so a send recorded meanwhile stays.
+                if (now - entry.Value >= Interval)
                 {
-                    _lastSent.TryRemove(stale, out _);
+                    _lastSent.TryRemove(entry);
                 }
             }
         }

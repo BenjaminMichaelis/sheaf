@@ -105,12 +105,15 @@ internal static class EmailServiceCollectionExtensions
 
     private const string DevelopmentSender = "Sheaf <no-reply@sheaf.localhost>";
 
-    /// <summary>Registers the outbox, account emails, options and a transport chosen from the options.</summary>
+    /// <summary>Registers the outbox, the account work queue, account emails, options and a transport chosen from the options.</summary>
     internal static void AddSheafEmail(this WebApplicationBuilder builder, bool documentGeneration)
     {
         builder.Services.AddSingleton<ChannelEmailOutbox>();
         builder.Services.AddSingleton<IEmailOutbox>(services => services.GetRequiredService<ChannelEmailOutbox>());
         builder.Services.AddHostedService<EmailDeliveryService>();
+        builder.Services.AddSingleton<ChannelAccountWorkScheduler>();
+        builder.Services.AddSingleton<IAccountWorkScheduler>(services => services.GetRequiredService<ChannelAccountWorkScheduler>());
+        builder.Services.AddHostedService<AccountWorkService>();
         builder.Services.AddSingleton<EmailCooldown>();
         builder.Services.AddScoped<AccountEmails>();
 

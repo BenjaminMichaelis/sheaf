@@ -13,16 +13,15 @@ internal sealed class AccountEmails(
     private const string Ignore = "If you didn't ask for this, you can ignore this email.";
 
     /// <summary>
-    /// Sends a sign-up code. <paramref name="passwordProven"/> is for a sign-in with the correct password: it skips the
-    /// daily cap, so someone who uses up the cap with anonymous requests can't keep the owner from verifying.
+    /// Sends a sign-up code. <paramref name="passwordProven"/> is for a sign-in with the correct password: it has a
+    /// larger daily allowance (<see cref="EmailCodeTokenProvider.MaxIssuedPerDayWithPassword"/>) and its own cooldown,
+    /// so someone who uses up the anonymous allowance can't keep the owner from verifying.
     /// </summary>
     public async Task SendConfirmationCodeAsync(ApplicationUser user, bool passwordProven = false)
     {
         const string purpose = UserManager<ApplicationUser>.ConfirmEmailTokenPurpose;
-        bool allowed = passwordProven
-            ? cooldown.TryStart($"confirm-signin:{user.Id}")
-            : await TryStartAsync(user, $"confirm:{user.Id}", purpose);
-        if (allowed && await codes.TryGenerateAsync(purpose, users, user) is { } code)
+        string key = passwordProven ? $"confirm-signin:{user.Id}" : $"confirm:{user.Id}";
+        if (await TryStartAsync(user, key, purpose, passwordProven) && await codes.TryGenerateAsync(purpose, users, user) is { } code)
         {
             outbox.Enqueue(new EmailMessage(EmailOf(user), "Your Sheaf verification code",
                 $"Your Sheaf verification code is {code}\n\n{Expiry}\n\n{Ignore}"));
@@ -84,8 +83,8 @@ internal sealed class AccountEmails(
     internal static string ChangeEmailPurpose(UserManager<ApplicationUser> users, string newEmail) =>
         UserManager<ApplicationUser>.GetChangeEmailTokenPurpose(users.NormalizeEmail(newEmail));
 
-    private async Task<bool> TryStartAsync(ApplicationUser user, string cooldownKey, string purpose) =>
-        await codes.CanIssueAsync(users, user, purpose) && cooldown.TryStart(cooldownKey);
+    private async Task<bool> TryStartAsync(ApplicationUser user, string cooldownKey, string purpose, bool passwordProven = false) =>
+        await codes.CanIssueAsync(users, user, purpose, passwordProven) && cooldown.TryStart(cooldownKey);
 
     private static string EmailOf(ApplicationUser user) =>
         user.Email ?? throw new InvalidOperationException("Accounts always have an email address.");

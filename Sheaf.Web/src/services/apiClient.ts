@@ -26,9 +26,10 @@ export const apiClient = createClient<paths>({
 apiClient.use({
   async onResponse({ request, response }) {
     if (!response.ok) {
-      const body = request.method === 'POST' ? await response.clone().text() : ''
+      const body = await response.clone().text()
 
-      let message = body || `HTTP error! status: ${response.status}`
+      // Only POST falls back to a raw body; any method may carry Problem Details, parsed below.
+      let message = (request.method === 'POST' && body) || `HTTP error! status: ${response.status}`
       let problemType: string | undefined
 
       if (response.headers.get('content-type')?.includes('application/problem+json') && body) {

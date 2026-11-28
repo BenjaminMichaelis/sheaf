@@ -125,13 +125,27 @@ public class ChurchSessionTests : ChurchApiTestBase
         {
             await Assert.That(registered.StatusCode).IsEqualTo(HttpStatusCode.Accepted);
         }
-        string code = "";
-        await InScopeAsync(async services =>
+        // Registration creates the account and emails its code after the response, on the background queue. Once that
+        // code is stored, replace it with one the test can read.
+        string? code = null;
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
+        while (code is null)
         {
-            UserManager<ApplicationUser> users = services.GetRequiredService<UserManager<ApplicationUser>>();
-            ApplicationUser user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("Not registered.");
-            code = await users.GenerateEmailConfirmationTokenAsync(user);
-        });
+            await InScopeAsync(async services =>
+            {
+                UserManager<ApplicationUser> users = services.GetRequiredService<UserManager<ApplicationUser>>();
+                if (await users.FindByEmailAsync(email) is { } user
+                    && await users.GetAuthenticationTokenAsync(user, EmailCodeTokenProvider.ProviderName,
+                        UserManager<ApplicationUser>.ConfirmEmailTokenPurpose) is not null)
+                {
+                    code = await users.GenerateEmailConfirmationTokenAsync(user);
+                }
+            });
+            if (code is null)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), timeout.Token);
+            }
+        }
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(
             "/api/auth/confirm-email", new ConfirmEmailRequest(email, Password, code));
