@@ -16,8 +16,8 @@ public class ApplicationUser : IdentityUser
     public const int EmailMaxLength = 256;
 
     [MaxLength(NameMaxLength)]
-    public string FirstName { get; set; } = "";
+    public required string FirstName { get; set; }
 
     [MaxLength(NameMaxLength)]
-    public string LastName { get; set; } = "";
+    public required string LastName { get; set; }
 }

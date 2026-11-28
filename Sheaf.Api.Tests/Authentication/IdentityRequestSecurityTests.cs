@@ -90,7 +90,7 @@ public class IdentityRequestSecurityTests : InMemoryApiTest
     private async Task<ApplicationUser> CreateUserAsync()
     {
         string email = $"{Guid.NewGuid():N}@example.com";
-        ApplicationUser user = new() { UserName = email, Email = email, EmailConfirmed = true };
+        ApplicationUser user = new() { UserName = email, Email = email, EmailConfirmed = true, FirstName = "Test", LastName = "User" };
         await InScopeAsync(async services =>
         {
             IdentityResult result = await services.GetRequiredService<UserManager<ApplicationUser>>().CreateAsync(user, Password);

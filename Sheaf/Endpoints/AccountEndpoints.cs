@@ -326,8 +326,12 @@ internal static class AccountEndpoints
         return errors.Count == 0 ? null : ToValidationProblem(IdentityResult.Failed([.. errors]));
     }
 
-    /// <summary>A stand-in account for password rules when the address has no account, so the answer doesn't differ.</summary>
-    private static ApplicationUser Candidate(string email) => new() { UserName = email, Email = email };
+    /// <summary>
+    /// A stand-in account for password rules when the address has no account, so the answer doesn't differ. It is never
+    /// saved, and no name is known for it.
+    /// </summary>
+    private static ApplicationUser Candidate(string email) =>
+        new() { UserName = email, Email = email, FirstName = "", LastName = "" };
 
     private static bool IsDuplicate(IdentityError error) =>
         error.Code is nameof(IdentityErrorDescriber.DuplicateEmail) or nameof(IdentityErrorDescriber.DuplicateUserName);

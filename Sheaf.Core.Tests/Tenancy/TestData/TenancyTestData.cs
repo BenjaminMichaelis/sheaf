@@ -8,8 +8,8 @@ internal static class TenancyTestData
     {
         Church churchA = new() { Slug = "production-a", Name = "Production A", TimeZoneId = "America/Chicago" };
         Church churchB = new() { Slug = "production-b", Name = "Production B", TimeZoneId = "America/Chicago" };
-        ApplicationUser userA = new() { Id = "production-user-a", UserName = "production-user-a" };
-        ApplicationUser userB = new() { Id = "production-user-b", UserName = "production-user-b" };
+        ApplicationUser userA = new() { Id = "production-user-a", UserName = "production-user-a", FirstName = "User", LastName = "A" };
+        ApplicationUser userB = new() { Id = "production-user-b", UserName = "production-user-b", FirstName = "User", LastName = "B" };
         ChurchMembership membershipA = new() { ChurchId = churchA.Id, UserId = userA.Id, Role = ChurchMembershipRole.Leader };
         ChurchMembership membershipB = new() { ChurchId = churchB.Id, UserId = userB.Id, Role = ChurchMembershipRole.Leader };
 

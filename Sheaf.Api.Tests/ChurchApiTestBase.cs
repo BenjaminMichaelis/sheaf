@@ -90,7 +90,9 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
         ApplicationUser user = new()
         {
             UserName = $"{Guid.NewGuid():N}@example.com",
-            EmailConfirmed = true
+            EmailConfirmed = true,
+            FirstName = "Test",
+            LastName = "User"
         };
         user.Email = user.UserName;
         await InScopeAsync(async services =>
