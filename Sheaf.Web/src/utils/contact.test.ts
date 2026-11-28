@@ -7,6 +7,8 @@ describe('telHref', () => {
     ['+1 (555) 010-0100', 'tel:+1(555)010-0100'],
     ['555-0100 ext 2', 'tel:555-0100'],
     ['555-0100 (cell)', 'tel:555-0100'],
+    ['555-0100 #2', 'tel:555-0100'],
+    ['555-0100 / 555-0199', 'tel:555-0100'],
   ])('telHref_%s_LinksTheDialableNumber', (phone, expected) => {
     expect(telHref(phone)).toBe(expected)
   })
