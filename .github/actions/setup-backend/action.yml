@@ -1,0 +1,22 @@
+name: Set up backend
+description: Installs the pinned .NET SDK and workload set, then restores the backend solution filter and local tools.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        global-json-file: global.json
+
+    - name: Install pinned workload set
+      shell: pwsh
+      run: dotnet workload update
+
+    - name: Restore .NET dependencies
+      shell: pwsh
+      run: dotnet restore Sheaf.Backend.slnf
+
+    - name: Restore .NET tools
+      shell: pwsh
+      run: dotnet tool restore

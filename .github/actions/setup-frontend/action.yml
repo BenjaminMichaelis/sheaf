@@ -1,0 +1,22 @@
+name: Set up frontend
+description: Installs Node.js, the pnpm version pinned in Sheaf.Web/package.json, and the frontend dependencies.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+
+    - name: Install pinned pnpm
+      shell: pwsh
+      run: |
+        $package = Get-Content Sheaf.Web/package.json -Raw | ConvertFrom-Json
+        npm install --global $package.packageManager
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Install frontend dependencies
+      shell: pwsh
+      working-directory: Sheaf.Web
+      run: pnpm install --frozen-lockfile
