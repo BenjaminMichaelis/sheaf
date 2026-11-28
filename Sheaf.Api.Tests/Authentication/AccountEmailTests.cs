@@ -33,9 +33,6 @@ public partial class AccountEmailTests : InMemoryApiTest
         base.ConfigureTestServices(services);
         services.RemoveAll<IEmailOutbox>();
         services.AddSingleton<IEmailOutbox>(_outbox);
-        // Run queued account work before the response, so a test sees its emails as soon as the request returns.
-        services.RemoveAll<IAccountWorkScheduler>();
-        services.AddSingleton<IAccountWorkScheduler, InlineAccountWorkScheduler>();
     }
 
     [Test]
@@ -810,22 +807,17 @@ public partial class AccountEmailTests : InMemoryApiTest
     [GeneratedRegex(@"\b\d{6}\b")]
     private static partial Regex CodePattern();
 
-    private sealed class InlineAccountWorkScheduler(IServiceScopeFactory scopes) : IAccountWorkScheduler
-    {
-        public async ValueTask EnqueueAsync(Func<IServiceProvider, Task> work)
-        {
-            await using AsyncServiceScope scope = scopes.CreateAsyncScope();
-            await work(scope.ServiceProvider);
-        }
-    }
-
     private sealed class CapturingOutbox : IEmailOutbox
     {
         private readonly ConcurrentQueue<EmailMessage> _messages = new();
 
         public IReadOnlyList<EmailMessage> Messages => [.. _messages];
 
-        public void Enqueue(EmailMessage message) => _messages.Enqueue(message);
+        public ValueTask EnqueueAsync(EmailMessage message, CancellationToken cancellationToken = default)
+        {
+            _messages.Enqueue(message);
+            return ValueTask.CompletedTask;
+        }
 
         public IReadOnlyList<EmailMessage> To(string email) =>
             [.. _messages.Where(message => string.Equals(message.To, email, StringComparison.OrdinalIgnoreCase))];

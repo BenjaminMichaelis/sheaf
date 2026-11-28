@@ -16,8 +16,7 @@ namespace Sheaf.Endpoints;
 
 /// <summary>
 /// Sign-up, email verification, password reset and sign-in email changes. Anonymous endpoints answer the same way
-/// whether or not an address has an account, so they can't be used to find out who uses Sheaf: anything that depends on
-/// the account runs after the response, through <see cref="IAccountWorkScheduler"/>. Request shape is
+/// whether or not an address has an account, so they can't be used to find out who uses Sheaf. Request shape is
 /// checked by minimal API validation (DataAnnotations on the request records) before a handler runs.
 /// </summary>
 internal static class AccountEndpoints
@@ -59,7 +58,7 @@ internal static class AccountEndpoints
         .Produces(StatusCodes.Status429TooManyRequests);
 
     private static async Task<Results<Accepted, ValidationProblem>> RegisterAsync(
-        RegisterRequest request, UserManager<ApplicationUser> userManager, IAccountWorkScheduler work)
+        RegisterRequest request, UserManager<ApplicationUser> userManager, ApplicationDbContext db, AccountEmails emails)
     {
         string email = request.Email.Trim();
         ApplicationUser candidate = new()
@@ -69,45 +68,33 @@ internal static class AccountEndpoints
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim()
         };
-        // Password rules and hashing don't depend on whether the address is taken, so doing them here reveals nothing.
+        // Password rules don't depend on whether the address is taken, so checking them first reveals nothing.
         if (await PasswordProblemAsync(userManager, candidate, request.Password) is { } passwordProblem)
         {
             return passwordProblem;
         }
-        candidate.PasswordHash = userManager.PasswordHasher.HashPassword(candidate, request.Password);
-
-        await work.EnqueueAsync(services => CompleteRegistrationAsync(services, candidate));
-        return TypedResults.Accepted((string?)null);
-    }
-
-    /// <summary>Creates the account, or, if the address already has one, emails its owner. Runs after the response.</summary>
-    private static async Task CompleteRegistrationAsync(IServiceProvider services, ApplicationUser candidate)
-    {
-        UserManager<ApplicationUser> userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
-        AccountEmails emails = services.GetRequiredService<AccountEmails>();
-        string email = candidate.Email ?? "";
 
         ApplicationUser? existing = await userManager.FindByEmailAsync(email);
         if (existing is null)
         {
-            IdentityResult created = await SaveUniqueEmailAsync(userManager, services.GetRequiredService<ApplicationDbContext>(),
-                candidate, () => userManager.CreateAsync(candidate));
+            IdentityResult created = await SaveUniqueEmailAsync(userManager, db, candidate,
+                () => userManager.CreateAsync(candidate, request.Password));
             if (created.Succeeded)
             {
                 await emails.SendConfirmationCodeAsync(candidate);
-                return;
+                return TypedResults.Accepted((string?)null);
             }
-            if (!created.Errors.Any(IsDuplicate))
-            {
-                throw new InvalidOperationException(
-                    $"Registration failed: {string.Join(", ", created.Errors.Select(error => error.Code))}.");
-            }
-            // Another registration for the address saved first.
-            existing = await userManager.FindByEmailAsync(email);
+            existing = created.Errors.Any(IsDuplicate) ? await userManager.FindByEmailAsync(email) : null;
             if (existing is null)
             {
-                return;
+                return ToValidationProblem(created);
             }
+        }
+        else
+        {
+            // Creating an account hashes the password; do the same work here so response time doesn't tell an existing
+            // address from a new one.
+            _ = userManager.PasswordHasher.HashPassword(candidate, request.Password);
         }
 
         // Registration never changes an existing account: every account was marked unverified when verification
@@ -115,12 +102,13 @@ internal static class AccountEndpoints
         // address gets a code, and confirming with it sets the password they choose (see ConfirmEmailAsync).
         if (existing.EmailConfirmed)
         {
-            emails.SendAlreadyRegistered(existing);
+            await emails.SendAlreadyRegisteredAsync(existing);
         }
         else
         {
             await emails.SendConfirmationCodeAsync(existing);
         }
+        return TypedResults.Accepted((string?)null);
     }
 
     private static async Task<Results<Ok<UserInfo>, ValidationProblem>> ConfirmEmailAsync(
@@ -151,29 +139,23 @@ internal static class AccountEndpoints
         return TypedResults.Ok(await AuthEndpoints.CreateUserInfoAsync(user, churchAccess, currentChurch, cancellationToken));
     }
 
-    private static async Task<Accepted> ResendConfirmationAsync(EmailRequest request, IAccountWorkScheduler work)
+    private static async Task<Accepted> ResendConfirmationAsync(
+        EmailRequest request, UserManager<ApplicationUser> userManager, AccountEmails emails)
     {
-        string email = request.Email.Trim();
-        await work.EnqueueAsync(async services =>
+        if (await userManager.FindByEmailAsync(request.Email.Trim()) is { EmailConfirmed: false } user)
         {
-            if (await services.GetRequiredService<UserManager<ApplicationUser>>().FindByEmailAsync(email) is { EmailConfirmed: false } user)
-            {
-                await services.GetRequiredService<AccountEmails>().SendConfirmationCodeAsync(user);
-            }
-        });
+            await emails.SendConfirmationCodeAsync(user);
+        }
         return TypedResults.Accepted((string?)null);
     }
 
-    private static async Task<Accepted> ForgotPasswordAsync(EmailRequest request, IAccountWorkScheduler work)
+    private static async Task<Accepted> ForgotPasswordAsync(
+        EmailRequest request, UserManager<ApplicationUser> userManager, AccountEmails emails)
     {
-        string email = request.Email.Trim();
-        await work.EnqueueAsync(async services =>
+        if (await userManager.FindByEmailAsync(request.Email.Trim()) is { } user)
         {
-            if (await services.GetRequiredService<UserManager<ApplicationUser>>().FindByEmailAsync(email) is { } user)
-            {
-                await services.GetRequiredService<AccountEmails>().SendPasswordResetCodeAsync(user);
-            }
-        });
+            await emails.SendPasswordResetCodeAsync(user);
+        }
         return TypedResults.Accepted((string?)null);
     }
 
@@ -265,7 +247,7 @@ internal static class AccountEndpoints
             // Another account took the address after the code was sent.
             return InvalidCode();
         }
-        emails.SendEmailChanged(oldEmail);
+        await emails.SendEmailChangedAsync(oldEmail);
 
         principalFactory.RenewalPrincipal = principal;
         try

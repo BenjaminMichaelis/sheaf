@@ -91,10 +91,7 @@ Wrong codes don't count toward sign-in lockout, so guessing can't lock someone o
 codes are protected with Data Protection, so reading the database isn't enough to test
 guesses offline. Emails are unique (`EmailIndex` is a unique index).
 
-For register, resend and forgot password, everything that depends on whether the address
-has an account (the lookup, creating the account, storing a code) runs on a background
-queue after the response, so neither the answer nor its timing reveals the account. Email
-is likewise queued and sent after the response. Locally the AppHost runs Mailpit; open its
+Email is queued and sent after the response. Locally the AppHost runs Mailpit; open its
 web UI from the dashboard to read codes. Without the AppHost, Development logs each
 message instead. Outside Development and Testing, startup requires:
 

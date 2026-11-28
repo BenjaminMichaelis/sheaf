@@ -23,17 +23,17 @@ internal sealed class AccountEmails(
         string key = passwordProven ? $"confirm-signin:{user.Id}" : $"confirm:{user.Id}";
         if (await TryStartAsync(user, key, purpose, passwordProven) && await codes.TryGenerateAsync(purpose, users, user) is { } code)
         {
-            outbox.Enqueue(new EmailMessage(EmailOf(user), "Your Sheaf verification code",
+            await outbox.EnqueueAsync(new EmailMessage(EmailOf(user), "Your Sheaf verification code",
                 $"Your Sheaf verification code is {code}\n\n{Expiry}\n\n{Ignore}"));
         }
     }
 
     /// <summary>Tells the owner of an existing account that someone tried to register their address.</summary>
-    public void SendAlreadyRegistered(ApplicationUser user)
+    public async Task SendAlreadyRegisteredAsync(ApplicationUser user)
     {
         if (cooldown.TryStart($"registered:{user.Id}"))
         {
-            outbox.Enqueue(new EmailMessage(EmailOf(user), "You already have a Sheaf account",
+            await outbox.EnqueueAsync(new EmailMessage(EmailOf(user), "You already have a Sheaf account",
                 "Someone tried to create a Sheaf account with this email address, but you already have one.\n\n"
                 + "Sign in instead, or use \"Forgot password\" if you don't remember your password.\n\n" + Ignore));
         }
@@ -44,7 +44,7 @@ internal sealed class AccountEmails(
         const string purpose = UserManager<ApplicationUser>.ResetPasswordTokenPurpose;
         if (await TryStartAsync(user, $"reset:{user.Id}", purpose) && await codes.TryGenerateAsync(purpose, users, user) is { } code)
         {
-            outbox.Enqueue(new EmailMessage(EmailOf(user), "Your Sheaf password reset code",
+            await outbox.EnqueueAsync(new EmailMessage(EmailOf(user), "Your Sheaf password reset code",
                 $"Your Sheaf password reset code is {code}\n\n{Expiry}\n\n{Ignore}"));
         }
     }
@@ -58,7 +58,7 @@ internal sealed class AccountEmails(
         {
             if (cooldown.TryStart(key))
             {
-                outbox.Enqueue(new EmailMessage(newEmail, "This address already has a Sheaf account",
+                await outbox.EnqueueAsync(new EmailMessage(newEmail, "This address already has a Sheaf account",
                     "Someone tried to move a Sheaf account to this email address, but it already belongs to an account.\n\n"
                     + Ignore));
             }
@@ -68,14 +68,14 @@ internal sealed class AccountEmails(
         string purpose = ChangeEmailPurpose(users, newEmail);
         if (await TryStartAsync(user, key, purpose) && await codes.TryGenerateAsync(purpose, users, user) is { } code)
         {
-            outbox.Enqueue(new EmailMessage(newEmail, "Confirm your new Sheaf email address",
+            await outbox.EnqueueAsync(new EmailMessage(newEmail, "Confirm your new Sheaf email address",
                 $"Your Sheaf verification code is {code}\n\nEnter it to use this address to sign in. {Expiry}\n\n{Ignore}"));
         }
     }
 
     /// <summary>Warns the old address after the sign-in email changes, so a takeover doesn't go unnoticed.</summary>
-    public void SendEmailChanged(string oldEmail) =>
-        outbox.Enqueue(new EmailMessage(oldEmail, "Your Sheaf sign-in email changed",
+    public ValueTask SendEmailChangedAsync(string oldEmail) =>
+        outbox.EnqueueAsync(new EmailMessage(oldEmail, "Your Sheaf sign-in email changed",
             "The email address used to sign in to your Sheaf account was just changed, and this address no longer works for it.\n\n"
             + "If you didn't make this change, contact your church's Sheaf administrator."));
 
