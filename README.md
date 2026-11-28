@@ -100,7 +100,7 @@ message instead. Outside Development and Testing, startup requires:
 | `Email:Smtp:Host` | Required |
 | `Email:From` | Required, e.g. `Sheaf <no-reply@example.org>` |
 | `Email:Smtp:Port` | Default 587 |
-| `Email:Smtp:EnableSsl` | Default true |
+| `Email:Smtp:EnableSsl` | Default true, and must stay true. Port 465 uses TLS from the start; other ports require STARTTLS |
 | `Email:Smtp:UserName`, `Email:Smtp:Password` | Optional |
 
 The `AccountEmailVerification` migration marks every existing account unverified and

@@ -14,7 +14,8 @@ namespace Sheaf.Api.Tests.Authentication;
 internal sealed class ProductionApiFactory(
     string environment = "Production",
     string? keyIdentifier = null,
-    string? mailHost = "smtp.example") : ApiWebApplicationFactory
+    string? mailHost = "smtp.example",
+    bool mailTls = true) : ApiWebApplicationFactory
 {
     public TokenCredential? CredentialUsedByKeyResolver { get; private set; }
 
@@ -55,6 +56,7 @@ internal sealed class ProductionApiFactory(
             ["AllowedOrigins:0"] = "https://client.example",
             ["DataProtection:KeyVaultKeyIdentifier"] = keyIdentifier,
             ["Email:Smtp:Host"] = mailHost,
+            ["Email:Smtp:EnableSsl"] = mailTls ? "true" : "false",
             ["Email:From"] = mailHost is null ? null : "Sheaf <no-reply@example.com>"
         });
     }

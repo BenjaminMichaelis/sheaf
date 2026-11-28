@@ -11,6 +11,9 @@ using Microsoft.Extensions.Options;
 using MimeKit;
 using MimeKit.Text;
 
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
 using MailAddress = System.Net.Mail.MailAddress;
 
 namespace Sheaf.Email;
@@ -63,7 +66,8 @@ internal sealed class SmtpEmailTransport(IOptions<EmailOptions> options) : IEmai
         mail.Subject = message.Subject;
         mail.Body = new TextPart(TextFormat.Plain) { Text = message.Body };
 
-        using SmtpClient client = new();
+        // Disposing doesn't send QUIT, so DisconnectAsync below ends the session politely first.
+        await using SmtpClient client = new();
         await client.ConnectAsync(smtp.Host, smtp.Port, SecureSocket(smtp), cancellationToken);
         if (!string.IsNullOrWhiteSpace(smtp.UserName))
         {
@@ -74,8 +78,10 @@ internal sealed class SmtpEmailTransport(IOptions<EmailOptions> options) : IEmai
     }
 
     /// <summary>
-    /// With TLS on, port 465 connects over TLS and any other port (587 by default) must upgrade with STARTTLS: a server
-    /// that doesn't offer it fails the send rather than getting the code in the clear. Mailpit runs without TLS.
+    /// The options MailKit's README recommends per port: with TLS on, port 465 connects over TLS and any other port
+    /// (587 by default) must upgrade with STARTTLS, so a server that doesn't offer it fails the send rather than getting
+    /// the code in the clear (<c>StartTlsWhenAvailable</c> is not recommended). Only local Mailpit runs without TLS;
+    /// <see cref="EmailOptionsValidator"/> requires TLS everywhere else.
     /// </summary>
     private static SecureSocketOptions SecureSocket(SmtpOptions smtp) => smtp switch
     {
@@ -110,6 +116,10 @@ internal sealed class EmailOptionsValidator(bool requireMailServer) : IValidateO
         if (requireMailServer && !options.Smtp.IsConfigured)
         {
             failures.Add("Email:Smtp:Host must be configured outside Development and Testing.");
+        }
+        if (requireMailServer && !options.Smtp.EnableSsl)
+        {
+            failures.Add("Email:Smtp:EnableSsl must be true outside Development and Testing, so codes aren't sent in the clear.");
         }
         if (!MailAddress.TryCreate(options.From, out _))
         {
@@ -160,6 +170,15 @@ internal static class EmailServiceCollectionExtensions
         {
             options.ValidateOnStart();
         }
+
+        // MailKit's metrics exist only after Configure (the first call wins, so repeated hosts are fine); its trace source
+        // always exists. Export both alongside the service defaults' telemetry.
+        MailKit.Telemetry.SmtpClient.Configure();
+        MailKit.Telemetry.Socket.Configure();
+        builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics
+            .AddMeter(MailKit.Telemetry.SmtpClient.MeterName, MailKit.Telemetry.Socket.MeterName));
+        builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing
+            .AddSource(MailKit.Telemetry.SmtpClient.ActivitySourceName));
 
         builder.Services.AddSingleton<SmtpEmailTransport>();
         builder.Services.AddSingleton<LoggingEmailTransport>();

@@ -15,6 +15,14 @@ public class EmailStartupTests
     }
 
     [Test]
+    public async Task Startup_ProductionMailServerWithoutTls_Fails()
+    {
+        await using ProductionApiFactory factory = new(keyIdentifier: KeyIdentifier, mailTls: false);
+
+        await Assert.That(() => factory.CreateClient()).Throws<OptionsValidationException>();
+    }
+
+    [Test]
     public async Task Startup_ProductionWithMailServer_Starts()
     {
         await using ProductionApiFactory factory = new(keyIdentifier: KeyIdentifier);
