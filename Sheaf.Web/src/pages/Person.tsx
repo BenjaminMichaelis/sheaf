@@ -21,6 +21,7 @@ import {
 } from '@mui/material'
 import type { components } from '@/api/schema'
 import { Loading, RetryButton } from '@/components/Feedback'
+import HouseholdSection from '@/components/HouseholdSection'
 import PagedListFooter from '@/components/PagedList'
 import { useChurch } from '@/contexts/ChurchContext'
 import { ApiError } from '@/services/apiClient'
@@ -104,6 +105,9 @@ function PersonPage({ churchId, personId }: { churchId: string; personId: string
         <PersonDetails person={shown} editButton={editButton} onEdit={() => setEditing(shown)} />
       )}
 
+      {/* A merged record belongs to no household: the merge moved it to the person kept. */}
+      {!shown.mergedIntoId && <HouseholdSection churchId={churchId} person={shown} canManage={shown.canEdit} />}
+
       {/* History is part of the full profile, so it is shown to those who may edit the person, as the API allows. */}
       {shown.canEdit && !shown.mergedIntoId && (
         <>
@@ -137,14 +141,6 @@ function PersonDetails({ person, editButton, onEdit }: PersonDetailsProps) {
         </Typography>
         <Typography component="dd" sx={{ m: 0 }}>
           <PhoneNumber phone={person.phone} />
-        </Typography>
-        <Typography component="dt" color="text.secondary">
-          Household
-        </Typography>
-        <Typography component="dd" sx={{ m: 0 }}>
-          {person.householdId === null
-            ? 'None'
-            : [person.householdLabel, person.householdMembers.map(member => member.firstName).join(', ')].filter(Boolean).join(': ')}
         </Typography>
       </Box>
 

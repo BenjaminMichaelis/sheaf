@@ -255,3 +255,48 @@ export async function updatePerson(churchId: string, personId: string, version: 
 
   return data
 }
+
+/** A household's label and members (first names only), with the version an update is checked against. */
+export function householdQuery(churchId: string, householdId: string) {
+  return queryOptions({
+    queryKey: ['church', churchId, 'households', householdId],
+    queryFn: async ({ signal }) => {
+      const { data } = await apiClient.GET('/api/church/households/{id}', {
+        params: { path: { id: householdId } },
+        headers: churchHeaders(churchId),
+        signal,
+      })
+
+      if (!data) throw new Error('Household response is empty.')
+
+      return data
+    },
+  })
+}
+
+type HouseholdRequest = components['schemas']['HouseholdRequest']
+
+/** Starts a household. Without a label, the API names it after the first member's last name. */
+export async function createHousehold(churchId: string, request: HouseholdRequest) {
+  const { data } = await apiClient.POST('/api/church/households', { headers: churchHeaders(churchId), body: request })
+
+  if (!data) throw new Error('Household response is empty.')
+
+  return data
+}
+
+/**
+ * Replaces a household's members, and its label when one is given (null keeps the current label). `version` is the
+ * household as the user last saw it: if someone changed it since, the API refuses with 412.
+ */
+export async function updateHousehold(churchId: string, householdId: string, version: string, request: HouseholdRequest) {
+  const { data } = await apiClient.PUT('/api/church/households/{id}', {
+    params: { path: { id: householdId }, header: { 'If-Match': `"${version}"` } },
+    headers: churchHeaders(churchId),
+    body: request,
+  })
+
+  if (!data) throw new Error('Household response is empty.')
+
+  return data
+}

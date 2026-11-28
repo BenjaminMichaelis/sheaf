@@ -100,14 +100,13 @@ const problem = (status: number, title: string) =>
   new Response(JSON.stringify({ title, status }), { status, headers: { 'content-type': 'application/problem+json' } })
 
 describe('Person', () => {
-  it('Person_CanEdit_ShowsDetailsHouseholdGroupsAndAttendance', async () => {
+  it('Person_CanEdit_ShowsDetailsGroupsAndAttendance', async () => {
     mockPersonApi()
     renderPerson()
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Max Member' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'max@example.com' })).toHaveAttribute('href', 'mailto:max@example.com')
     expect(screen.getByRole('link', { name: '555-0100' })).toHaveAttribute('href', 'tel:555-0100')
-    expect(screen.getByText('The Member Family: Mia')).toBeInTheDocument()
     // The church's own word, and current roles apart from past ones (UI-PPL-04).
     expect(screen.getByRole('heading', { name: 'Villages' })).toBeInTheDocument()
     const current = await screen.findByRole('list', { name: 'Current' })
@@ -118,7 +117,7 @@ describe('Person', () => {
       within(past).getByText(`Leader, ${formatChurchDate('2024-03-01T12:00:00Z', TIME_ZONE)} – ${formatChurchDate('2024-06-01T12:00:00Z', TIME_ZONE)}`),
     ).toBeInTheDocument()
     expect(within(past).queryByText('Tuesday village')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('term').map(term => term.textContent)).toEqual(['Email', 'Phone', 'Household'])
+    expect(screen.getAllByRole('term').map(term => term.textContent)).toEqual(['Email', 'Phone'])
     const meetings = await screen.findByRole('list', { name: 'Attendance' })
     expect(within(meetings).getByRole('link', { name: `${formatDate('2026-11-24')}, Tuesday village` })).toHaveAttribute('href', '/groups/g1/meetings/s1')
   })
