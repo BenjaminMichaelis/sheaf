@@ -22,7 +22,7 @@ export default function Login() {
       enqueueSnackbar('Login successful', { variant: 'success' })
       navigate('/')
     } catch (error) {
-      if (error instanceof ApiError && error.problemType === EMAIL_NOT_CONFIRMED) {
+      if (error instanceof ApiError && error.problem?.type === EMAIL_NOT_CONFIRMED) {
         navigate('/verify-email')
 
         return
