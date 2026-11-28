@@ -4646,6 +4646,7 @@
           "description",
           "attendees",
           "absent",
+          "canEdit",
           "version"
         ],
         "type": "object",
@@ -4679,6 +4680,9 @@
             "items": {
               "$ref": "#/components/schemas/SessionPersonResponse"
             }
+          },
+          "canEdit": {
+            "type": "boolean"
           },
           "version": {
             "type": "string",

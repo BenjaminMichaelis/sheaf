@@ -228,6 +228,36 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    [Arguments(ChurchMembershipRole.Leader, 7, true)]
+    [Arguments(ChurchMembershipRole.Leader, 8, false)]
+    [Arguments(ChurchMembershipRole.Staff, 30, true)]
+    public async Task GetGroupSession_DaysAfterRecording_CanEditMatchesWhetherACorrectionIsAccepted(ChurchMembershipRole role, int daysAgo, bool expected)
+    {
+        // The screen offers a correction only when CanEdit is true, so it must agree with what the API then does.
+        using var f = await SeedGroupAsync(role, callerLeads: role == ChurchMembershipRole.Leader);
+        var session = await AddSessionAsync(f, Today.AddDays(-60), Time.GetUtcNow().AddDays(-daysAgo), f.Member.Id);
+
+        using var read = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/sessions/{session.Id}");
+        var meeting = await TrackerReadAsync<SessionResponse>(read);
+        using var correct = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}", new AttendeesRequest([f.Leader.Id]), meeting.Version);
+
+        await Assert.That(meeting.CanEdit).IsEqualTo(expected);
+        await Assert.That(correct.StatusCode == HttpStatusCode.OK).IsEqualTo(meeting.CanEdit);
+        if (correct.StatusCode == HttpStatusCode.OK)
+            await Assert.That((await TrackerReadAsync<SessionResponse>(correct)).CanEdit).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordGroupSession_JustRecorded_CanCorrectIt()
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today, [f.Member.Id]));
+
+        await Assert.That((await TrackerReadAsync<SessionResponse>(response, HttpStatusCode.Created)).CanEdit).IsTrue();
+    }
+
+    [Test]
     [Arguments(90, HttpStatusCode.OK)]
     [Arguments(91, HttpStatusCode.NotFound)]
     public async Task GetPerson_AttendedLeadersGroupDaysAgo_VisibleOnlyWithinNinetyDays(int daysAgo, HttpStatusCode expected)

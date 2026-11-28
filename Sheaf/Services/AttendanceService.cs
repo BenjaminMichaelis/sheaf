@@ -51,10 +51,14 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
 
     public async Task<SessionResponse> GetSessionAsync(Guid groupId, Guid sessionId, CancellationToken ct)
     {
-        await scope.GroupAsync(groupId, GroupPermission.View, ct);
+        var (actor, _) = await scope.GroupAsync(groupId, GroupPermission.View, ct);
         var session = await db.GroupMeetings.AsNoTracking()
             .SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
-        return await ResponseAsync(session, ct);
+        // Seeing a group need not mean recording for it, so that is checked on its own, as UpdateAttendeesAsync does,
+        // but only when the window is still open and the caller does not already manage every group.
+        var canEdit = InEditWindow(actor, session) && (TrackerScope.ManagesGroups(actor)
+            || await scope.Groups(actor, GroupPermission.RecordAttendance).AnyAsync(g => g.Id == groupId, ct));
+        return await ResponseAsync(session, canEdit, ct);
     }
 
     public async Task<SessionPersonResponse[]> GetRosterAsync(Guid groupId, DateOnly occurredOn, CancellationToken ct)
@@ -92,7 +96,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         db.GroupMeetings.Add(session);
         await SetAttendeesAsync(session, actor, request.PersonIds, request.NewPeople, request.Confirm, reasons, ct);
         await scope.SaveAsync(ct);
-        return await ResponseAsync(session, ct);
+        return await ResponseAsync(session, InEditWindow(actor, session), ct);
     }
 
     public async Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct)
@@ -109,7 +113,7 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         session.Description = description;
         session.Version = Guid.NewGuid();
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
-        return await ResponseAsync(session, ct);
+        return await ResponseAsync(session, InEditWindow(actor, session), ct);
     }
 
     public async Task<PagedResponse<AttendanceRecordResponse>> GetRecordsAsync(Guid? personId, string? userId, PageRequest page, CancellationToken ct)
@@ -136,9 +140,12 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     /// </summary>
     private void RequireEditWindow(ChurchActor actor, GroupMeeting session)
     {
-        if (!TrackerScope.ManagesGroups(actor) && scope.Now > session.RecordedAt.AddDays(LeaderEditDays))
+        if (!InEditWindow(actor, session))
             throw Denied();
     }
+
+    private bool InEditWindow(ChurchActor actor, GroupMeeting session) =>
+        TrackerScope.ManagesGroups(actor) || scope.Now <= session.RecordedAt.AddDays(LeaderEditDays);
 
     /// <summary>A meeting date must not be in the future and must fall while the group existed.</summary>
     private void RequireMeetingDate(Group group, DateOnly date)
@@ -208,11 +215,11 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         people.OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id).Select(NameOf);
 
     /// <summary>Who came, and who was absent: people on the roster that day (<see cref="RosterOn"/>) not marked present. Absence is worked out on read, never stored.</summary>
-    private async Task<SessionResponse> ResponseAsync(GroupMeeting session, CancellationToken ct)
+    private async Task<SessionResponse> ResponseAsync(GroupMeeting session, bool canEdit, CancellationToken ct)
     {
         var present = db.Attendances.Where(a => a.MeetingId == session.Id && a.RemovedAt == null).Select(a => a.PersonId);
         var attendees = await ByName(db.People.Where(p => present.Contains(p.Id))).ToArrayAsync(ct);
         var absent = await ByName(RosterOn(session.GroupId, session.OccurredOn).Where(p => !present.Contains(p.Id))).ToArrayAsync(ct);
-        return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, session.Description, attendees, absent, session.Version);
+        return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, session.Description, attendees, absent, canEdit, session.Version);
     }
 }

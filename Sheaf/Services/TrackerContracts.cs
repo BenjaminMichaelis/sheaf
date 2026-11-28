@@ -116,8 +116,12 @@ public sealed record AttendeesRequest(Guid[]? PersonIds, PersonRequest[]? NewPeo
 /// <summary>A person named on a meeting: who came, or a roster member who did not.</summary>
 public sealed record SessionPersonResponse(Guid Id, string Name);
 /// <summary>A meeting with its description, who came, and which roster members, as of that date, did not.</summary>
+/// <param name="CanEdit">
+/// Whether the caller may still correct the meeting: Staff always, a group's Leaders for
+/// <see cref="AttendanceService.LeaderEditDays"/> days after it was recorded.
+/// </param>
 public sealed record SessionResponse(Guid Id, Guid GroupId, DateOnly OccurredOn, string? Description, SessionPersonResponse[] Attendees,
-    SessionPersonResponse[] Absent, Guid Version) : IVersioned;
+    SessionPersonResponse[] Absent, bool CanEdit, Guid Version) : IVersioned;
 /// <summary>A meeting in a group's history.</summary>
 public sealed record SessionSummaryResponse(Guid Id, DateOnly OccurredOn, int AttendeeCount, Guid Version) : IVersioned;
 /// <summary>People who may already exist for the new person at <paramref name="Index"/> in the request (0 when creating one person).</summary>
