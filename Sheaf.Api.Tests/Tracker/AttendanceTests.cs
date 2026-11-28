@@ -502,6 +502,99 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task GetGroupRoster_OnDate_ListsActivePeopleAssignedThatDayByName()
+    {
+        using var f = await SeedGroupAsync();
+        var late = await AddPersonAsync(f, "Lars", "Late");
+        var left = await AddPersonAsync(f, "Lea", "Left");
+        var inactive = await AddPersonAsync(f, "Ida", "Inactive");
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = late.Id, Role = GroupRole.Member, StartsAt = Time.GetUtcNow().AddDays(-3) });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = left.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt, EndsAt = Time.GetUtcNow().AddDays(-7) });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = inactive.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt });
+            await db.SaveChangesAsync();
+            await db.People.Where(p => p.Id == inactive.Id).ExecuteUpdateAsync(s => s.SetProperty(p => p.IsActive, false));
+        });
+
+        using var twoWeeksAgo = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(-14):yyyy-MM-dd}");
+        using var today = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today:yyyy-MM-dd}");
+
+        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(twoWeeksAgo)).Select(p => p.Name))
+            .IsEquivalentTo(["Lea Left", "Lena Leader", "Max Member"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(today)).Select(p => p.Name))
+            .IsEquivalentTo(["Lars Late", "Lena Leader", "Max Member"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task GetGroupRoster_GroupLedBySomeoneElse_ReturnsNotFound()
+    {
+        using var f = await SeedGroupAsync();
+        var otherGroup = new Group { Name = "Other group", StartsAt = f.Group.StartsAt };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.Add(otherGroup);
+            await db.SaveChangesAsync();
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{otherGroup.Id}/roster?occurredOn={Today:yyyy-MM-dd}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("?occurredOn=2026-13-01")]
+    [Arguments("?occurredOn=9999-12-31")]
+    [Arguments("?occurredOn=0001-01-01")]
+    public async Task GetGroupRoster_MissingMalformedOrExtremeDate_ReturnsBadRequest(string query)
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster{query}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(-201)]
+    public async Task GetGroupRoster_FutureDateOrBeforeGroupStarted_ReturnsBadRequest(int daysFromToday)
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(daysFromToday):yyyy-MM-dd}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    }
+
+    [Test]
+    [Arguments(ChurchMembershipRole.Staff, HttpStatusCode.OK)]
+    [Arguments(ChurchMembershipRole.Leader, HttpStatusCode.NotFound)]
+    public async Task GetGroupRoster_EndedGroupCallerNoLongerLeads_OnlyStaffCanRead(ChurchMembershipRole role, HttpStatusCode expected)
+    {
+        using var f = await SeedGroupAsync(role, callerLeads: false);
+        await InChurchAsync(f.ChurchId, db => db.Groups.Where(g => g.Id == f.Group.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.EndsAt, Time.GetUtcNow().AddDays(-1))));
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(-7):yyyy-MM-dd}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("9999-12-31")]
+    [Arguments("0001-01-01")]
+    public async Task RecordGroupSession_ExtremeDate_ReturnsBadRequest(string occurredOn)
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(DateOnly.Parse(occurredOn, System.Globalization.CultureInfo.InvariantCulture), [f.Member.Id]));
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+    }
+
+    [Test]
     public async Task GetGroupSessions_SeveralMeetings_ListsNewestFirstWithCounts()
     {
         using var f = await SeedGroupAsync();

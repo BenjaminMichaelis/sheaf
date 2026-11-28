@@ -13,6 +13,7 @@ public interface IAttendanceService
 {
     Task<PagedResponse<SessionSummaryResponse>> GetSessionsAsync(Guid groupId, PageRequest page, CancellationToken ct);
     Task<SessionResponse> GetSessionAsync(Guid groupId, Guid sessionId, CancellationToken ct);
+    Task<SessionPersonResponse[]> GetRosterAsync(Guid groupId, DateOnly occurredOn, CancellationToken ct);
     Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct);
     Task<SessionResponse> UpdateAttendeesAsync(Guid groupId, Guid sessionId, Guid expectedVersion, AttendeesRequest request, CancellationToken ct);
     Task<PagedResponse<AttendanceRecordResponse>> GetRecordsAsync(Guid? personId, string? userId, PageRequest page, CancellationToken ct);
@@ -54,6 +55,14 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         var session = await db.GroupMeetings.AsNoTracking()
             .SingleOrDefaultAsync(s => s.Id == sessionId && s.GroupId == groupId, ct) ?? throw Missing();
         return await ResponseAsync(session, ct);
+    }
+
+    public async Task<SessionPersonResponse[]> GetRosterAsync(Guid groupId, DateOnly occurredOn, CancellationToken ct)
+    {
+        var (_, group) = await scope.GroupAsync(groupId, GroupPermission.View, ct);
+        // Only dates a meeting could be recorded for, so a future date cannot reveal who is due to join.
+        RequireMeetingDate(group, occurredOn);
+        return await ByName(RosterOn(groupId, occurredOn)).ToArrayAsync(ct);
     }
 
     public async Task<SessionResponse> CreateSessionAsync(Guid groupId, SessionRequest request, CancellationToken ct)
@@ -134,8 +143,12 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
     /// <summary>A meeting date must not be in the future and must fall while the group existed.</summary>
     private void RequireMeetingDate(Group group, DateOnly date)
     {
-        var (start, end) = scope.Calendar.DayBounds(date);
-        if (date > scope.Today || end <= group.StartsAt || (group.EndsAt is { } ended && start >= ended))
+        // Compared as calendar dates first, so a date far outside the group's life is rejected before its day bounds
+        // are worked out: those overflow at DateOnly's extremes.
+        if (date > scope.Today || date < scope.Calendar.DateOf(group.StartsAt))
+            throw Invalid();
+        var (start, _) = scope.Calendar.DayBounds(date);
+        if (group.EndsAt is { } ended && start >= ended)
             throw Invalid();
     }
 
@@ -183,23 +196,23 @@ public sealed class AttendanceService(ApplicationDbContext db, TrackerScope scop
         }
     }
 
-    /// <summary>
-    /// Who came, and who was absent: active people on the group's roster, in any role, at any point on the meeting's
-    /// local date and not marked present. Absence is worked out on read, never stored.
-    /// </summary>
+    /// <summary>Active people on the group's roster, in any role, at any point on <paramref name="date"/> in the church's time zone.</summary>
+    private IQueryable<Person> RosterOn(Guid groupId, DateOnly date)
+    {
+        var (start, end) = scope.Calendar.DayBounds(date);
+        return db.People.Where(p => p.IsActive && db.GroupAssignments.Any(a => a.GroupId == groupId && a.PersonId == p.Id
+            && a.StartsAt < end && (a.EndsAt == null || a.EndsAt > start)));
+    }
+
+    private static IQueryable<SessionPersonResponse> ByName(IQueryable<Person> people) =>
+        people.OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id).Select(NameOf);
+
+    /// <summary>Who came, and who was absent: people on the roster that day (<see cref="RosterOn"/>) not marked present. Absence is worked out on read, never stored.</summary>
     private async Task<SessionResponse> ResponseAsync(GroupMeeting session, CancellationToken ct)
     {
-        var (start, end) = scope.Calendar.DayBounds(session.OccurredOn);
         var present = db.Attendances.Where(a => a.MeetingId == session.Id && a.RemovedAt == null).Select(a => a.PersonId);
-        var attendees = await db.People.Where(p => present.Contains(p.Id))
-            .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
-            .Select(NameOf).ToArrayAsync(ct);
-        var absent = await db.People
-            .Where(p => p.IsActive && !present.Contains(p.Id)
-                && db.GroupAssignments.Any(a => a.GroupId == session.GroupId && a.PersonId == p.Id
-                    && a.StartsAt < end && (a.EndsAt == null || a.EndsAt > start)))
-            .OrderBy(p => p.FirstName).ThenBy(p => p.LastName).ThenBy(p => p.Id)
-            .Select(NameOf).ToArrayAsync(ct);
+        var attendees = await ByName(db.People.Where(p => present.Contains(p.Id))).ToArrayAsync(ct);
+        var absent = await ByName(RosterOn(session.GroupId, session.OccurredOn).Where(p => !present.Contains(p.Id))).ToArrayAsync(ct);
         return new SessionResponse(session.Id, session.GroupId, session.OccurredOn, session.Description, attendees, absent, session.Version);
     }
 }
