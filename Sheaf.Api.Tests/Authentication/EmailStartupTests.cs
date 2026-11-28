@@ -11,7 +11,9 @@ public class EmailStartupTests
     {
         await using ProductionApiFactory factory = new(keyIdentifier: KeyIdentifier, mailHost: null);
 
-        await Assert.That(() => factory.CreateClient()).Throws<OptionsValidationException>();
+        await Assert.That(() => factory.CreateClient())
+            .Throws<OptionsValidationException>()
+            .WithMessageContaining("Email:Smtp:Host");
     }
 
     [Test]
@@ -19,7 +21,9 @@ public class EmailStartupTests
     {
         await using ProductionApiFactory factory = new(keyIdentifier: KeyIdentifier, mailTls: false);
 
-        await Assert.That(() => factory.CreateClient()).Throws<OptionsValidationException>();
+        await Assert.That(() => factory.CreateClient())
+            .Throws<OptionsValidationException>()
+            .WithMessageContaining("Email:Smtp:EnableSsl");
     }
 
     [Test]

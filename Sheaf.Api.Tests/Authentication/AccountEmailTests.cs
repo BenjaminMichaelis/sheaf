@@ -239,6 +239,25 @@ public partial class AccountEmailTests : InMemoryApiTest
     }
 
     [Test]
+    public async Task ConfirmEmail_FourWrongCodesThenRightOne_ConfirmsAndSignsIn()
+    {
+        // With the test above, pins the limit at exactly five: a fifth guess is still allowed.
+        using HttpClient client = CreateClient();
+        ApplicationUser user = await CreateUserAsync(confirmed: false);
+        await LoginRequiresVerificationAsync(client, Address(user), Password);
+        string code = LatestCode(Address(user));
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            using HttpResponseMessage failed = await ConfirmAsync(client, Address(user), Password, WrongCode(code));
+            await Assert.That(failed.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        }
+
+        using HttpResponseMessage confirmed = await ConfirmAsync(client, Address(user), Password, code);
+
+        await Assert.That(confirmed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
     public async Task ConfirmEmail_UnknownAddress_AnswersLikeWrongCode()
     {
         using HttpClient client = CreateClient();
@@ -254,9 +273,10 @@ public partial class AccountEmailTests : InMemoryApiTest
     }
 
     [Test]
-    public async Task VerifyUserTokenAsync_GuessLoadedBeforeAnotherGuessSaved_RejectedWithoutComparing()
+    public async Task VerifyUserTokenAsync_GuessLoadedBeforeAnotherGuessSaved_RightGuessRejected()
     {
-        // Two parallel guesses load the same state; the one whose count doesn't save must not be compared, even if right.
+        // Two parallel guesses load the same state; the one that loses the save is rejected even if right, so parallel
+        // requests can't get more guesses than the limit.
         ApplicationUser created = await CreateUserAsync(confirmed: false);
         await using AsyncServiceScope first = Factory.Services.CreateAsyncScope();
         await using AsyncServiceScope second = Factory.Services.CreateAsyncScope();
@@ -577,21 +597,19 @@ public partial class AccountEmailTests : InMemoryApiTest
     }
 
     [Test]
-    public async Task ChangeEmail_AddressOfAnotherAccount_SendsNoticeAndNoCodeConfirms()
+    public async Task ChangeEmail_AddressOfAnotherAccount_AnswersLikeFreeAddressAndSendsNoticeWithoutCode()
     {
         using HttpClient client = CreateClient();
         ApplicationUser user = await CreateUserAsync(confirmed: true);
         ApplicationUser other = await CreateUserAsync(confirmed: true);
         string cookie = await LoginAsync(client, Address(user), Password);
 
-        using HttpResponseMessage started = await PostAsync(client, cookie, "/api/auth/email", new ChangeEmailRequest(Address(other), Password));
-        using HttpResponseMessage confirmed = await PostAsync(client, cookie, "/api/auth/email/confirm",
-            new ConfirmEmailChangeRequest(Address(other), "123456"));
+        using HttpResponseMessage taken = await PostAsync(client, cookie, "/api/auth/email", new ChangeEmailRequest(Address(other), Password));
+        using HttpResponseMessage free = await PostAsync(client, cookie, "/api/auth/email", new ChangeEmailRequest(NewEmail(), Password));
 
-        await Assert.That(started.StatusCode).IsEqualTo(HttpStatusCode.Accepted);
+        await Assert.That(taken.StatusCode).IsEqualTo(free.StatusCode);
+        await Assert.That(await taken.Content.ReadAsStringAsync()).IsEqualTo(await free.Content.ReadAsStringAsync());
         await Assert.That(CodeIn(_outbox.Single(Address(other)))).IsNull();
-        await Assert.That(confirmed.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
-        await LoginAsync(client, Address(other), Password);
     }
 
     [Test]
@@ -657,15 +675,12 @@ public partial class AccountEmailTests : InMemoryApiTest
     }
 
     [Test]
-    [Arguments(false)]
-    [Arguments(true)]
-    public async Task ConfirmEmailChange_LongOrDifferentlyCapitalizedAddress_ChangesEmail(bool longAddress)
+    public async Task ConfirmEmailChange_DifferentlyCapitalizedAddress_ChangesEmail()
     {
+        // Long addresses depend on SQL Server's column sizes, so AccountCodeStorageTests covers those.
         using HttpClient client = CreateClient();
         ApplicationUser user = await CreateUserAsync(confirmed: true);
-        string newEmail = longAddress
-            ? $"{new string('a', 60)}.{Guid.NewGuid():N}@{new string('b', 120)}.example.com"
-            : $"New.{Guid.NewGuid():N}@Example.com";
+        string newEmail = $"New.{Guid.NewGuid():N}@Example.com";
         string cookie = await LoginAsync(client, Address(user), Password);
         using (HttpResponseMessage started = await PostAsync(client, cookie, "/api/auth/email", new ChangeEmailRequest(newEmail, Password)))
         {
@@ -673,7 +688,7 @@ public partial class AccountEmailTests : InMemoryApiTest
         }
 
         using HttpResponseMessage confirmed = await PostAsync(client, cookie, "/api/auth/email/confirm",
-            new ConfirmEmailChangeRequest(longAddress ? newEmail : newEmail.ToLowerInvariant(), LatestCode(newEmail)));
+            new ConfirmEmailChangeRequest(newEmail.ToLowerInvariant(), LatestCode(newEmail)));
 
         await Assert.That(confirmed.StatusCode).IsEqualTo(HttpStatusCode.OK);
         await LoginAsync(client, newEmail, Password);

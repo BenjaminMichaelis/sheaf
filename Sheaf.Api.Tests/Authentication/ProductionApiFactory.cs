@@ -57,7 +57,7 @@ internal sealed class ProductionApiFactory(
             ["DataProtection:KeyVaultKeyIdentifier"] = keyIdentifier,
             ["Email:Smtp:Host"] = mailHost,
             ["Email:Smtp:EnableSsl"] = mailTls ? "true" : "false",
-            ["Email:From"] = mailHost is null ? null : "Sheaf <no-reply@example.com>"
+            ["Email:From"] = "Sheaf <no-reply@example.com>"
         });
     }
 }

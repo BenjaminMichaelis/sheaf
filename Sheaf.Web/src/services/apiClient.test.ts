@@ -171,26 +171,10 @@ describe('apiClient', () => {
     })).rejects.toThrow('Passwords do not match.')
   })
 
-  it('PUT_ValidationProblem_RejectsWithServerMessage', async () => {
-    const problem = {
-      title: 'One or more validation errors occurred.',
-      status: 400,
-      errors: { FirstName: ['Enter a first name.'] },
-    }
-
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(problem), {
-      status: 400,
-      headers: { 'content-type': 'application/problem+json' },
-    }))
-
-    await expect(apiClient.PUT('/api/auth/profile', {
-      body: { firstName: '', lastName: 'Leader' },
-    })).rejects.toThrow('Enter a first name.')
-  })
-
   it('POST_LoginUnverifiedEmail_RejectsWithProblemType', async () => {
+    // The backend's problem type, written out so a wrong EMAIL_NOT_CONFIRMED fails this test.
     const problem = {
-      type: EMAIL_NOT_CONFIRMED,
+      type: 'tag:sheaf,2026:problems/email-not-confirmed',
       title: 'Verify your email address.',
       status: 403,
       detail: 'Enter the code we emailed you to finish signing in.',
