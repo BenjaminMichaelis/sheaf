@@ -33,7 +33,11 @@ public enum PersonMergeChoice
     /// <summary>The duplicate's value, even when it is blank.</summary>
     Duplicate = 2
 }
-/// <summary>Where each field of the merged person comes from. Omitted fields <see cref="PersonMergeChoice.Merge"/>.</summary>
+/// <summary>
+/// Where each field of the merged person comes from; omitted fields use <see cref="PersonMergeChoice.Merge"/>. A first
+/// name is never blank, so for <see cref="FirstName"/> only <see cref="PersonMergeChoice.Duplicate"/> changes anything.
+/// Values outside the enum are rejected with 400.
+/// </summary>
 public sealed record PersonMergeFields(
     PersonMergeChoice FirstName = PersonMergeChoice.Merge,
     PersonMergeChoice LastName = PersonMergeChoice.Merge,
@@ -53,7 +57,7 @@ public enum DuplicateReason
     Phone = 2
 }
 /// <summary>One side of a suggested duplicate pair, with what Staff need to compare the two.</summary>
-public sealed record DuplicatePersonResponse(Guid Id, string Name, string? Email, string? Phone, string? HouseholdLabel, bool IsActive,
+public sealed record DuplicatePersonResponse(Guid Id, string Name, string? Email, string? Phone, string? HouseholdLabel,
     bool HasAccount, DateTimeOffset CreatedAt);
 /// <summary>
 /// Two people who may be the same person. <paramref name="Person"/> is the earlier record, the suggested survivor;

@@ -3723,7 +3723,6 @@
           "email",
           "phone",
           "householdLabel",
-          "isActive",
           "hasAccount",
           "createdAt"
         ],
@@ -3753,9 +3752,6 @@
               "null",
               "string"
             ]
-          },
-          "isActive": {
-            "type": "boolean"
           },
           "hasAccount": {
             "type": "boolean"

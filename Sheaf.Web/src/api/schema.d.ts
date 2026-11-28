@@ -657,7 +657,6 @@ export interface components {
             email: null | string;
             phone: null | string;
             householdLabel: null | string;
-            isActive: boolean;
             hasAccount: boolean;
             /** Format: date-time */
             createdAt: string;

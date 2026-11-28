@@ -91,8 +91,8 @@ public static class TrackerEndpoints
             })
             .Tracker("DismissDuplicatePeople", "Staff mark two people as different so the pair is no longer suggested")
             .RequirePermission(Permission.PeopleManage);
-        // If-Match carries the survivor's version and the body the duplicate's. Two people both linked to an account
-        // return 409 with reason "bothLinkedToAccounts".
+        // If-Match carries the survivor's version and the body the duplicate's. A 409 with a "reason" member explains a
+        // merge that cannot be done as asked: "bothLinkedToAccounts", or "overlappingGroupRoles" with the "groupIds".
         api.MapPost("/people/{id:guid}/merge", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonMergeRequest request, IPersonMergeService s, CancellationToken ct) =>
             TypedResults.Ok(await s.MergeAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
             .Tracker("MergePerson", "Staff merge a duplicate into this Person, moving attendance, group history, household, and account link; it cannot be undone")

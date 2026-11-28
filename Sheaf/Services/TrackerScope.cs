@@ -124,7 +124,7 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
         var groups = Groups(actor, GroupPermission.View).Select(g => g.Id);
         var attendedSince = Today.AddDays(-AttendanceVisibilityDays);
         var reachable = EditablePeople(actor).Select(p => p.Id);
-        return db.People.Where(p => reachable.Contains(p.Id)
+        return Unmerged.Where(p => reachable.Contains(p.Id)
             || db.Attendances.Any(a => a.PersonId == p.Id && a.RemovedAt == null
                 && db.GroupMeetings.Any(m => m.Id == a.MeetingId && groups.Contains(m.GroupId) && m.OccurredOn >= attendedSince)));
     }
