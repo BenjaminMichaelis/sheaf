@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,7 @@ using Sheaf.Core.Tests;
 using Sheaf.Data;
 using Sheaf.Data.Tenancy;
 using Sheaf.Endpoints;
+using Sheaf.Services;
 
 using TUnit.AspNetCore;
 
@@ -30,7 +32,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected const string CookieName = "__Host-sheaf";
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>() }
+        Converters = { new JsonStringEnumConverter<ChurchMembershipRole>(), new JsonStringEnumConverter<GroupRole>() }
     };
 
     private string _connectionString = "";
@@ -176,7 +178,7 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
         if (ifMatch is { } version)
             request.Headers.TryAddWithoutValidation("If-Match", Sheaf.Services.EntityTag.Format(version));
         if (body is not null)
-            request.Content = JsonContent.Create(body);
+            request.Content = JsonContent.Create(body, options: JsonOptions);
         return await client.SendAsync(request);
     }
 
@@ -184,7 +186,31 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
     protected static async Task<T> TrackerReadAsync<T>(HttpResponseMessage response, System.Net.HttpStatusCode expected = System.Net.HttpStatusCode.OK)
     {
         await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
-        return await response.Content.ReadFromJsonAsync<T>() ?? throw new InvalidOperationException("Missing tracker response.");
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions) ?? throw new InvalidOperationException("Missing tracker response.");
+    }
+
+    /// <summary>Asserts the response asks the caller to confirm (409 confirmation-required) and reads the problem.</summary>
+    protected static async Task<ProblemDetails> ReadConfirmationAsync(HttpResponseMessage response)
+    {
+        await Assert.That(response.StatusCode).IsEqualTo(System.Net.HttpStatusCode.Conflict).Because(await response.Content.ReadAsStringAsync());
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>() ?? throw new InvalidOperationException("Missing problem.");
+        await Assert.That(problem.Type).IsEqualTo(TrackerException.ConfirmationRequiredType);
+        return problem;
+    }
+
+    /// <summary>Asserts the problem carries the named extension member and returns it as JSON.</summary>
+    protected static async Task<JsonElement> ExtensionAsync(ProblemDetails problem, string name)
+    {
+        await Assert.That(problem.Extensions.TryGetValue(name, out var value)).IsTrue();
+        return await Assert.That(value).IsTypeOf<JsonElement>();
+    }
+
+    /// <summary>Asserts the response is a possible-duplicate confirmation and reads its similar-people lists.</summary>
+    protected static async Task<SimilarPeopleResponse[]> ReadSimilarPeopleAsync(HttpResponseMessage response)
+    {
+        var similar = await ExtensionAsync(await ReadConfirmationAsync(response), "similarPeople");
+        return similar.Deserialize<SimilarPeopleResponse[]>(JsonSerializerOptions.Web)
+            ?? throw new InvalidOperationException("Missing similar people.");
     }
 
     /// <summary>A whole-second clock that tests advance explicitly.</summary>

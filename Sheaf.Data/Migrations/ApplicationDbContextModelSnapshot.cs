@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261127211232_AccountEmailVerification";
+    public override string LastMigrationId => "20261128000126_AccountEmailVerification";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -321,6 +321,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
+                b.Property<Guid>("MeetingId")
+                    .HasColumnType("uniqueidentifier");
+
                 b.Property<Guid>("PersonId")
                     .HasColumnType("uniqueidentifier");
 
@@ -340,14 +343,11 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasMaxLength(450)
                     .HasColumnType("nvarchar(450)");
 
-                b.Property<Guid>("SessionId")
-                    .HasColumnType("uniqueidentifier");
-
                 b.HasKey("ChurchId", "Id");
 
                 b.HasIndex("ChurchId", "PersonId");
 
-                b.HasIndex("ChurchId", "SessionId", "PersonId")
+                b.HasIndex("ChurchId", "MeetingId", "PersonId")
                     .IsUnique()
                     .HasFilter("[RemovedAt] IS NULL");
 
@@ -361,6 +361,14 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
             {
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("GroupLabel")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<string>("GroupLabelPlural")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
 
                 b.Property<string>("Name")
                     .IsRequired()
@@ -412,7 +420,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.ToTable("ChurchMemberships");
             });
 
-        modelBuilder.Entity("Sheaf.Data.Context", b =>
+        modelBuilder.Entity("Sheaf.Data.Group", b =>
             {
                 b.Property<Guid>("ChurchId")
                     .HasColumnType("uniqueidentifier");
@@ -425,9 +433,6 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid?>("GroupTypeId")
                     .HasColumnType("uniqueidentifier");
-
-                b.Property<int>("Kind")
-                    .HasColumnType("int");
 
                 b.Property<string>("Name")
                     .IsRequired()
@@ -445,17 +450,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.HasIndex("ChurchId", "GroupTypeId");
 
-                b.ToTable("Contexts", t =>
+                b.ToTable("Groups", t =>
                     {
-                        t.HasCheckConstraint("CK_Contexts_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                        t.HasCheckConstraint("CK_Groups_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
 
-                        t.HasCheckConstraint("CK_Contexts_Kind", "[Kind] = 0");
-
-                        t.HasCheckConstraint("CK_Contexts_Name", "TRIM([Name]) <> ''");
+                        t.HasCheckConstraint("CK_Groups_Name", "TRIM([Name]) <> ''");
                     });
             });
 
-        modelBuilder.Entity("Sheaf.Data.ContextLeader", b =>
+        modelBuilder.Entity("Sheaf.Data.GroupAssignment", b =>
             {
                 b.Property<Guid>("ChurchId")
                     .HasColumnType("uniqueidentifier");
@@ -463,31 +466,38 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
-                b.Property<Guid>("ContextId")
-                    .HasColumnType("uniqueidentifier");
-
                 b.Property<DateTimeOffset?>("EndsAt")
                     .HasColumnType("datetimeoffset");
 
+                b.Property<Guid>("GroupId")
+                    .HasColumnType("uniqueidentifier");
+
                 b.Property<Guid>("PersonId")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<int>("Role")
+                    .HasColumnType("int");
 
                 b.Property<DateTimeOffset>("StartsAt")
                     .HasColumnType("datetimeoffset");
 
                 b.HasKey("ChurchId", "Id");
 
-                b.HasIndex("ChurchId", "ContextId");
-
                 b.HasIndex("ChurchId", "PersonId");
 
-                b.ToTable("ContextLeaders", t =>
+                b.HasIndex("ChurchId", "GroupId", "PersonId")
+                    .IsUnique()
+                    .HasFilter("[EndsAt] IS NULL");
+
+                b.ToTable("GroupAssignments", t =>
                     {
-                        t.HasCheckConstraint("CK_ContextLeaders_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+                        t.HasCheckConstraint("CK_GroupAssignments_Dates", "[EndsAt] IS NULL OR [EndsAt] >= [StartsAt]");
+
+                        t.HasCheckConstraint("CK_GroupAssignments_Role", "[Role] IN (0, 1)");
                     });
             });
 
-        modelBuilder.Entity("Sheaf.Data.ContextMember", b =>
+        modelBuilder.Entity("Sheaf.Data.GroupMeeting", b =>
             {
                 b.Property<Guid>("ChurchId")
                     .HasColumnType("uniqueidentifier");
@@ -495,39 +505,11 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
 
-                b.Property<Guid>("ContextId")
-                    .HasColumnType("uniqueidentifier");
+                b.Property<string>("Description")
+                    .HasMaxLength(2000)
+                    .HasColumnType("nvarchar(2000)");
 
-                b.Property<DateTimeOffset>("JoinedAt")
-                    .HasColumnType("datetimeoffset");
-
-                b.Property<DateTimeOffset?>("LeftAt")
-                    .HasColumnType("datetimeoffset");
-
-                b.Property<Guid>("PersonId")
-                    .HasColumnType("uniqueidentifier");
-
-                b.HasKey("ChurchId", "Id");
-
-                b.HasIndex("ChurchId", "ContextId");
-
-                b.HasIndex("ChurchId", "PersonId");
-
-                b.ToTable("ContextMembers", t =>
-                    {
-                        t.HasCheckConstraint("CK_ContextMembers_Dates", "[LeftAt] IS NULL OR [LeftAt] >= [JoinedAt]");
-                    });
-            });
-
-        modelBuilder.Entity("Sheaf.Data.ContextSession", b =>
-            {
-                b.Property<Guid>("ChurchId")
-                    .HasColumnType("uniqueidentifier");
-
-                b.Property<Guid>("Id")
-                    .HasColumnType("uniqueidentifier");
-
-                b.Property<Guid>("ContextId")
+                b.Property<Guid>("GroupId")
                     .HasColumnType("uniqueidentifier");
 
                 b.Property<DateOnly>("OccurredOn")
@@ -548,9 +530,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.HasKey("ChurchId", "Id");
 
-                b.HasIndex("ChurchId", "ContextId", "OccurredOn");
+                b.HasIndex("ChurchId", "GroupId", "OccurredOn");
 
-                b.ToTable("ContextSessions");
+                b.ToTable("GroupMeetings");
             });
 
         modelBuilder.Entity("Sheaf.Data.GroupType", b =>
@@ -560,6 +542,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.Property<Guid>("Id")
                     .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("IsRetired")
+                    .HasColumnType("bit");
 
                 b.Property<string>("Name")
                     .IsRequired()
@@ -727,15 +712,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 
-                b.HasOne("Sheaf.Data.Person", null)
+                b.HasOne("Sheaf.Data.GroupMeeting", null)
                     .WithMany()
-                    .HasForeignKey("ChurchId", "PersonId")
+                    .HasForeignKey("ChurchId", "MeetingId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 
-                b.HasOne("Sheaf.Data.ContextSession", null)
+                b.HasOne("Sheaf.Data.Person", null)
                     .WithMany()
-                    .HasForeignKey("ChurchId", "SessionId")
+                    .HasForeignKey("ChurchId", "PersonId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
             });
@@ -755,7 +740,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired();
             });
 
-        modelBuilder.Entity("Sheaf.Data.Context", b =>
+        modelBuilder.Entity("Sheaf.Data.Group", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
                     .WithMany()
@@ -769,7 +754,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .OnDelete(DeleteBehavior.Restrict);
             });
 
-        modelBuilder.Entity("Sheaf.Data.ContextLeader", b =>
+        modelBuilder.Entity("Sheaf.Data.GroupAssignment", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
                     .WithMany()
@@ -777,9 +762,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 
-                b.HasOne("Sheaf.Data.Context", null)
+                b.HasOne("Sheaf.Data.Group", null)
                     .WithMany()
-                    .HasForeignKey("ChurchId", "ContextId")
+                    .HasForeignKey("ChurchId", "GroupId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 
@@ -790,7 +775,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired();
             });
 
-        modelBuilder.Entity("Sheaf.Data.ContextMember", b =>
+        modelBuilder.Entity("Sheaf.Data.GroupMeeting", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
                     .WithMany()
@@ -798,30 +783,9 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 
-                b.HasOne("Sheaf.Data.Context", null)
+                b.HasOne("Sheaf.Data.Group", null)
                     .WithMany()
-                    .HasForeignKey("ChurchId", "ContextId")
-                    .OnDelete(DeleteBehavior.Restrict)
-                    .IsRequired();
-
-                b.HasOne("Sheaf.Data.Person", null)
-                    .WithMany()
-                    .HasForeignKey("ChurchId", "PersonId")
-                    .OnDelete(DeleteBehavior.Restrict)
-                    .IsRequired();
-            });
-
-        modelBuilder.Entity("Sheaf.Data.ContextSession", b =>
-            {
-                b.HasOne("Sheaf.Data.Church", null)
-                    .WithMany()
-                    .HasForeignKey("ChurchId")
-                    .OnDelete(DeleteBehavior.Restrict)
-                    .IsRequired();
-
-                b.HasOne("Sheaf.Data.Context", null)
-                    .WithMany()
-                    .HasForeignKey("ChurchId", "ContextId")
+                    .HasForeignKey("ChurchId", "GroupId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
             });

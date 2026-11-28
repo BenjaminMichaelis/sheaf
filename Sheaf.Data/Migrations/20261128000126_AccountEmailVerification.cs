@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Sheaf.Data.Migrations;
 
 /// <inheritdoc />
-public partial class _20261127211232_AccountEmailVerification : Migration
+public partial class _20261128000126_AccountEmailVerification : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)

@@ -248,7 +248,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Find up to 20 active people by name (2+ characters), returning only name and household label */
+        /** Find up to 20 active people by name (2+ characters), returning only name, household label, and current group names */
         get: operations["LookupPeople"];
         put?: never;
         post?: never;
@@ -265,7 +265,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a scoped Person profile */
+        /** Get a Person's basic profile with household members' first names */
         get: operations["GetPerson"];
         /** Update a scoped Person profile without changing account links */
         put: operations["UpdatePerson"];
@@ -320,7 +320,7 @@ export interface paths {
         };
         /** Get a church-local group type */
         get: operations["GetGroupType"];
-        /** Staff rename a group type */
+        /** Staff rename or retire a group type; groups keep a retired type, but no group can be given it */
         put: operations["UpdateGroupType"];
         post?: never;
         delete?: never;
@@ -521,6 +521,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/church/groups/{groupId}/assignments/{assignmentId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Staff move a person's current group assignment to another role, keeping both intervals */
+        post: operations["ChangeGroupRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/church/groups/{groupId}/sessions": {
         parameters: {
             query?: never;
@@ -548,7 +565,7 @@ export interface paths {
         };
         /** Get a meeting with who came and which roster members were absent */
         get: operations["GetGroupSession"];
-        /** Replace who came to a meeting; people taken off the list are kept as history */
+        /** Replace who came to a meeting and its description; people taken off the list are kept as history */
         put: operations["UpdateGroupSessionAttendees"];
         post?: never;
         delete?: never;
@@ -581,9 +598,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get the selected church's name and the time zone its meeting dates are kept in */
+        /** Get the selected church's name, the time zone its meeting dates are kept in, and its group labels */
         get: operations["GetChurchSettings"];
-        /** Admins set the IANA time zone the church's meeting dates are kept in */
+        /** Admins set the church's time zone and its own words for a group; omitted labels reset to Group/Groups */
         put: operations["UpdateChurchSettings"];
         post?: never;
         delete?: never;
@@ -607,6 +624,7 @@ export interface components {
             id: string;
             /** Format: uuid */
             personId: string;
+            role: components["schemas"]["GroupRole"];
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
@@ -634,6 +652,7 @@ export interface components {
             newPeople?: null | components["schemas"]["PersonRequest"][];
             /** @default false */
             confirm: boolean;
+            description?: null | string;
         };
         ChangeEmailRequest: {
             newEmail: string;
@@ -649,10 +668,14 @@ export interface components {
         ChurchMembershipRole: "Leader" | "Coordinator" | "Staff" | "Admin";
         ChurchSettingsRequest: {
             timeZoneId: string;
+            groupLabel?: null | string;
+            groupLabelPlural?: null | string;
         };
         ChurchSettingsResponse: {
             name: string;
             timeZoneId: string;
+            groupLabel: string;
+            groupLabelPlural: string;
         };
         ConfirmEmailChangeRequest: {
             newEmail: string;
@@ -690,13 +713,17 @@ export interface components {
             /** Format: uuid */
             version: string;
         };
+        /** @enum {unknown} */
+        GroupRole: "Member" | "Leader";
         GroupTypeRequest: {
             name: string;
+            isRetired?: null | boolean;
         };
         GroupTypeResponse: {
             /** Format: uuid */
             id: string;
             name: string;
+            isRetired: boolean;
         };
         HouseholdMemberResponse: {
             /** Format: uuid */
@@ -761,6 +788,7 @@ export interface components {
             id: string;
             name: string;
             householdLabel: null | string;
+            groups: null | string[];
         };
         PersonRequest: {
             firstName: string;
@@ -779,7 +807,10 @@ export interface components {
             phone: null | string;
             /** Format: uuid */
             householdId: null | string;
+            householdLabel: null | string;
+            householdMembers: components["schemas"]["HouseholdMemberResponse"][];
             isActive: boolean;
+            canEdit: boolean;
             /** Format: uuid */
             version: string;
         };
@@ -803,6 +834,11 @@ export interface components {
             code: string;
             newPassword: string;
         };
+        RoleChangeRequest: {
+            role: components["schemas"]["GroupRole"];
+            /** Format: date-time */
+            startsAt: string;
+        };
         SessionPersonResponse: {
             /** Format: uuid */
             id: string;
@@ -815,6 +851,7 @@ export interface components {
             newPeople?: null | components["schemas"]["PersonRequest"][];
             /** @default false */
             confirm: boolean;
+            description?: null | string;
         };
         SessionResponse: {
             /** Format: uuid */
@@ -823,6 +860,7 @@ export interface components {
             groupId: string;
             /** Format: date */
             occurredOn: string;
+            description: null | string;
             attendees: components["schemas"]["SessionPersonResponse"][];
             absent: components["schemas"]["SessionPersonResponse"][];
             /** Format: uuid */
@@ -1610,7 +1648,9 @@ export interface operations {
     };
     CreatePerson: {
         parameters: {
-            query?: never;
+            query?: {
+                confirm?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2888,6 +2928,69 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EndRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    ChangeGroupRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: string;
+                assignmentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleChangeRequest"];
             };
         };
         responses: {

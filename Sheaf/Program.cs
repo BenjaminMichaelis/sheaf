@@ -76,10 +76,15 @@ builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.Appli
         options.TimeProvider = timeProvider;
     });
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>()));
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GroupRole>());
+});
 
 // Add services to the container.
 builder.Services.AddProblemDetails();
+// Validates Minimal API parameters (DataAnnotations and IValidatableObject) and returns 400 ValidationProblem on failure.
+builder.Services.AddValidation();
 builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((document, _, _) =>

@@ -59,7 +59,10 @@ public class SqlServerMigrationTests
         await sql.InDatabaseScopeAsync(null, async db =>
         {
             // Registration used to confirm every email without sending anything.
-            await db.GetService<IMigrator>().MigrateAsync("20261126022815_Attendance");
+            string[] migrations = db.Database.GetMigrations().ToArray();
+            int verification = Array.FindIndex(migrations, m => m.EndsWith("_AccountEmailVerification", StringComparison.Ordinal));
+            await Assert.That(verification).IsGreaterThan(0);
+            await db.GetService<IMigrator>().MigrateAsync(migrations[verification - 1]);
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO [AspNetUsers] ([Id], [UserName], [NormalizedUserName], [Email], [NormalizedEmail], [EmailConfirmed],
                     [SecurityStamp], [PhoneNumberConfirmed], [TwoFactorEnabled], [LockoutEnabled], [AccessFailedCount])
