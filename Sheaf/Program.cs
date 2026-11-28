@@ -78,6 +78,7 @@ builder.Services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.Appli
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GroupRole>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<IntegrationStatus>());
 });
 

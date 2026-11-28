@@ -124,13 +124,21 @@ Content-Type: application/json
 
 {"personId":"{{personId}}","startsAt":"2026-11-02T00:00:00Z"}
 
-### Staff end leadership without deleting history
+### Staff end leadership without deleting history; the person leaves the group
 POST {{baseUrl}}/api/church/groups/{{groupId}}/leaders/{{leaderId}}/end
 Cookie: {{cookie}}
 X-Sheaf-Church: {{churchId}}
 Content-Type: application/json
 
 {"endsAt":"2026-11-20T00:00:00Z"}
+
+### Staff promote a Member to Leader (or step a Leader down to Member); both intervals are kept
+POST {{baseUrl}}/api/church/groups/{{groupId}}/assignments/{{memberId}}/role
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"role":"Leader","startsAt":"2026-11-10T00:00:00Z"}
 
 ### Associated household structure only
 GET {{baseUrl}}/api/church/households/{{householdId}}

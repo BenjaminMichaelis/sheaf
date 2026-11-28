@@ -2379,6 +2379,102 @@
         ]
       }
     },
+    "/api/church/groups/{groupId}/assignments/{assignmentId}/role": {
+      "post": {
+        "tags": [
+          "Tracker"
+        ],
+        "summary": "Staff move a person's current group assignment to another role, keeping both intervals",
+        "operationId": "ChangeGroupRole",
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
+    },
     "/api/church/groups/{groupId}/sessions": {
       "get": {
         "tags": [
@@ -3107,6 +3203,7 @@
         "required": [
           "id",
           "personId",
+          "role",
           "startsAt",
           "endsAt"
         ],
@@ -3119,6 +3216,9 @@
           "personId": {
             "type": "string",
             "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/GroupRole"
           },
           "startsAt": {
             "type": "string",
@@ -3378,6 +3478,12 @@
             "format": "uuid"
           }
         }
+      },
+      "GroupRole": {
+        "enum": [
+          "Member",
+          "Leader"
+        ]
       },
       "GroupTypeRequest": {
         "required": [
@@ -3914,6 +4020,22 @@
           },
           "confirmPassword": {
             "type": "string"
+          }
+        }
+      },
+      "RoleChangeRequest": {
+        "required": [
+          "role",
+          "startsAt"
+        ],
+        "type": "object",
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/GroupRole"
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

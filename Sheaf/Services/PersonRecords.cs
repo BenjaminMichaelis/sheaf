@@ -80,19 +80,13 @@ internal static class PersonNameSearch
             return null;
         if (personIds.Length == 0)
             return [];
-        var active = db.Contexts.ActiveAt(now);
-        var members =
-            from m in db.ContextMembers.CurrentAt(now)
-            join g in active on m.ContextId equals g.Id
-            where personIds.Contains(m.PersonId)
-            select new { m.PersonId, g.Name };
-        var leaders =
-            from l in db.ContextLeaders.CurrentAt(now)
-            join g in active on l.ContextId equals g.Id
-            where personIds.Contains(l.PersonId)
-            select new { l.PersonId, g.Name };
-        // Union drops a group listed twice for someone who both leads and attends it; the database orders the names.
-        var rows = await members.Union(leaders).OrderBy(r => r.Name).ToArrayAsync(ct);
+        // A person has one assignment per group at a time, so each current group appears once; the database orders the names.
+        var rows = await (
+            from a in db.GroupAssignments.CurrentAt(now)
+            join g in db.Groups.ActiveAt(now) on a.GroupId equals g.Id
+            where personIds.Contains(a.PersonId)
+            orderby g.Name
+            select new { a.PersonId, g.Name }).ToArrayAsync(ct);
         return rows.GroupBy(r => r.PersonId).ToDictionary(g => g.Key, g => g.Select(r => r.Name).ToArray());
     }
 

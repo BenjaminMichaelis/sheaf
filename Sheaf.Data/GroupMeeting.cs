@@ -8,15 +8,16 @@ namespace Sheaf.Data;
 /// <summary>
 /// One meeting of a group on a local date. Who came is recorded in <see cref="Attendance"/>; who was absent is the
 /// roster on that date minus the attendees, so it is never stored. A group may meet more than once on a date.
+/// The API calls a meeting a session.
 /// </summary>
-public sealed class ContextSession : ITenanted
+public sealed class GroupMeeting : ITenanted
 {
     [DatabaseGenerated(DatabaseGeneratedOption.None)]
     public Guid Id { get; private set; } = Guid.CreateVersion7();
 
     public Guid ChurchId { get; set; }
 
-    public Guid ContextId { get; set; }
+    public Guid GroupId { get; set; }
     /// <summary>The meeting's calendar date in the church's time zone (see <see cref="ChurchCalendar"/>).</summary>
     public DateOnly OccurredOn { get; set; }
     /// <summary>
@@ -32,7 +33,7 @@ public sealed class ContextSession : ITenanted
     /// </summary>
     [MaxLength(450)]
     public string? RecordedByUserId { get; set; }
-    /// <summary>Changes on every write to the session or its attendance; clients send it back as If-Match.</summary>
+    /// <summary>Changes on every write to the meeting or its attendance; clients send it back as If-Match.</summary>
     [ConcurrencyCheck]
     public Guid Version { get; set; } = Guid.NewGuid();
 
