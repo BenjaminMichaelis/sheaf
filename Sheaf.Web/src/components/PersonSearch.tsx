@@ -21,7 +21,8 @@ interface PersonSearchProps {
   churchId: string
   label: string
   onPick: (person: PersonMatch) => void
-  onCreate: (name: string) => void
+  /** Offers "Create new person" last in the list; left out where people can't be created, such as households. */
+  onCreate?: (name: string) => void
 }
 
 /**
@@ -38,7 +39,7 @@ export default function PersonSearch({ churchId, label, onPick, onCreate }: Pers
   // Only results for exactly what is typed are offered, so a match for an earlier name can never be picked.
   const searching = typed.length >= LOOKUP_MIN_LENGTH && (name !== typed || lookup.isFetching)
   const matches = typed.length >= LOOKUP_MIN_LENGTH && name === typed ? (lookup.data ?? []) : []
-  const options: Option[] = typed ? [...matches, { create: typed }] : []
+  const options: Option[] = typed ? (onCreate ? [...matches, { create: typed }] : matches) : []
 
   return (
     <Autocomplete<Option>
@@ -54,7 +55,7 @@ export default function PersonSearch({ churchId, label, onPick, onCreate }: Pers
       onChange={(_, option) => {
         if (option === null) return
 
-        if ('create' in option) onCreate(option.create)
+        if ('create' in option) onCreate?.(option.create)
         else onPick(option)
         // The box empties for the next name rather than showing the choice.
         setInput('')
@@ -63,6 +64,10 @@ export default function PersonSearch({ churchId, label, onPick, onCreate }: Pers
       filterOptions={all => all}
       getOptionLabel={option => ('create' in option ? option.create : option.name)}
       getOptionKey={optionKey}
+      // Only seen without the create option, which otherwise keeps the list from being empty.
+      loading={searching}
+      loadingText="Searching…"
+      noOptionsText="No one found"
       // Create waits for the search, so a quick Enter can't create someone who is about to be found.
       getOptionDisabled={option => 'create' in option && searching}
       renderOption={({ key, ...props }, option) => (

@@ -13,3 +13,11 @@ export function formatChurchDate(instant: string, timeZoneId: string): string {
 export function churchDateOf(instant: Date | string, timeZoneId: string): string {
   return new Date(instant).toLocaleDateString('en-CA', { timeZone: timeZoneId })
 }
+
+/**
+ * Formats a calendar date (YYYY-MM-DD, such as a meeting date). It has no time or zone, so it is formatted as that
+ * date in UTC, which never shifts it to the day before or after.
+ */
+export function formatDate(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+}

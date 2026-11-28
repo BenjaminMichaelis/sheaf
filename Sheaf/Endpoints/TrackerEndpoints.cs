@@ -78,6 +78,12 @@ public static class TrackerEndpoints
         api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonRequest request, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdatePersonAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
             .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links").RequiresIfMatch();
+        api.MapGet("/people/{id:guid}/groups", async Task<Ok<PersonGroupResponse[]>> (Guid id, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetGroupsAsync(id, ct)))
+            .Tracker("GetPersonGroups", "List the groups a Person is or was in or led, with dates, for those who may edit them; Leaders see only their own groups");
+        api.MapGet("/people/{id:guid}/attendance", async Task<Ok<PagedResponse<PersonAttendanceResponse>>> (Guid id, int? offset, int? limit, IPeopleService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetAttendanceAsync(id, PageRequest.From(offset, limit), ct)))
+            .Tracker("GetPersonAttendance", "List the meetings a Person came to, newest first, for those who may edit them; Leaders see only their own groups");
         MapDuplicates(api);
     }
 

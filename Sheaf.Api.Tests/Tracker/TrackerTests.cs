@@ -250,6 +250,30 @@ public class TrackerTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task LookupPeople_PersonInHouseholdWithoutLabel_SaysTheyAreInAHousehold()
+    {
+        // A household whose first member has no last name gets no label, so the label alone can't say who is in one.
+        var user = await CreateUserAsync();
+        var membership = await AddMembershipAsync(user, ChurchMembershipRole.Leader);
+        var household = new Household();
+        var housed = new Person { FirstName = "Quinn", HouseholdId = household.Id };
+        var unhoused = new Person { FirstName = "Quincy" };
+        await InChurchAsync(membership.ChurchId, async db =>
+        {
+            db.AddRange(household, housed, unhoused);
+            await db.SaveChangesAsync();
+        });
+        using var client = CreateClient();
+        var (_, cookie) = await LoginAsync(client, user);
+
+        using var lookup = await TrackerRequestAsync(client, cookie, membership.ChurchId, HttpMethod.Get, "/people/lookup?name=Qu");
+
+        var found = await TrackerReadAsync<PersonLookupResponse[]>(lookup);
+        await Assert.That(found.Select(p => (p.Id, p.HouseholdLabel, p.InHousehold)))
+            .IsEquivalentTo([(housed.Id, (string?)null, true), (unhoused.Id, (string?)null, false)]);
+    }
+
+    [Test]
     public async Task CreateHousehold_EmptyMemberList_LeavesDefaultUnset()
     {
         var user = await CreateUserAsync();

@@ -62,11 +62,12 @@ internal static class PersonNameSearch
             {
                 p.Id,
                 Name = p.FirstName + (p.LastName == null ? string.Empty : " " + p.LastName),
-                HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()
+                HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault(),
+                InHousehold = p.HouseholdId != null
             })
             .ToArrayAsync(ct);
         var groups = await CurrentGroupsAsync(db, actor, [.. rows.Select(r => r.Id)], now, ct);
-        return [.. rows.Select(r => new PersonLookupResponse(r.Id, r.Name, r.HouseholdLabel, GroupsOf(groups, r.Id)))];
+        return [.. rows.Select(r => new PersonLookupResponse(r.Id, r.Name, r.HouseholdLabel, GroupsOf(groups, r.Id), r.InHousehold))];
     }
 
     /// <summary>
@@ -113,7 +114,8 @@ internal static class PersonNameSearch
                     Id = p.Id,
                     FirstName = p.FirstName,
                     LastName = p.LastName,
-                    HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault()
+                    HouseholdLabel = db.Households.Where(h => h.Id == p.HouseholdId).Select(h => h.Label).FirstOrDefault(),
+                    InHousehold = p.HouseholdId != null
                 });
             query = query is null ? matches : query.Concat(matches);
         }
@@ -125,7 +127,7 @@ internal static class PersonNameSearch
         var groups = await CurrentGroupsAsync(db, actor, [.. rows.Select(m => m.Id).Distinct()], now, ct);
         return [.. rows.GroupBy(m => m.Index).Select(g => new SimilarPeopleResponse(g.Key,
             [.. g.Select(m => new PersonLookupResponse(m.Id, m.LastName is null ? m.FirstName : $"{m.FirstName} {m.LastName}", m.HouseholdLabel,
-                GroupsOf(groups, m.Id)))]))];
+                GroupsOf(groups, m.Id), m.InHousehold))]))];
     }
 
     private static IQueryable<Person> Top(this IQueryable<Person> matches) =>
@@ -139,5 +141,6 @@ internal static class PersonNameSearch
         public required string FirstName { get; init; }
         public string? LastName { get; init; }
         public string? HouseholdLabel { get; init; }
+        public bool InHousehold { get; init; }
     }
 }

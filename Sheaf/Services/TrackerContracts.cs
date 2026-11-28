@@ -71,7 +71,11 @@ public sealed record DuplicateDismissalRequest(Guid PersonId, Guid OtherPersonId
 /// <paramref name="Groups"/> names the active groups they are in or lead today; it is null unless the caller manages
 /// every group (Staff and Admins), because group membership can itself be sensitive.
 /// </summary>
-public sealed record PersonLookupResponse(Guid Id, string Name, string? HouseholdLabel, string[]? Groups);
+/// <param name="InHousehold">
+/// Whether they are in a household, which a household's label alone can't say: a household whose first member has no
+/// last name has none. Lets a household screen ask before moving someone out of theirs.
+/// </param>
+public sealed record PersonLookupResponse(Guid Id, string Name, string? HouseholdLabel, string[]? Groups, bool InHousehold);
 /// <summary>A group type name. An omitted IsRetired keeps the current value.</summary>
 public sealed record GroupTypeRequest(string Name, bool? IsRetired = null);
 /// <summary>
@@ -116,12 +120,22 @@ public sealed record AttendeesRequest(Guid[]? PersonIds, PersonRequest[]? NewPeo
 /// <summary>A person named on a meeting: who came, or a roster member who did not.</summary>
 public sealed record SessionPersonResponse(Guid Id, string Name);
 /// <summary>A meeting with its description, who came, and which roster members, as of that date, did not.</summary>
+/// <param name="CanEdit">
+/// Whether the caller may still correct the meeting: Staff always, a group's Leaders for
+/// <see cref="AttendanceService.LeaderEditDays"/> days after it was recorded.
+/// </param>
 public sealed record SessionResponse(Guid Id, Guid GroupId, DateOnly OccurredOn, string? Description, SessionPersonResponse[] Attendees,
-    SessionPersonResponse[] Absent, Guid Version) : IVersioned;
+    SessionPersonResponse[] Absent, bool CanEdit, Guid Version) : IVersioned;
 /// <summary>A meeting in a group's history.</summary>
 public sealed record SessionSummaryResponse(Guid Id, DateOnly OccurredOn, int AttendeeCount, Guid Version) : IVersioned;
 /// <summary>People who may already exist for the new person at <paramref name="Index"/> in the request (0 when creating one person).</summary>
 public sealed record SimilarPeopleResponse(int Index, PersonLookupResponse[] Matches);
+/// <summary>One interval in which a person held <paramref name="Role"/> in a group.</summary>
+/// <param name="EndsAt">When the role ended or ends: its own end, or the group's if the group ended first.</param>
+/// <param name="IsCurrent">Whether the role has started and not yet ended, so a role ending in future is still current.</param>
+public sealed record PersonGroupResponse(Guid GroupId, string GroupName, GroupRole Role, DateTimeOffset StartsAt, DateTimeOffset? EndsAt, bool IsCurrent);
+/// <summary>A meeting a person is marked as having come to.</summary>
+public sealed record PersonAttendanceResponse(Guid SessionId, Guid GroupId, string GroupName, DateOnly OccurredOn);
 /// <summary>One person marked present, by whom, and whether and by whom they were taken off the list.</summary>
 public sealed record AttendanceRecordResponse(Guid SessionId, Guid GroupId, DateOnly OccurredOn, Guid PersonId, string PersonName,
     string? RecordedByUserId, DateTimeOffset RecordedAt, string? RemovedByUserId, DateTimeOffset? RemovedAt);

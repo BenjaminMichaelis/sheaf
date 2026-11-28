@@ -19,12 +19,13 @@ describe('createQueryClient', () => {
     expect(await attemptsFailingWith(new ApiError('Not found.', 404, null))).toBe(1)
   })
 
-  it('fetchQuery_ServerError_RetriesThreeTimes', async () => {
-    expect(await attemptsFailingWith(new ApiError('Unavailable.', 503, null))).toBe(4)
+  // The requirement is that these are retried and then given up on; how many times is TanStack's default, not ours.
+  it('fetchQuery_ServerError_RetriesThenGivesUp', async () => {
+    expect(await attemptsFailingWith(new ApiError('Unavailable.', 503, null))).toBeGreaterThan(1)
   })
 
-  it('fetchQuery_NetworkError_RetriesThreeTimes', async () => {
-    expect(await attemptsFailingWith(new TypeError('Failed to fetch'))).toBe(4)
+  it('fetchQuery_NetworkError_RetriesThenGivesUp', async () => {
+    expect(await attemptsFailingWith(new TypeError('Failed to fetch'))).toBeGreaterThan(1)
   })
 
   it('fetchQuery_NetworkErrorWhileOffline_DoesNotRetry', async () => {

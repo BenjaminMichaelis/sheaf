@@ -22,7 +22,9 @@ public class AttendanceTests : ChurchApiTestBase
         public void Dispose() => Client.Dispose();
     }
 
-    private DateOnly Today => new ChurchCalendar(TimeZone).DateOf(Time.GetUtcNow());
+    private static ChurchCalendar Calendar => new(TimeZone);
+
+    private DateOnly Today => Calendar.DateOf(Time.GetUtcNow());
 
     /// <summary>Seeds a group led by Lena. Unless <paramref name="callerLeads"/> is false, Lena is the signed-in caller.</summary>
     private async Task<GroupFixture> SeedGroupAsync(ChurchMembershipRole role = ChurchMembershipRole.Leader, bool callerLeads = true)
@@ -225,6 +227,36 @@ public class AttendanceTests : ChurchApiTestBase
         using var response = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}", new AttendeesRequest([f.Leader.Id]), session.Version);
 
         await Assert.That(response.StatusCode).IsEqualTo(expected).Because(await response.Content.ReadAsStringAsync());
+    }
+
+    [Test]
+    [Arguments(ChurchMembershipRole.Leader, 7, true)]
+    [Arguments(ChurchMembershipRole.Leader, 8, false)]
+    [Arguments(ChurchMembershipRole.Staff, 30, true)]
+    public async Task GetGroupSession_DaysAfterRecording_CanEditMatchesWhetherACorrectionIsAccepted(ChurchMembershipRole role, int daysAgo, bool expected)
+    {
+        // The screen offers a correction only when CanEdit is true, so it must agree with what the API then does.
+        using var f = await SeedGroupAsync(role, callerLeads: role == ChurchMembershipRole.Leader);
+        var session = await AddSessionAsync(f, Today.AddDays(-60), Time.GetUtcNow().AddDays(-daysAgo), f.Member.Id);
+
+        using var read = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/sessions/{session.Id}");
+        var meeting = await TrackerReadAsync<SessionResponse>(read);
+        using var correct = await SendAsync(f, HttpMethod.Put, $"/groups/{f.Group.Id}/sessions/{session.Id}", new AttendeesRequest([f.Leader.Id]), meeting.Version);
+
+        await Assert.That(meeting.CanEdit).IsEqualTo(expected);
+        await Assert.That(correct.StatusCode == HttpStatusCode.OK).IsEqualTo(meeting.CanEdit);
+        if (correct.StatusCode == HttpStatusCode.OK)
+            await Assert.That((await TrackerReadAsync<SessionResponse>(correct)).CanEdit).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordGroupSession_JustRecorded_CanCorrectIt()
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today, [f.Member.Id]));
+
+        await Assert.That((await TrackerReadAsync<SessionResponse>(response, HttpStatusCode.Created)).CanEdit).IsTrue();
     }
 
     [Test]
@@ -502,17 +534,21 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task GetGroupRoster_OnDate_ListsActivePeopleAssignedThatDayByName()
+    public async Task GetGroupRoster_OnDate_ListsActivePeopleAssignedThatDay()
     {
         using var f = await SeedGroupAsync();
         var late = await AddPersonAsync(f, "Lars", "Late");
         var left = await AddPersonAsync(f, "Lea", "Left");
         var inactive = await AddPersonAsync(f, "Ida", "Inactive");
+        var elsewhere = await AddPersonAsync(f, "Otto", "Other");
+        var otherGroup = new Group { Name = "Other group", StartsAt = f.Group.StartsAt };
         await InChurchAsync(f.ChurchId, async db =>
         {
+            db.Add(otherGroup);
             db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = late.Id, Role = GroupRole.Member, StartsAt = Time.GetUtcNow().AddDays(-3) });
             db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = left.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt, EndsAt = Time.GetUtcNow().AddDays(-7) });
             db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = inactive.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = otherGroup.Id, PersonId = elsewhere.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt });
             await db.SaveChangesAsync();
             await db.People.Where(p => p.Id == inactive.Id).ExecuteUpdateAsync(s => s.SetProperty(p => p.IsActive, false));
         });
@@ -520,14 +556,53 @@ public class AttendanceTests : ChurchApiTestBase
         using var twoWeeksAgo = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(-14):yyyy-MM-dd}");
         using var today = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today:yyyy-MM-dd}");
 
-        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(twoWeeksAgo)).Select(p => p.Name))
-            .IsEquivalentTo(["Lea Left", "Lena Leader", "Max Member"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
-        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(today)).Select(p => p.Name))
-            .IsEquivalentTo(["Lars Late", "Lena Leader", "Max Member"], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(twoWeeksAgo)).Select(p => p.Id)).IsEquivalentTo([left.Id, f.Leader.Id, f.Member.Id]);
+        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(today)).Select(p => p.Id)).IsEquivalentTo([late.Id, f.Leader.Id, f.Member.Id]);
     }
 
     [Test]
-    public async Task GetGroupRoster_GroupLedBySomeoneElse_ReturnsNotFound()
+    public async Task GetGroupRoster_AssignmentsAtChurchDayEdges_ListsOnlyThoseOnTheRosterDuringThatLocalDay()
+    {
+        using var f = await SeedGroupAsync();
+        var date = Today.AddDays(-14);
+        var (start, end) = Calendar.DayBounds(date);
+        var joinedLateEvening = await AddPersonAsync(f, "Eve", "Evening");
+        var leftDuringDay = await AddPersonAsync(f, "Dee", "Daytime");
+        var leftAtMidnightBefore = await AddPersonAsync(f, "Mona", "Midnight");
+        var joinedNextMidnight = await AddPersonAsync(f, "Nick", "Next");
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = joinedLateEvening.Id, Role = GroupRole.Member, StartsAt = end.AddHours(-1) });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = leftDuringDay.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt, EndsAt = start.AddHours(1) });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = leftAtMidnightBefore.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt, EndsAt = start });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = f.Group.Id, PersonId = joinedNextMidnight.Id, Role = GroupRole.Member, StartsAt = end });
+            await db.SaveChangesAsync();
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={date:yyyy-MM-dd}");
+
+        await Assert.That((await TrackerReadAsync<SessionPersonResponse[]>(response)).Select(p => p.Id))
+            .IsEquivalentTo([f.Leader.Id, f.Member.Id, joinedLateEvening.Id, leftDuringDay.Id]);
+    }
+
+    [Test]
+    public async Task GetGroupRoster_RosterMemberWithContacts_ReturnsOnlyIdAndName()
+    {
+        using var f = await SeedGroupAsync();
+        await InChurchAsync(f.ChurchId, db => db.People.Where(p => p.Id == f.Member.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Email, "max@example.com").SetProperty(p => p.Phone, "555-0100")));
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today:yyyy-MM-dd}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        await Assert.That(json.RootElement.EnumerateArray().Select(p => p.GetProperty("id").GetGuid())).Contains(f.Member.Id);
+        foreach (var person in json.RootElement.EnumerateArray())
+            await Assert.That(person.EnumerateObject().Select(p => p.Name)).IsEquivalentTo(["id", "name"]);
+    }
+
+    [Test]
+    public async Task GetGroupRoster_GroupCallerDoesNotLead_ReturnsNotFound()
     {
         using var f = await SeedGroupAsync();
         var otherGroup = new Group { Name = "Other group", StartsAt = f.Group.StartsAt };
@@ -546,8 +621,7 @@ public class AttendanceTests : ChurchApiTestBase
     [Arguments("")]
     [Arguments("?occurredOn=2026-13-01")]
     [Arguments("?occurredOn=9999-12-31")]
-    [Arguments("?occurredOn=0001-01-01")]
-    public async Task GetGroupRoster_MissingMalformedOrExtremeDate_ReturnsBadRequest(string query)
+    public async Task GetGroupRoster_MissingMalformedOrLastPossibleDate_ReturnsBadRequest(string query)
     {
         using var f = await SeedGroupAsync();
 
@@ -556,24 +630,40 @@ public class AttendanceTests : ChurchApiTestBase
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
     }
 
+    /// <summary>The group started 200 days ago and ended at local midnight 10 days ago, so its last day was 11 days ago.</summary>
     [Test]
-    [Arguments(1)]
-    [Arguments(-201)]
-    public async Task GetGroupRoster_FutureDateOrBeforeGroupStarted_ReturnsBadRequest(int daysFromToday)
+    [Arguments("dayBeforeStart", HttpStatusCode.BadRequest)]
+    [Arguments("startDay", HttpStatusCode.OK)]
+    [Arguments("lastDay", HttpStatusCode.OK)]
+    [Arguments("endDay", HttpStatusCode.BadRequest)]
+    [Arguments("tomorrow", HttpStatusCode.BadRequest)]
+    public async Task GetGroupRoster_DateAroundGroupLife_AcceptsOnlyDaysTheGroupExisted(string day, HttpStatusCode expected)
     {
-        using var f = await SeedGroupAsync();
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff);
+        var endDay = Today.AddDays(-10);
+        await InChurchAsync(f.ChurchId, db => db.Groups.Where(g => g.Id == f.Group.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.EndsAt, Calendar.StartOf(endDay))));
+        var startDay = Calendar.DateOf(f.Group.StartsAt);
+        var date = day switch
+        {
+            "dayBeforeStart" => startDay.AddDays(-1),
+            "startDay" => startDay,
+            "lastDay" => endDay.AddDays(-1),
+            "endDay" => endDay,
+            _ => Today.AddDays(1),
+        };
 
-        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(daysFromToday):yyyy-MM-dd}");
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={date:yyyy-MM-dd}");
 
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
+        await Assert.That(response.StatusCode).IsEqualTo(expected);
     }
 
     [Test]
     [Arguments(ChurchMembershipRole.Staff, HttpStatusCode.OK)]
     [Arguments(ChurchMembershipRole.Leader, HttpStatusCode.NotFound)]
-    public async Task GetGroupRoster_EndedGroupCallerNoLongerLeads_OnlyStaffCanRead(ChurchMembershipRole role, HttpStatusCode expected)
+    public async Task GetGroupRoster_GroupCallerLedHasEnded_OnlyStaffCanRead(ChurchMembershipRole role, HttpStatusCode expected)
     {
-        using var f = await SeedGroupAsync(role, callerLeads: false);
+        using var f = await SeedGroupAsync(role);
         await InChurchAsync(f.ChurchId, db => db.Groups.Where(g => g.Id == f.Group.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(g => g.EndsAt, Time.GetUtcNow().AddDays(-1))));
 
@@ -583,13 +673,23 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
-    [Arguments("9999-12-31")]
-    [Arguments("0001-01-01")]
-    public async Task RecordGroupSession_ExtremeDate_ReturnsBadRequest(string occurredOn)
+    public async Task GetGroupRoster_LeaderSteppedDown_ReturnsNotFound()
+    {
+        using var f = await SeedGroupAsync();
+        await InChurchAsync(f.ChurchId, db => db.GroupAssignments.Where(a => a.PersonId == f.Leader.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.EndsAt, Time.GetUtcNow().AddDays(-1))));
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/roster?occurredOn={Today.AddDays(-7):yyyy-MM-dd}");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task RecordGroupSession_LastPossibleDate_ReturnsBadRequest()
     {
         using var f = await SeedGroupAsync();
 
-        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(DateOnly.Parse(occurredOn, System.Globalization.CultureInfo.InvariantCulture), [f.Member.Id]));
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(DateOnly.MaxValue, [f.Member.Id]));
 
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
     }
@@ -647,5 +747,192 @@ public class AttendanceTests : ChurchApiTestBase
 
         var records = (await TrackerReadAsync<PagedResponse<AttendanceRecordResponse>>(response)).Items;
         await Assert.That(records.Select(r => r.PersonId)).IsEquivalentTo([f.Member.Id, f.Leader.Id], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    /// <summary>Puts the fixture's member in a second group the caller does not lead, and returns that group.</summary>
+    private async Task<Group> AddOtherGroupMembershipAsync(GroupFixture f, DateTimeOffset? endsAt = null, DateTimeOffset? startsAt = null)
+    {
+        var other = new Group { Name = "Grief support", StartsAt = f.Group.StartsAt };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.Add(other);
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = other.Id, PersonId = f.Member.Id, Role = GroupRole.Member, StartsAt = startsAt ?? f.Group.StartsAt, EndsAt = endsAt });
+            await db.SaveChangesAsync();
+        });
+        return other;
+    }
+
+    [Test]
+    public async Task GetPersonGroups_StaffReadsMember_ListsEveryGroupWithRoleAndDatesCurrentFirst()
+    {
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff, callerLeads: false);
+        // The past membership started more recently, so only "current first" puts the Sunday group ahead of it.
+        var ended = Time.GetUtcNow().AddDays(-30);
+        var other = await AddOtherGroupMembershipAsync(f, ended, startsAt: Time.GetUtcNow().AddDays(-60));
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/groups");
+
+        var groups = await TrackerReadAsync<PersonGroupResponse[]>(response);
+        await Assert.That(groups.Select(g => (g.GroupId, g.GroupName, g.Role, g.EndsAt, g.IsCurrent)))
+            .IsEquivalentTo([(f.Group.Id, "Sunday group", GroupRole.Member, (DateTimeOffset?)null, true), (other.Id, "Grief support", GroupRole.Member, ended, false)],
+                TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task GetPersonGroups_RoleEndingLaterOrGroupEndedOrRoleNotStarted_SaysWhetherCurrentAndWhenItEnds()
+    {
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff, callerLeads: false);
+        var leaving = Time.GetUtcNow().AddDays(10);
+        var groupEnded = Time.GetUtcNow().AddDays(-5);
+        var ended = new Group { Name = "Ended group", StartsAt = f.Group.StartsAt, EndsAt = groupEnded };
+        var later = new Group { Name = "Later group", StartsAt = f.Group.StartsAt };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.AddRange(ended, later);
+            // Ending a group leaves its assignments open.
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = ended.Id, PersonId = f.Member.Id, Role = GroupRole.Member, StartsAt = f.Group.StartsAt });
+            db.GroupAssignments.Add(new GroupAssignment { GroupId = later.Id, PersonId = f.Member.Id, Role = GroupRole.Leader, StartsAt = Time.GetUtcNow().AddDays(20) });
+            await db.SaveChangesAsync();
+            await db.GroupAssignments.Where(a => a.GroupId == f.Group.Id && a.PersonId == f.Member.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.EndsAt, leaving));
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/groups");
+
+        var groups = await TrackerReadAsync<PersonGroupResponse[]>(response);
+        await Assert.That(groups[0].GroupId).IsEqualTo(f.Group.Id);
+        await Assert.That(groups.Select(g => (g.GroupId, g.EndsAt, g.IsCurrent))).IsEquivalentTo([
+            (f.Group.Id, (DateTimeOffset?)leaving, true),
+            (ended.Id, (DateTimeOffset?)groupEnded, false),
+            (later.Id, (DateTimeOffset?)null, false)]);
+    }
+
+    [Test]
+    public async Task GetPersonGroups_StaffReadsMergedRecord_ReturnsEmptyHistory()
+    {
+        // Merging moves history to the person merged into, and Staff can still read the merged record itself.
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff, callerLeads: false);
+        var merged = new Person { FirstName = "Max", LastName = "Duplicate", IsActive = false, MergedIntoId = f.Member.Id, MergedAt = Time.GetUtcNow() };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.People.Add(merged);
+            await db.SaveChangesAsync();
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{merged.Id}/groups");
+
+        await Assert.That(await TrackerReadAsync<PersonGroupResponse[]>(response)).IsEmpty();
+    }
+
+    [Test]
+    public async Task GetPersonGroups_LeaderReadsMemberWhoLeft_ReturnsNotFound()
+    {
+        using var f = await SeedGroupAsync();
+        await InChurchAsync(f.ChurchId, db => db.GroupAssignments.Where(a => a.PersonId == f.Member.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.EndsAt, Time.GetUtcNow().AddDays(-1))));
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/groups");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task GetPersonGroups_LeaderReadsSomeoneTheyJustCreatedInNoGroup_ReturnsEmptyHistory()
+    {
+        using var f = await SeedGroupAsync();
+        var created = new Person { FirstName = "Nia", LastName = "New", CreatedByUserId = f.Membership.UserId, CreatedAt = Time.GetUtcNow() };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.People.Add(created);
+            await db.SaveChangesAsync();
+        });
+
+        using var groups = await SendAsync(f, HttpMethod.Get, $"/people/{created.Id}/groups");
+        using var attendance = await SendAsync(f, HttpMethod.Get, $"/people/{created.Id}/attendance");
+
+        await Assert.That(await TrackerReadAsync<PersonGroupResponse[]>(groups)).IsEmpty();
+        await Assert.That((await TrackerReadAsync<PagedResponse<PersonAttendanceResponse>>(attendance)).Items).IsEmpty();
+    }
+
+    [Test]
+    public async Task GetPersonGroups_LeaderReadsMember_ListsOnlyGroupsTheyLead()
+    {
+        using var f = await SeedGroupAsync();
+        await AddOtherGroupMembershipAsync(f);
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/groups");
+
+        await Assert.That((await TrackerReadAsync<PersonGroupResponse[]>(response)).Select(g => g.GroupId)).IsEquivalentTo([f.Group.Id]);
+    }
+
+    [Test]
+    public Task GetPersonGroups_LeaderReadsRecentVisitor_ReturnsNotFound() => VisitorHistoryIsHiddenAsync("groups");
+
+    [Test]
+    public Task GetPersonAttendance_LeaderReadsRecentVisitor_ReturnsNotFound() => VisitorHistoryIsHiddenAsync("attendance");
+
+    /// <summary>A recent visitor's basic profile is visible to the Leader, but their history is part of the full profile.</summary>
+    private async Task VisitorHistoryIsHiddenAsync(string history)
+    {
+        using var f = await SeedGroupAsync();
+        var visitor = await AddPersonAsync(f, "Vera", "Visitor");
+        await AddSessionAsync(f, Today, visitor.Id);
+
+        using var profile = await SendAsync(f, HttpMethod.Get, $"/people/{visitor.Id}");
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{visitor.Id}/{history}");
+
+        await Assert.That(profile.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
+    }
+
+    [Test]
+    public async Task GetPersonAttendance_StaffReadsMember_ListsMeetingsTheyCameToNewestFirst()
+    {
+        using var f = await SeedGroupAsync(ChurchMembershipRole.Staff, callerLeads: false);
+        var other = await AddOtherGroupMembershipAsync(f);
+        var older = await AddSessionAsync(f, Today.AddDays(-14), f.Member.Id);
+        var newer = await AddSessionAsync(f, Today.AddDays(-7), f.Member.Id);
+        var elsewhere = new GroupMeeting { GroupId = other.Id, OccurredOn = Today.AddDays(-3), RecordedAt = Time.GetUtcNow() };
+        var takenOff = await AddSessionAsync(f, Today.AddDays(-1), f.Member.Id);
+        var missed = await AddSessionAsync(f, Today, f.Leader.Id);
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.GroupMeetings.Add(elsewhere);
+            db.Attendances.Add(new Attendance { MeetingId = elsewhere.Id, PersonId = f.Member.Id, RecordedAt = elsewhere.RecordedAt });
+            await db.SaveChangesAsync();
+            await db.Attendances.Where(a => a.MeetingId == takenOff.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.RemovedAt, Time.GetUtcNow()));
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/attendance");
+
+        var meetings = (await TrackerReadAsync<PagedResponse<PersonAttendanceResponse>>(response)).Items;
+        await Assert.That(meetings.Select(m => m.SessionId)).IsEquivalentTo([elsewhere.Id, newer.Id, older.Id], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(meetings[0].GroupName).IsEqualTo("Grief support");
+        await Assert.That(meetings.Select(m => m.SessionId)).DoesNotContain(missed.Id);
+
+        using var firstPage = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/attendance?limit=1");
+        var page = await TrackerReadAsync<PagedResponse<PersonAttendanceResponse>>(firstPage);
+        await Assert.That(page.Items.Select(m => m.SessionId)).IsEquivalentTo([elsewhere.Id]);
+        await Assert.That(page.NextOffset).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task GetPersonAttendance_LeaderReadsMember_ListsOnlyMeetingsOfGroupsTheyLead()
+    {
+        using var f = await SeedGroupAsync();
+        var other = await AddOtherGroupMembershipAsync(f);
+        var ours = await AddSessionAsync(f, Today.AddDays(-7), f.Member.Id);
+        var elsewhere = new GroupMeeting { GroupId = other.Id, OccurredOn = Today.AddDays(-3), RecordedAt = Time.GetUtcNow() };
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            db.GroupMeetings.Add(elsewhere);
+            db.Attendances.Add(new Attendance { MeetingId = elsewhere.Id, PersonId = f.Member.Id, RecordedAt = elsewhere.RecordedAt });
+            await db.SaveChangesAsync();
+        });
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/people/{f.Member.Id}/attendance");
+
+        await Assert.That((await TrackerReadAsync<PagedResponse<PersonAttendanceResponse>>(response)).Items.Select(m => m.SessionId)).IsEquivalentTo([ours.Id]);
     }
 }
