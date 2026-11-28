@@ -74,5 +74,6 @@ export function renderApp(ui: ReactElement, path = '/') {
     </QueryClientProvider>,
   )
 
-  return { user, ...result }
+  // The query cache is returned so a test can act as a background refresh would.
+  return { user, queryClient, ...result }
 }

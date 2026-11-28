@@ -15,13 +15,15 @@ interface AttendeesEditorProps {
   heading: string
   /** Shown under the heading in place of, or above, the list: loading, an error, or a note that it is empty. */
   status?: ReactNode
+  /** The level of the section headings: h3 when the editor sits under its own h2, as when correcting a meeting. */
+  headingLevel?: 'h2' | 'h3'
 }
 
 /**
  * Marks who came: a checkbox for each listed person, then a name search for anyone else, ending with "Create new
  * person". Used both to record a meeting and to correct one.
  */
-export default function AttendeesEditor({ churchId, attendees, listed, heading, status }: AttendeesEditorProps) {
+export default function AttendeesEditor({ churchId, attendees, listed, heading, status, headingLevel = 'h2' }: AttendeesEditorProps) {
   const listedHeading = useId()
   const othersHeading = useId()
   const [creating, setCreating] = useState({ open: false, name: '' })
@@ -29,7 +31,7 @@ export default function AttendeesEditor({ churchId, attendees, listed, heading, 
   return (
     <>
       <section aria-labelledby={listedHeading}>
-        <Typography id={listedHeading} variant="h6" component="h2">
+        <Typography id={listedHeading} variant="h6" component={headingLevel}>
           {heading}
         </Typography>
         {status}
@@ -52,7 +54,7 @@ export default function AttendeesEditor({ churchId, attendees, listed, heading, 
       </section>
 
       <section aria-labelledby={othersHeading}>
-        <Typography id={othersHeading} variant="h6" component="h2" gutterBottom>
+        <Typography id={othersHeading} variant="h6" component={headingLevel} gutterBottom>
           Also came
         </Typography>
         <PersonSearch

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSnackbar } from 'notistack'
@@ -33,7 +33,16 @@ function MeetingPage({ churchId, groupId, sessionId }: { churchId: string; group
   // The meeting as it was when the correction began. A background refresh never replaces it, so edits in progress are
   // never lost; if someone else saved meanwhile the API refuses (412) and the user reloads their version on purpose.
   const [correcting, setCorrecting] = useState<SessionResponse | null>(null)
-  const [returnFocus, setReturnFocus] = useState(false)
+  // Where focus goes when the editor closes, so it is never left nowhere (WCAG 2.4.3): back to Correct, or to the
+  // heading when the meeting can no longer be corrected and that button is gone.
+  const [closedTo, setClosedTo] = useState<FocusTarget | null>(null)
+  const title = useRef<HTMLHeadingElement>(null)
+  const correctButton = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (correcting !== null || closedTo === null) return
+    ;(closedTo === 'correct' && correctButton.current ? correctButton.current : title.current)?.focus()
+  }, [correcting, closedTo])
 
   // A failed background refresh keeps what is shown; only a meeting that never loaded shows the error.
   if (meeting.data === undefined) {
@@ -54,7 +63,7 @@ function MeetingPage({ churchId, groupId, sessionId }: { churchId: string; group
       <Link href={`/groups/${groupId}`} variant="body2">
         {group.data ? `Back to ${group.data.name}` : 'Back to the group'}
       </Link>
-      <Typography variant="h4" component="h1" sx={{ mt: 1 }}>
+      <Typography ref={title} tabIndex={-1} variant="h4" component="h1" sx={{ mt: 1, outline: 'none' }}>
         {group.data ? `${group.data.name}, ${date}` : date}
       </Typography>
 
@@ -65,32 +74,28 @@ function MeetingPage({ churchId, groupId, sessionId }: { churchId: string; group
           groupId={groupId}
           meeting={correcting}
           onReloaded={setCorrecting}
-          onDone={() => {
+          onDone={focusTo => {
             setCorrecting(null)
-            setReturnFocus(true)
+            setClosedTo(focusTo)
           }}
         />
       ) : (
-        <MeetingDetails meeting={shown} focusCorrect={returnFocus} onCorrect={() => setCorrecting(shown)} />
+        <MeetingDetails meeting={shown} correctButton={correctButton} onCorrect={() => setCorrecting(shown)} />
       )}
     </Box>
   )
 }
 
+type FocusTarget = 'correct' | 'title'
+
 interface MeetingDetailsProps {
   meeting: SessionResponse
-  /** Moves focus to the Correct button, so closing the editor does not leave focus nowhere. */
-  focusCorrect: boolean
+  /** The Correct button, which takes focus back when the editor closes. */
+  correctButton: RefObject<HTMLButtonElement | null>
   onCorrect: () => void
 }
 
-function MeetingDetails({ meeting, focusCorrect, onCorrect }: MeetingDetailsProps) {
-  const correctButton = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    if (focusCorrect) correctButton.current?.focus()
-  }, [focusCorrect])
-
+function MeetingDetails({ meeting, correctButton, onCorrect }: MeetingDetailsProps) {
   return (
     <Stack spacing={3} sx={{ mt: 2 }}>
       {meeting.description && <Typography sx={{ whiteSpace: 'pre-wrap' }}>{meeting.description}</Typography>}
@@ -141,7 +146,8 @@ interface CorrectMeetingProps {
   meeting: SessionResponse
   /** Restarts the correction from someone else's newer version. */
   onReloaded: (meeting: SessionResponse) => void
-  onDone: () => void
+  /** Closes the editor, saying where focus should go. */
+  onDone: (focusTo: FocusTarget) => void
 }
 
 /** Changes who came and the description; people taken off stay in the meeting's history on the server. */
@@ -170,7 +176,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
       }),
     onSuccess: corrected => {
       // The editor closes first, so it cannot be used again against the version it just replaced.
-      onDone()
+      onDone('correct')
       queryClient.setQueryData(meetingKey, corrected)
       // The meeting list shows how many came, so it is refreshed too.
       void queryClient.invalidateQueries({ queryKey: meetingsQuery(churchId, groupId).queryKey })
@@ -179,9 +185,8 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
     onError: (error, { people }) => {
       // The week Leaders have to correct a meeting ran out while they were editing.
       if (error instanceof ApiError && error.status === 403) {
-        onDone()
         void queryClient.invalidateQueries({ queryKey: meetingKey })
-        enqueueSnackbar('This meeting can no longer be corrected.', { variant: 'error' })
+        closeAsNoLongerCorrectable()
 
         return
       }
@@ -190,13 +195,17 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
     },
   })
 
-  // Loads the version someone else saved and starts again from it, unless the user may no longer correct it.
-  const reload = async () => {
-    const latest = await queryClient.fetchQuery({ ...meetingQuery(churchId, groupId, meeting.id), staleTime: 0 })
-
-    if (latest.canEdit) onReloaded(latest)
-    else onDone()
+  function closeAsNoLongerCorrectable() {
+    onDone('title')
+    enqueueSnackbar('This meeting can no longer be corrected.', { variant: 'error' })
   }
+
+  // Loads the version someone else saved and starts again from it, unless the user may no longer correct it. A
+  // mutation, so the button shows it is working and a failure (such as being offline) is reported.
+  const reload = useMutation({
+    mutationFn: () => queryClient.fetchQuery({ ...meetingQuery(churchId, groupId, meeting.id), staleTime: 0 }),
+    onSuccess: latest => (latest.canEdit ? onReloaded(latest) : closeAsNoLongerCorrectable()),
+  })
 
   // Someone saved a change since the correction began; the API refuses rather than overwrite it.
   const changedElsewhere = save.error instanceof ApiError && save.error.status === 412
@@ -210,7 +219,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
         Correct attendance
       </Typography>
 
-      <AttendeesEditor churchId={churchId} attendees={attendees} listed={listed} heading="Marked on this meeting" />
+      <AttendeesEditor churchId={churchId} attendees={attendees} listed={listed} heading="Marked on this meeting" headingLevel="h3" />
 
       <DescriptionField value={description} onChange={setDescription} />
 
@@ -218,7 +227,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
         <Alert
           severity="warning"
           action={
-            <Button color="inherit" size="small" onClick={() => void reload()}>
+            <Button color="inherit" size="small" onClick={() => reload.mutate()} disabled={reload.isPending}>
               Reload
             </Button>
           }
@@ -226,6 +235,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
           Someone changed this meeting since you opened it. Reload to see their changes, then correct it again.
         </Alert>
       )}
+      {reload.error && <Alert severity="error">Could not reload the meeting: {reload.error.message}</Alert>}
       {saveError && <Alert severity="error">{saveError}</Alert>}
 
       <SaveBar
@@ -235,7 +245,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: Corr
         disabled={save.isPending || changedElsewhere}
         onSave={() => save.mutate({ confirm: false, people: attendees.newPeople })}
       >
-        <Button onClick={onDone} disabled={save.isPending}>
+        <Button onClick={() => onDone('correct')} disabled={save.isPending}>
           Cancel
         </Button>
       </SaveBar>

@@ -1,5 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { components } from '@/api/schema'
 import { json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
@@ -232,6 +232,67 @@ describe('Meeting', () => {
     expect(await screen.findByText('This meeting can no longer be corrected.')).toBeInTheDocument()
     expect(await screen.findByRole('list', { name: 'Came (1)' })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Correct attendance' })).not.toBeInTheDocument())
+    // With no Correct button to return to, focus goes to the page heading rather than nowhere.
+    expect(screen.getByRole('heading', { level: 1 })).toHaveFocus()
+  })
+
+  it('Meeting_RefreshedWhileCorrecting_KeepsTheEditsAndCorrectsTheVersionStartedFrom', async () => {
+    const corrections = mockMeetingApi([meeting(), meeting({ attendees: [lena, max], absent: [], version: 'v2' })], () =>
+      json(meeting({ attendees: [], absent: [lena, max], version: 'v3' })),
+    )
+
+    const { user, queryClient } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Lena Leader' }))
+    // A background refresh (such as returning to the tab) brings someone else's newer version.
+    await act(() => queryClient.invalidateQueries())
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument())
+
+    expect(screen.getByRole('checkbox', { name: 'Lena Leader' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Max Member' })).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
+    expect(corrections[0]?.ifMatch).toBe('"v1"')
+  })
+
+  it('Meeting_ReloadedVersionCanNoLongerBeCorrected_ClosesTheEditorAndSaysSo', async () => {
+    mockMeetingApi([meeting(), meeting({ canEdit: false, version: 'v2' })], () =>
+      new Response(JSON.stringify({ title: 'The resource changed since it was read.', status: 412 }), {
+        status: 412,
+        headers: { 'content-type': 'application/problem+json' },
+      }),
+    )
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    await user.click(await screen.findByRole('button', { name: 'Reload' }))
+
+    expect(await screen.findByText('This meeting can no longer be corrected.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save correction' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Correct attendance' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveFocus()
+  })
+
+  it('Meeting_ReloadFails_SaysSo', async () => {
+    let reads = 0
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser()),
+      'GET /api/church/settings': () => json(settings),
+      'GET /api/church/groups/g1': () => json(village),
+      'GET /api/church/groups/g1/sessions/s1': () =>
+        ++reads === 1 ? json(meeting()) : new Response(JSON.stringify({ title: 'Resource not found.', status: 404 }), { status: 404, headers: { 'content-type': 'application/problem+json' } }),
+      'PUT /api/church/groups/g1/sessions/s1': () =>
+        new Response(JSON.stringify({ title: 'The resource changed since it was read.', status: 412 }), { status: 412, headers: { 'content-type': 'application/problem+json' } }),
+    })
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    await user.click(await screen.findByRole('button', { name: 'Reload' }))
+
+    expect(await screen.findByText('Could not reload the meeting: Resource not found.')).toBeInTheDocument()
   })
 
   it('Meeting_AfterCorrecting_TheGroupsMeetingListShowsTheNewCount', async () => {
