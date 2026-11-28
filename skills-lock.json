@@ -1,12 +1,148 @@
 {
   "version": 2,
   "skills": {
+    "assertion-quality": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/assertion-quality/SKILL.md",
+      "computedHash": "d2957bf122ace52799c913dc4198e63783e8c601a5e6a3a3937897f9b9d122f6",
+      "installMode": "copy"
+    },
+    "binlog-failure-analysis": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-msbuild/skills/binlog-failure-analysis/SKILL.md",
+      "computedHash": "6ffb2435456e79f6a3d1eaf613db185ba0128734affde2660b4e7ddc4626692f",
+      "installMode": "copy"
+    },
+    "binlog-generation": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-msbuild/skills/binlog-generation/SKILL.md",
+      "computedHash": "fc01f7a9cb140eabf8c7dffb570099cba3c79bbe5fe3195edf6922fec337c6f9",
+      "installMode": "copy"
+    },
+    "coverage-analysis": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/coverage-analysis/SKILL.md",
+      "computedHash": "4445135fe1e9b0a7da0d9ee67cd9c0f3acae15a9f95dae62b50f3c53bf012719",
+      "installMode": "copy"
+    },
+    "csharp-expert": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet/skills/csharp-expert/SKILL.md",
+      "computedHash": "81c33ee4d5d24c6a32c312deb434027e488512ba93162d9278c69f7b863c5a4d",
+      "installMode": "copy"
+    },
+    "csharp-refactoring": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet/skills/csharp-refactoring/SKILL.md",
+      "computedHash": "32a0247c73bc42649c6de7fd54ac0f7b4dadc4f6d0968b155a12aec58f669dfc",
+      "installMode": "copy"
+    },
+    "directory-build-organization": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-msbuild/skills/directory-build-organization/SKILL.md",
+      "computedHash": "90842094b650914091bc8f7dec41894819e9bac54a9dc3d9479eeb5813425c32",
+      "installMode": "copy"
+    },
+    "dotnet-breaking-changes": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet/skills/dotnet-breaking-changes/SKILL.md",
+      "computedHash": "539da90a5bb4b20a77a14966cedd730acb81551aabe1c7609b13ddccf7ad10ea",
+      "installMode": "copy"
+    },
+    "dotnet-webapi": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-aspnetcore/skills/dotnet-webapi/SKILL.md",
+      "computedHash": "2aedc615b14b3027800a556a4bf0c28f28f21b09ffc7a546c3865f08a26b79b0",
+      "installMode": "copy"
+    },
+    "filter-syntax": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/filter-syntax/SKILL.md",
+      "computedHash": "8b91ef0e8a6598023c35f2b2aed41263c11128483f97c64b0ae48489120afb02",
+      "installMode": "copy"
+    },
     "install-anti-slop": {
       "source": "dmmulroy/anti-slop",
       "commit": "13909c9e07590f5a85d93c62712259fe14a883f7",
       "sourceType": "github",
       "skillPath": "skills/install-anti-slop/SKILL.md",
       "computedHash": "72309811a88f92e56b6041960b7bd6f187deea251486982fd457378460b38d8a"
+    },
+    "msbuild": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet/skills/msbuild/SKILL.md",
+      "computedHash": "a52a3e2e83f1afe3114e731fc72011fecbc89ba7748f5c6080b909094973d806",
+      "installMode": "copy"
+    },
+    "msbuild-antipatterns": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-msbuild/skills/msbuild-antipatterns/SKILL.md",
+      "computedHash": "5224b7292c887bb51e5ef48fdec0d4db985d92bdd30a13700e6c66c19c7ec9ff",
+      "installMode": "copy"
+    },
+    "optimizing-ef-core-queries": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-data/skills/optimizing-ef-core-queries/SKILL.md",
+      "computedHash": "14bd45305955f1592917ad2ef1e3791c65bf50dd5c654b03cb6342cd6ddfbaba",
+      "installMode": "copy"
+    },
+    "run-tests": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/run-tests/SKILL.md",
+      "computedHash": "ae1fc27bdc724c82e84871ed3dbbd2a08491a6898b1024fb67f6b463067ec058",
+      "installMode": "copy"
+    },
+    "system-text-json-net11": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet11/skills/system-text-json-net11/SKILL.md",
+      "computedHash": "dd634c38ed9737e71e8f0f82416ab365fb62ffd4929ddbe913e3c9c84ffa8741",
+      "installMode": "copy"
+    },
+    "test-anti-patterns": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/test-anti-patterns/SKILL.md",
+      "computedHash": "5991eef6aa53253ec6fad3011438ce4f99cd94eaf26e6c5a24ebcd9ac45ceba1",
+      "installMode": "copy"
+    },
+    "test-smell-detection": {
+      "source": "dotnet/skills",
+      "commit": "a273ceb823340c260b796ef49113b399430472a9",
+      "sourceType": "github",
+      "skillPath": "plugins/dotnet-test/skills/test-smell-detection/SKILL.md",
+      "computedHash": "be263c6841c439e3ef3ad611c9cf3c7cb05f9d08762f75621b7873f410bdbe7c",
+      "installMode": "copy"
     }
   }
 }
