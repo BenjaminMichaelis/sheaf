@@ -385,6 +385,29 @@ public class PersonMergeTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task MergePerson_MembershipBridgesPastAndScheduledLeadership_KeepsTheGapAsMembership()
+    {
+        using var f = await SeedAsync();
+        var survivor = await AddPersonAsync(f, "Ann", "Lee");
+        var duplicate = await AddPersonAsync(f, "Ann", "Lee");
+        var now = Time.GetUtcNow();
+        await SeedAsync(f,
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(-300), EndsAt = now.AddDays(-200) },
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(10), EndsAt = now.AddDays(20) },
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = duplicate.Id, Role = GroupRole.Member, StartsAt = now.AddDays(-250) });
+
+        await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
+
+        await Assert.That(await IntervalsAsync(f)).IsEquivalentTo(
+        [
+            (survivor.Id, GroupRole.Leader, now.AddDays(-300), (DateTimeOffset?)now.AddDays(-200)),
+            (survivor.Id, GroupRole.Member, now.AddDays(-200), (DateTimeOffset?)now.AddDays(10)),
+            (survivor.Id, GroupRole.Leader, now.AddDays(10), (DateTimeOffset?)now.AddDays(20)),
+            (survivor.Id, GroupRole.Member, now.AddDays(20), (DateTimeOffset?)null)
+        ]);
+    }
+
+    [Test]
     public async Task MergePerson_MembershipInsideLeadership_LeavesOnlyTheLeadership()
     {
         using var f = await SeedAsync();

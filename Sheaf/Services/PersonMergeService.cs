@@ -344,25 +344,31 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
     }
 
     /// <summary>
-    /// The touching intervals one run becomes. All one role: that role from the earliest start to the latest end. Mixed
-    /// roles, Leader wins, but never longer than the leadership itself: Leader from the first Leader start to the last
-    /// Leader end (open if any Leader interval is open), with Member time before and after it kept as Member. So a past
-    /// leadership never becomes current access, and leadership never starts earlier than it did.
+    /// The touching intervals one run becomes. The run's start and end instants cut its span into segments; Leader wins,
+    /// but only where a Leader interval covers the segment, and every other segment is Member. Neighbouring segments with
+    /// the same role are joined. So leadership never starts earlier, lasts longer, or fills a gap between leaderships, and
+    /// a past or scheduled leadership never becomes current access.
     /// </summary>
     private static List<(DateTimeOffset StartsAt, DateTimeOffset? EndsAt, GroupRole Role)> Parts(List<GroupAssignment> run, DateTimeOffset? runEnd)
     {
-        var start = run[0].StartsAt;
-        var leaders = run.Where(a => a.Role == GroupRole.Leader).ToArray();
-        if (leaders.Length == 0 || leaders.Length == run.Count)
-            return [(start, runEnd, run[0].Role)];
-        var leaderStart = leaders.Min(a => a.StartsAt);
-        var leaderEnd = leaders.Select(a => a.EndsAt).Aggregate(Later);
-        var parts = new List<(DateTimeOffset, DateTimeOffset?, GroupRole)>();
-        if (start < leaderStart)
-            parts.Add((start, leaderStart, GroupRole.Member));
-        parts.Add((leaderStart, leaderEnd, GroupRole.Leader));
-        if (leaderEnd is { } ended && (runEnd is null || runEnd > ended))
-            parts.Add((ended, runEnd, GroupRole.Member));
+        var points = run.Select(a => a.StartsAt).Concat(run.Select(a => a.EndsAt).OfType<DateTimeOffset>())
+            .Distinct().Order().ToList();
+        var parts = new List<(DateTimeOffset StartsAt, DateTimeOffset? EndsAt, GroupRole Role)>();
+        for (var i = 0; i < points.Count; i++)
+        {
+            var from = points[i];
+            DateTimeOffset? to = i + 1 < points.Count ? points[i + 1] : null;
+            // Past the last instant there is a segment only if the run is still open.
+            if (to is null && runEnd is not null)
+                break;
+            var role = run.Any(a => a.Role == GroupRole.Leader && a.StartsAt <= from && (a.EndsAt is null || (to is { } t && a.EndsAt >= t)))
+                ? GroupRole.Leader
+                : GroupRole.Member;
+            if (parts.Count > 0 && parts[^1].Role == role)
+                parts[^1] = (parts[^1].StartsAt, to, role);
+            else
+                parts.Add((from, to, role));
+        }
         return parts;
     }
 
