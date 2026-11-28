@@ -6,14 +6,14 @@ export const PHONE_WIDTH = 375
 /**
  * jsdom has no matchMedia. This answers media queries for a screen `width` pixels wide, as MUI's useMediaQuery testing
  * guide recommends (mui.com/material-ui/react-use-media-query/#testing), so layouts can be tested at each breakpoint.
- * Queries about anything but size (such as prefers-color-scheme) don't match, so tests use light mode.
+ * The system color scheme is light unless a test passes 'dark', which answers `prefers-color-scheme` queries.
  */
-export function setScreenWidth(width: number) {
+export function setScreenWidth(width: number, colorScheme: 'light' | 'dark' = 'light') {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     configurable: true,
     value: (query: string) => ({
-      matches: mediaQuery.match(query, { width }),
+      matches: mediaQuery.match(query, { width, 'prefers-color-scheme': colorScheme }),
       media: query,
       onchange: null,
       addListener: () => {},
