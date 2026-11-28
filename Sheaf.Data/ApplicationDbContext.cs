@@ -33,6 +33,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<Household> Households => Set<Household>();
 
+    public DbSet<PersonDuplicateDismissal> PersonDuplicateDismissals => Set<PersonDuplicateDismissal>();
+
     public DbSet<Group> Groups => Set<Group>();
 
     public DbSet<GroupAssignment> GroupAssignments => Set<GroupAssignment>();
@@ -97,7 +99,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(person => new { person.ChurchId, person.UserId }).IsUnique()
                 .HasFilter("[UserId] IS NOT NULL");
-            entity.ToTable(table => table.HasCheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''"));
+            entity.HasOne<Person>().WithMany().HasForeignKey(person => person.MergedIntoId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''");
+                // A merged record has when it was merged and is never merged into itself; an unmerged one has neither.
+                table.HasCheckConstraint("CK_People_Merged",
+                    "([MergedIntoId] IS NULL AND [MergedAt] IS NULL AND [MergedByUserId] IS NULL) "
+                    + "OR ([MergedIntoId] IS NOT NULL AND [MergedAt] IS NOT NULL AND [MergedIntoId] <> [Id])");
+            });
+        });
+        builder.Entity<PersonDuplicateDismissal>(entity =>
+        {
+            entity.HasOne<Church>().WithMany().HasForeignKey(dismissal => dismissal.ChurchId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired();
+            entity.HasOne<Person>().WithMany().HasForeignKey(dismissal => dismissal.PersonId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>().WithMany().HasForeignKey(dismissal => dismissal.OtherPersonId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(dismissal => new { dismissal.ChurchId, dismissal.PersonId, dismissal.OtherPersonId }).IsUnique();
+            entity.ToTable(table => table.HasCheckConstraint("CK_PersonDuplicateDismissals_Pair", "[PersonId] <> [OtherPersonId]"));
         });
         builder.Entity<Household>().HasOne<Church>().WithMany().HasForeignKey(household => household.ChurchId)
             .OnDelete(DeleteBehavior.Restrict).IsRequired();

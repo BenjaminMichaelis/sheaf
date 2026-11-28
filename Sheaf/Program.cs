@@ -78,6 +78,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ChurchMembershipRole>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GroupRole>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<Sheaf.Services.PersonMergeChoice>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<Sheaf.Services.DuplicateReason>());
 });
 
 // Add services to the container.
@@ -125,6 +127,7 @@ builder.Services.AddScoped<Sheaf.Services.IGroupService, Sheaf.Services.GroupSer
 builder.Services.AddScoped<Sheaf.Services.IAssignmentService, Sheaf.Services.AssignmentService>();
 builder.Services.AddScoped<Sheaf.Services.IHouseholdService, Sheaf.Services.HouseholdService>();
 builder.Services.AddScoped<Sheaf.Services.IAttendanceService, Sheaf.Services.AttendanceService>();
+builder.Services.AddScoped<Sheaf.Services.IPersonMergeService, Sheaf.Services.PersonMergeService>();
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {

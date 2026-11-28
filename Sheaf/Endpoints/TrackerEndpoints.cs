@@ -75,6 +75,29 @@ public static class TrackerEndpoints
         api.MapPut("/people/{id:guid}", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonRequest request, IPeopleService s, CancellationToken ct) =>
             TypedResults.Ok(await s.UpdatePersonAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
             .Tracker("UpdatePerson", "Update a scoped Person profile without changing account links").RequiresIfMatch();
+        MapDuplicates(api);
+    }
+
+    private static void MapDuplicates(RouteGroupBuilder api)
+    {
+        api.MapGet("/people/duplicates", async Task<Ok<PagedResponse<DuplicateCandidateResponse>>> (int? offset, int? limit, IPersonMergeService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetCandidatesAsync(PageRequest.From(offset, limit), ct)))
+            .Tracker("GetDuplicatePeople", "Staff list pairs of active people with the same name, email, or phone, except pairs marked as different")
+            .RequirePermission(Permission.PeopleManage);
+        api.MapPost("/people/duplicates/dismissals", async Task<NoContent> (DuplicateDismissalRequest request, IPersonMergeService s, CancellationToken ct) =>
+            {
+                await s.DismissAsync(request, ct);
+                return TypedResults.NoContent();
+            })
+            .Tracker("DismissDuplicatePeople", "Staff mark two people as different so the pair is no longer suggested")
+            .RequirePermission(Permission.PeopleManage);
+        // If-Match carries the survivor's version and the body the duplicate's. Two people both linked to an account
+        // return 409 with reason "bothLinkedToAccounts".
+        api.MapPost("/people/{id:guid}/merge", async Task<Ok<PersonResponse>> (Guid id, [FromHeader(Name = IfMatchHeader)] string? ifMatch, PersonMergeRequest request, IPersonMergeService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.MergeAsync(id, EntityTag.ParseIfMatch(ifMatch), request, ct)))
+            .Tracker("MergePerson", "Staff merge a duplicate into this Person, moving attendance, group history, household, and account link; it cannot be undone")
+            .RequiresIfMatch()
+            .RequirePermission(Permission.PeopleManage);
     }
 
     private static void MapGroups(RouteGroupBuilder api)

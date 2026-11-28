@@ -76,6 +76,12 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     }
 
     /// <summary>
+    /// People who are records of their own. A record merged into another (<see cref="Person.MergedIntoId"/>) is kept as
+    /// history only: nobody can change it, assign it, or put it in a household, and only managers can still read it.
+    /// </summary>
+    private IQueryable<Person> Unmerged => db.People.Where(p => p.MergedIntoId == null);
+
+    /// <summary>
     /// People the actor may assign to a group or put in a household, and change (see also <see cref="EditablePeople"/>).
     /// Managers reach every person; everyone else reaches whoever is currently on the roster, in any role, of a group
     /// where the actor may manage members.
@@ -83,11 +89,11 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     public IQueryable<Person> People(ChurchActor actor)
     {
         if (ManagesPeople(actor))
-            return db.People;
+            return Unmerged;
         var groups = Groups(actor, GroupPermission.ManageMembers).Select(g => g.Id);
         var now = Now;
         var assigned = db.GroupAssignments.CurrentAt(now);
-        return db.People.Where(p => assigned.Any(a => a.PersonId == p.Id && groups.Contains(a.GroupId)));
+        return Unmerged.Where(p => assigned.Any(a => a.PersonId == p.Id && groups.Contains(a.GroupId)));
     }
 
     /// <summary>
@@ -98,16 +104,17 @@ public sealed partial class TrackerScope(ApplicationDbContext db, ICurrentChurch
     public IQueryable<Person> EditablePeople(ChurchActor actor)
     {
         if (ManagesPeople(actor))
-            return db.People;
+            return Unmerged;
         var createdSince = Now.AddDays(-CreatorEditDays);
         var reachable = People(actor).Select(p => p.Id);
-        return db.People.Where(p => reachable.Contains(p.Id)
+        return Unmerged.Where(p => reachable.Contains(p.Id)
             || (p.CreatedByUserId == actor.UserId && p.CreatedAt >= createdSince));
     }
 
     /// <summary>
     /// People whose basic profile the actor may read: everyone in <see cref="EditablePeople"/>, plus anyone still marked present at
-    /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Attending grants read
+    /// one of the actor's groups' meetings in the last <see cref="AttendanceVisibilityDays"/> days. Managers also read
+    /// merged records, whose profile names the person they were merged into. Attending grants read
     /// access only, so marking someone present never lets a Leader edit them or add them to a roster or household.
     /// </summary>
     public IQueryable<Person> VisiblePeople(ChurchActor actor)
