@@ -23,7 +23,10 @@ public class TenancyArchitectureTests
         typeof(IdentityUserToken<string>),
         typeof(IdentityRoleClaim<string>),
         typeof(IdentityUserPasskey<string>),
-        typeof(DataProtectionKey)
+        typeof(DataProtectionKey),
+        // Identifiers only; enforces one church per external account (such as a Planning Center organization), which no
+        // per-church table can check.
+        typeof(IntegrationTenantLink)
     ];
 
     [Test]

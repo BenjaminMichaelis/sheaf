@@ -35,7 +35,8 @@ public abstract class ChurchApiTestBase : WebApplicationTest<ApiWebApplicationFa
         Converters =
         {
             new JsonStringEnumConverter<ChurchMembershipRole>(), new JsonStringEnumConverter<GroupRole>(),
-            new JsonStringEnumConverter<PersonMergeChoice>(), new JsonStringEnumConverter<DuplicateReason>()
+            new JsonStringEnumConverter<IntegrationStatus>(), new JsonStringEnumConverter<PersonMergeChoice>(),
+            new JsonStringEnumConverter<DuplicateReason>()
         }
     };
 

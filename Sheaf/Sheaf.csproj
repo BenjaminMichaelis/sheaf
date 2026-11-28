@@ -11,6 +11,7 @@
     <ProjectReference Include="..\Sheaf.Core\Sheaf.Core.csproj" />
     <ProjectReference Include="..\Sheaf.Data\Sheaf.Data.csproj" />
     <ProjectReference Include="..\Sheaf.ServiceDefaults\Sheaf.ServiceDefaults.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" />
     <PackageReference Include="Azure.Identity" />

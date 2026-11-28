@@ -540,6 +540,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/church/integrations/planning-center": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether Planning Center is configured and connected for the current church */
+        get: operations["GetPlanningCenterStatus"];
+        put?: never;
+        post?: never;
+        /** Revoke Sheaf's Planning Center access for the current church and forget its tokens */
+        delete: operations["DisconnectPlanningCenter"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/church/integrations/planning-center/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Navigate the browser here to connect the current church; it returns to the configured ReturnUrl with the outcome */
+        get: operations["ConnectPlanningCenter"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -693,6 +728,8 @@ export interface components {
                 [key: string]: string[];
             };
         };
+        /** @enum {unknown} */
+        IntegrationStatus: "Disconnected" | "Active" | "NeedsReauthorization";
         LoginRequest: {
             email: string;
             password: string;
@@ -779,6 +816,14 @@ export interface components {
             version: string;
             /** Format: uuid */
             mergedIntoId?: null | string;
+        };
+        PlanningCenterStatusResponse: {
+            configured: boolean;
+            status: components["schemas"]["IntegrationStatus"];
+            organizationName: null | string;
+            connectedPersonName: null | string;
+            /** Format: date-time */
+            connectedAt: null | string;
         };
         ProblemDetails: {
             type?: null | string;
@@ -3252,6 +3297,100 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    GetPlanningCenterStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningCenterStatusResponse"];
+                };
+            };
+        };
+    };
+    DisconnectPlanningCenter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ConnectPlanningCenter: {
+        parameters: {
+            query?: {
+                churchId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Found */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["HttpValidationProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
         };
     };

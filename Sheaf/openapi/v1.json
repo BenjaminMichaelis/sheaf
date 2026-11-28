@@ -3341,6 +3341,118 @@
           }
         ]
       }
+    },
+    "/api/church/integrations/planning-center": {
+      "get": {
+        "tags": [
+          "Planning Center"
+        ],
+        "summary": "Whether Planning Center is configured and connected for the current church",
+        "operationId": "GetPlanningCenterStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningCenterStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Planning Center"
+        ],
+        "summary": "Revoke Sheaf's Planning Center access for the current church and forget its tokens",
+        "operationId": "DisconnectPlanningCenter",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
+    },
+    "/api/church/integrations/planning-center/connect": {
+      "get": {
+        "tags": [
+          "Planning Center"
+        ],
+        "summary": "Navigate the browser here to connect the current church; it returns to the configured ReturnUrl with the outcome",
+        "operationId": "ConnectPlanningCenter",
+        "parameters": [
+          {
+            "name": "churchId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Found"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpValidationProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -3896,6 +4008,13 @@
           }
         }
       },
+      "IntegrationStatus": {
+        "enum": [
+          "Disconnected",
+          "Active",
+          "NeedsReauthorization"
+        ]
+      },
       "LoginRequest": {
         "required": [
           "email",
@@ -4267,6 +4386,43 @@
           }
         }
       },
+      "PlanningCenterStatusResponse": {
+        "required": [
+          "configured",
+          "status",
+          "organizationName",
+          "connectedPersonName",
+          "connectedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IntegrationStatus"
+          },
+          "organizationName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "connectedPersonName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "connectedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "ProblemDetails": {
         "type": "object",
         "properties": {
@@ -4525,6 +4681,9 @@
     },
     {
       "name": "Church"
+    },
+    {
+      "name": "Planning Center"
     },
     {
       "name": "Sheaf"

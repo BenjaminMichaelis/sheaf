@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261128000331_PersonMerge";
+    public override string LastMigrationId => "20261128004049_PersonMerge";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -382,6 +382,63 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     });
             });
 
+        modelBuilder.Entity("Sheaf.Data.ChurchIntegration", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("ConnectedAccountId")
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
+                b.Property<string>("ConnectedAccountName")
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.Property<DateTimeOffset?>("ConnectedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<Guid?>("ConnectedByMembershipId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("ExternalTenantId")
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
+                b.Property<string>("ExternalTenantName")
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.Property<string>("ProtectedCredentials")
+                    .HasColumnType("nvarchar(max)");
+
+                b.Property<string>("Provider")
+                    .IsRequired()
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<string>("Scopes")
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.Property<int>("Status")
+                    .HasColumnType("int");
+
+                b.Property<Guid>("Version")
+                    .IsConcurrencyToken()
+                    .HasColumnType("uniqueidentifier");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "Provider")
+                    .IsUnique();
+
+                b.ToTable("ChurchIntegrations");
+            });
+
         modelBuilder.Entity("Sheaf.Data.ChurchMembership", b =>
             {
                 b.Property<Guid>("ChurchId")
@@ -566,6 +623,29 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.HasKey("ChurchId", "Id");
 
                 b.ToTable("Households");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.IntegrationTenantLink", b =>
+            {
+                b.Property<string>("Provider")
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<string>("ExternalTenantId")
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.HasKey("Provider", "ExternalTenantId");
+
+                b.HasIndex("ChurchId");
+
+                b.HasIndex("Provider", "ChurchId")
+                    .IsUnique();
+
+                b.ToTable("IntegrationTenantLinks");
             });
 
         modelBuilder.Entity("Sheaf.Data.Person", b =>
@@ -761,6 +841,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .IsRequired();
             });
 
+        modelBuilder.Entity("Sheaf.Data.ChurchIntegration", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
         modelBuilder.Entity("Sheaf.Data.ChurchMembership", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
@@ -836,6 +925,15 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
             });
 
         modelBuilder.Entity("Sheaf.Data.Household", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.IntegrationTenantLink", b =>
             {
                 b.HasOne("Sheaf.Data.Church", null)
                     .WithMany()
