@@ -34,6 +34,17 @@ public sealed class Person : ITenanted
     /// </summary>
     [MaxLength(450)]
     public string? CreatedByUserId { get; set; }
+    /// <summary>
+    /// The person this record was merged into as a duplicate, or null while it is a record of its own. A merged record is
+    /// kept, inactive, with the values it had, so history survives; everything that pointed at it now points at
+    /// <see cref="MergedIntoId"/>. A merge cannot be undone.
+    /// </summary>
+    public Guid? MergedIntoId { get; set; }
+    /// <summary>When the record was merged into <see cref="MergedIntoId"/>.</summary>
+    public DateTimeOffset? MergedAt { get; set; }
+    /// <summary>The account that merged the record. Not a foreign key, like <see cref="CreatedByUserId"/>.</summary>
+    [MaxLength(450)]
+    public string? MergedByUserId { get; set; }
     /// <summary>Changes on every write to this row, including household moves; clients send it back as If-Match.</summary>
     [ConcurrencyCheck]
     public Guid Version { get; set; } = Guid.NewGuid();

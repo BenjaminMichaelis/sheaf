@@ -33,7 +33,7 @@ public sealed class PeopleService(ApplicationDbContext db, TrackerScope scope) :
             })
             .SingleOrDefaultAsync(ct);
         return new(p.Id, p.Name, p.FirstName, p.LastName, p.Email, p.Phone, p.HouseholdId, household?.Label,
-            household?.Members ?? [], p.IsActive, canEdit, p.Version);
+            household?.Members ?? [], p.IsActive, canEdit, p.Version, p.MergedIntoId);
     }
 
     public async Task<PersonResponse> CreatePersonAsync(PersonRequest request, bool confirm, CancellationToken ct)

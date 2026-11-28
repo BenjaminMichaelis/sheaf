@@ -18,9 +18,54 @@ public sealed record PersonRequest(string FirstName, string? LastName = null, st
 /// meetings recently (see TrackerScope.VisiblePeople), so anything more sensitive added to Person later must not be
 /// returned here when <paramref name="CanEdit"/> is false. <paramref name="HouseholdMembers"/> lists the other people in
 /// the household by first name only. <paramref name="CanEdit"/> says whether the caller may change this profile.
+/// <paramref name="MergedIntoId"/> is set when this record was merged into another person as a duplicate; such a
+/// record is kept as history, inactive and read-only, and only Staff and Admins can still read it.
 /// </summary>
 public sealed record PersonResponse(Guid Id, string Name, string FirstName, string? LastName, string? Email, string? Phone, Guid? HouseholdId,
-    string? HouseholdLabel, HouseholdMemberResponse[] HouseholdMembers, bool IsActive, bool CanEdit, Guid Version) : IVersioned;
+    string? HouseholdLabel, HouseholdMemberResponse[] HouseholdMembers, bool IsActive, bool CanEdit, Guid Version, Guid? MergedIntoId = null) : IVersioned;
+/// <summary>Where a merged person's value for one field comes from.</summary>
+public enum PersonMergeChoice
+{
+    /// <summary>The survivor's value, or the duplicate's when the survivor's is blank. First name keeps the survivor's.</summary>
+    Merge = 0,
+    /// <summary>The survivor's value, even when it is blank.</summary>
+    Survivor = 1,
+    /// <summary>The duplicate's value, even when it is blank.</summary>
+    Duplicate = 2
+}
+/// <summary>
+/// Where each field of the merged person comes from; omitted fields use <see cref="PersonMergeChoice.Merge"/>. A first
+/// name is never blank, so for <see cref="FirstName"/> only <see cref="PersonMergeChoice.Duplicate"/> changes anything.
+/// Values outside the enum are rejected with 400.
+/// </summary>
+public sealed record PersonMergeFields(
+    PersonMergeChoice FirstName = PersonMergeChoice.Merge,
+    PersonMergeChoice LastName = PersonMergeChoice.Merge,
+    PersonMergeChoice Email = PersonMergeChoice.Merge,
+    PersonMergeChoice Phone = PersonMergeChoice.Merge,
+    PersonMergeChoice Household = PersonMergeChoice.Merge);
+/// <summary>
+/// Merges the duplicate at <paramref name="DuplicateId"/> into the survivor named by the route.
+/// <paramref name="DuplicateVersion"/> is the duplicate's version as read, like If-Match is for the survivor.
+/// </summary>
+public sealed record PersonMergeRequest(Guid DuplicateId, Guid DuplicateVersion, PersonMergeFields? Fields = null);
+/// <summary>Why two people were suggested as duplicates.</summary>
+public enum DuplicateReason
+{
+    Name = 0,
+    Email = 1,
+    Phone = 2
+}
+/// <summary>One side of a suggested duplicate pair, with what Staff need to compare the two.</summary>
+public sealed record DuplicatePersonResponse(Guid Id, string Name, string? Email, string? Phone, string? HouseholdLabel,
+    bool HasAccount, DateTimeOffset CreatedAt);
+/// <summary>
+/// Two people who may be the same person. <paramref name="Person"/> is the earlier record, the suggested survivor;
+/// <paramref name="Other"/> is the later one.
+/// </summary>
+public sealed record DuplicateCandidateResponse(DuplicatePersonResponse Person, DuplicatePersonResponse Other, DuplicateReason[] Reasons);
+/// <summary>Marks two people as different, so the pair is no longer suggested as a duplicate.</summary>
+public sealed record DuplicateDismissalRequest(Guid PersonId, Guid OtherPersonId);
 /// <summary>
 /// An active Person found by name: only enough to pick the right person, never profile details.
 /// <paramref name="Groups"/> names the active groups they are in or lead today; it is null unless the caller manages

@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261127235354_VerifyEmpty";
+    public override string LastMigrationId => "20261128004049_PersonMerge";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -684,6 +684,16 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .HasMaxLength(100)
                     .HasColumnType("nvarchar(100)");
 
+                b.Property<DateTimeOffset?>("MergedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("MergedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<Guid?>("MergedIntoId")
+                    .HasColumnType("uniqueidentifier");
+
                 b.Property<string>("Phone")
                     .HasMaxLength(50)
                     .HasColumnType("nvarchar(50)");
@@ -702,6 +712,8 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
 
                 b.HasIndex("ChurchId", "HouseholdId");
 
+                b.HasIndex("ChurchId", "MergedIntoId");
+
                 b.HasIndex("ChurchId", "UserId")
                     .IsUnique()
                     .HasFilter("[UserId] IS NOT NULL");
@@ -709,6 +721,42 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.ToTable("People", t =>
                     {
                         t.HasCheckConstraint("CK_People_FirstName", "TRIM([FirstName]) <> ''");
+
+                        t.HasCheckConstraint("CK_People_Merged", "([MergedIntoId] IS NULL AND [MergedAt] IS NULL AND [MergedByUserId] IS NULL) OR ([MergedIntoId] IS NOT NULL AND [MergedAt] IS NOT NULL AND [MergedIntoId] <> [Id])");
+                    });
+            });
+
+        modelBuilder.Entity("Sheaf.Data.PersonDuplicateDismissal", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<DateTimeOffset>("DismissedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("DismissedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<Guid>("OtherPersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("PersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "OtherPersonId");
+
+                b.HasIndex("ChurchId", "PersonId", "OtherPersonId")
+                    .IsUnique();
+
+                b.ToTable("PersonDuplicateDismissals", t =>
+                    {
+                        t.HasCheckConstraint("CK_PersonDuplicateDismissals_Pair", "[PersonId] <> [OtherPersonId]");
                     });
             });
 
@@ -911,6 +959,32 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     .WithMany()
                     .HasForeignKey("ChurchId", "HouseholdId")
                     .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "MergedIntoId")
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+        modelBuilder.Entity("Sheaf.Data.PersonDuplicateDismissal", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "OtherPersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "PersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
             });
 #pragma warning restore 612, 618
     }

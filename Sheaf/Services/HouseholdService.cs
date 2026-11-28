@@ -56,7 +56,8 @@ public sealed class HouseholdService(ApplicationDbContext db, TrackerScope scope
         if (request.MemberIds is null || request.MemberIds.Length > 200 || request.MemberIds.Distinct().Count() != request.MemberIds.Length)
             throw Invalid();
         var members = await db.People.Where(p => request.MemberIds.Contains(p.Id)).ToArrayAsync(ct);
-        if (members.Length != request.MemberIds.Length)
+        // A record merged into another is history only and belongs to no household.
+        if (members.Length != request.MemberIds.Length || members.Any(p => p.MergedIntoId != null))
             throw Invalid();
         if (!TrackerScope.ManagesPeople(actor))
         {
