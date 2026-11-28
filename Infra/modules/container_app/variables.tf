@@ -52,6 +52,12 @@ variable "env_vars" {
   default     = {}
 }
 
+variable "key_vault_secrets" {
+  description = "Map of environment variable names to Key Vault secret IDs (versionless to follow rotation). The app identity needs the Key Vault Secrets User role on each secret."
+  type        = map(string)
+  default     = {}
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

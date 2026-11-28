@@ -59,6 +59,23 @@ public class AuthorizationPolicyTests
         await Assert.That(RolePermissions.HasPermission(role, Permission.ManageMemberships)).IsEqualTo(expected);
     }
 
+    public static IEnumerable<(ChurchMembershipRole Role, bool Expected)> ManageIntegrationsExpectations() =>
+        Enum.GetValues<ChurchMembershipRole>().Select(role => (role, role switch
+        {
+            ChurchMembershipRole.Admin => true,
+            ChurchMembershipRole.Staff => false,
+            ChurchMembershipRole.Coordinator => false,
+            ChurchMembershipRole.Leader => false,
+            _ => throw new NotSupportedException($"Decide whether {role} holds ManageIntegrations.")
+        }));
+
+    [Test]
+    [MethodDataSource(nameof(ManageIntegrationsExpectations))]
+    public async Task HasPermission_ManageIntegrations_MatchesExpectedRoles(ChurchMembershipRole role, bool expected)
+    {
+        await Assert.That(RolePermissions.HasPermission(role, Permission.ManageIntegrations)).IsEqualTo(expected);
+    }
+
     [Test]
     public async Task GetPolicyAsync_KnownPermission_DeniesUnauthenticatedIdentityWithAdminChurchClaims()
     {
