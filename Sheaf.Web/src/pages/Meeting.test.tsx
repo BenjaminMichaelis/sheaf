@@ -1,9 +1,11 @@
 import { Route, Routes } from 'react-router-dom'
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { components } from '@/api/schema'
 import { json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
 import { formatDate } from '@/utils/dates'
+import { CONFIRMATION_REQUIRED_PROBLEM_TYPE } from '@/services/apiClient'
+import GroupMeetings from './GroupMeetings'
 import Meeting from './Meeting'
 
 type SessionResponse = components['schemas']['SessionResponse']
@@ -68,7 +70,8 @@ describe('Meeting', () => {
     mockMeetingApi([meeting()])
     renderMeeting()
 
-    expect(await screen.findByRole('heading', { name: formatDate('2026-11-24') })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: `Tuesday village, ${formatDate('2026-11-24')}` })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to Tuesday village' })).toHaveAttribute('href', '/groups/g1')
     expect(screen.getByText('Potluck')).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'Came (1)' })).getByText('Lena Leader')).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'Absent (1)' })).getByText('Max Member')).toBeInTheDocument()
@@ -140,4 +143,134 @@ describe('Meeting', () => {
     expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
     expect(corrections[0]?.request.personIds).toEqual([])
   })
+
+  it('Meeting_CorrectByAddingSomeoneNew_SendsThemToBeCreated', async () => {
+    const corrections = mockMeetingApi([meeting()])
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.type(screen.getByRole('combobox', { name: 'Find or add a person' }), 'Nia New')
+    await user.click(await createOption())
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await user.click(await screen.findByRole('button', { name: 'Save correction' }))
+
+    expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
+    expect(corrections[0]?.request).toMatchObject({ personIds: [lena.id], newPeople: [{ firstName: 'Nia', lastName: 'New' }] })
+  })
+
+  it('Meeting_CorrectionAddsSomeoneWhoMayExist_UsesTheChosenMatchWithoutShowingAnError', async () => {
+    const zoeMatch = { ...zoe, householdLabel: null, groups: null }
+
+    const corrections = mockMeetingApi([meeting()], request =>
+      request.newPeople?.length
+        ? new Response(
+            JSON.stringify({ type: CONFIRMATION_REQUIRED_PROBLEM_TYPE, title: 'This looks like a duplicate.', status: 409, similarPeople: [{ index: 0, matches: [zoeMatch] }] }),
+            { status: 409, headers: { 'content-type': 'application/problem+json' } },
+          )
+        : json(meeting({ attendees: [lena, zoe], version: 'v2' })),
+    )
+
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.type(screen.getByRole('combobox', { name: 'Find or add a person' }), 'Zoe Visiter')
+    await user.click(await createOption())
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await user.click(await screen.findByRole('button', { name: 'Save correction' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Check before saving' })
+    await user.click(within(dialog).getByRole('button', { name: 'Use this person: Zoe Visitor' }))
+
+    // Choosing the match answers the warning, so it is not shown again as an error.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByText('This looks like a duplicate.')).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Save correction' }))
+
+    expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
+    expect(corrections[1]?.request).toMatchObject({ personIds: [lena.id, zoe.id], newPeople: [], confirm: false })
+  })
+
+  it('Meeting_SearchFindsSomeoneAlreadyChosen_ListsThemOnce', async () => {
+    const corrections = mockMeetingApi([meeting()])
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+
+    for (let time = 0; time < 2; time++) {
+      await user.type(screen.getByRole('combobox', { name: 'Find or add a person' }), 'Zo')
+      await user.click(await screen.findByRole('option', { name: /^Zoe Visitor/ }))
+    }
+
+    expect(within(screen.getByRole('list', { name: 'Also came' })).getAllByText('Zoe Visitor')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
+    expect(corrections[0]?.request.personIds).toEqual([lena.id, zoe.id])
+  })
+
+  it('Meeting_CancelCorrection_KeepsTheMeetingAsItWasAndReturnsFocus', async () => {
+    const corrections = mockMeetingApi([meeting()])
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    expect(screen.getByRole('heading', { name: 'Correct attendance' })).toHaveFocus()
+    await user.click(screen.getByRole('checkbox', { name: 'Lena Leader' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(within(screen.getByRole('list', { name: 'Came (1)' })).getByText('Lena Leader')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Correct attendance' })).toHaveFocus()
+    expect(corrections).toEqual([])
+  })
+
+  it('Meeting_CorrectionWindowEndsWhileEditing_ClosesTheEditorAndSaysSo', async () => {
+    mockMeetingApi([meeting(), meeting({ canEdit: false })], () =>
+      new Response(JSON.stringify({ title: 'Access denied.', status: 403 }), { status: 403, headers: { 'content-type': 'application/problem+json' } }),
+    )
+    const { user } = renderMeeting()
+
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+
+    expect(await screen.findByText('This meeting can no longer be corrected.')).toBeInTheDocument()
+    expect(await screen.findByRole('list', { name: 'Came (1)' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Correct attendance' })).not.toBeInTheDocument())
+  })
+
+  it('Meeting_AfterCorrecting_TheGroupsMeetingListShowsTheNewCount', async () => {
+    let attendeeCount = 1
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser()),
+      'GET /api/church/settings': () => json(settings),
+      'GET /api/church/groups/g1': () => json(village),
+      'GET /api/church/groups/g1/sessions': () => json({ items: [{ id: 's1', occurredOn: '2026-11-24', attendeeCount, version: 'v1' }], nextOffset: null }),
+      'GET /api/church/groups/g1/sessions/s1': () => json(meeting()),
+      'PUT /api/church/groups/g1/sessions/s1': () => {
+        attendeeCount = 2
+
+        return json(meeting({ attendees: [lena, max], absent: [], version: 'v2' }))
+      },
+    })
+
+    const { user } = renderApp(
+      <Routes>
+        <Route path="/groups/:groupId" element={<GroupMeetings />} />
+        <Route path="/groups/:groupId/meetings/:sessionId" element={<Meeting />} />
+      </Routes>,
+      '/groups/g1',
+    )
+
+    await user.click(await screen.findByRole('link', { name: /1 present/ }))
+    await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Max Member' }))
+    await user.click(screen.getByRole('button', { name: 'Save correction' }))
+    expect(await screen.findByText('Attendance corrected.')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Back to Tuesday village' }))
+
+    expect(await screen.findByRole('link', { name: /2 present/ })).toBeInTheDocument()
+  })
 })
+
+/** "Create new person", once the search for the typed name has finished (it can't be chosen while searching). */
+async function createOption() {
+  await waitFor(() => expect(screen.getByRole('option', { name: /Create new person/ })).toHaveAttribute('aria-disabled', 'false'))
+
+  return screen.getByRole('option', { name: /Create new person/ })
+}

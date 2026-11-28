@@ -260,6 +260,27 @@ describe('TakeAttendance', () => {
     expect(saved[0]).toMatchObject({ occurredOn: '2025-06-01', personIds: [zoe.id] })
   })
 
+  it('TakeAttendance_FoundPersonIsOnTheNewDatesRoster_ShowsThemOnceOnTheRoster', async () => {
+    const today = churchDateOf(new Date(), TIME_ZONE)
+    const zoeOnRoster = { id: zoe.id, name: zoe.name }
+    const { saved } = mockAttendanceApi({ roster: occurredOn => (occurredOn === today ? [lena] : [lena, zoeOnRoster]) })
+    const { user } = renderAttendance()
+
+    await user.type(await nameBox(), 'Zo')
+    await user.click(await screen.findByRole('option', { name: /^Zoe Visitor/ }))
+    expect(within(screen.getByRole('list', { name: 'Also came' })).getByText('Zoe Visitor')).toBeInTheDocument()
+    const date = screen.getByLabelText(/Meeting date/)
+    await user.clear(date)
+    await user.type(date, '2025-06-01')
+
+    // On that date Zoe was on the roster, so she is ticked there rather than listed again under "Also came".
+    expect(await screen.findByRole('checkbox', { name: 'Zoe Visitor', checked: true })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Also came' })).not.toBeInTheDocument()
+    await user.click(await saveButton())
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
+    expect(saved[0]?.personIds).toEqual([zoe.id])
+  })
+
   it('TakeAttendance_SaveInFlight_SendsOnlyOneRequest', async () => {
     const { saved } = mockAttendanceApi({ save: () => new Promise<Response>(() => {}) })
     const { user } = renderAttendance()

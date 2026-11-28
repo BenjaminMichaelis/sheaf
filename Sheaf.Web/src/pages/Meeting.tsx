@@ -1,16 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSnackbar } from 'notistack'
-import { Alert, Box, Button, List, ListItem, ListItemText, Paper, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Link, List, ListItem, ListItemText, Paper, Stack, Typography } from '@mui/material'
 import type { components } from '@/api/schema'
+import AttendeesConfirmDialog from '@/components/attendance/AttendeesConfirmDialog'
 import AttendeesEditor from '@/components/attendance/AttendeesEditor'
 import { DescriptionField, SaveBar } from '@/components/attendance/MeetingFields'
 import { useAttendees, type NewPerson } from '@/components/attendance/useAttendees'
-import ConfirmMeetingDialog from '@/components/ConfirmMeetingDialog'
 import { Loading, RetryButton } from '@/components/Feedback'
 import { useChurch } from '@/contexts/ChurchContext'
-import { ApiError } from '@/services/apiClient'
+import { ApiError, confirmationReasons } from '@/services/apiClient'
 import { correctMeeting, groupQuery, meetingQuery, meetingsQuery } from '@/services/churchQueries'
 import { formatDate } from '@/utils/dates'
 
@@ -30,46 +30,67 @@ export default function Meeting() {
 function MeetingPage({ churchId, groupId, sessionId }: { churchId: string; groupId: string; sessionId: string }) {
   const meeting = useQuery(meetingQuery(churchId, groupId, sessionId))
   const group = useQuery(groupQuery(churchId, groupId))
-  const [correcting, setCorrecting] = useState(false)
+  // The meeting as it was when the correction began. A background refresh never replaces it, so edits in progress are
+  // never lost; if someone else saved meanwhile the API refuses (412) and the user reloads their version on purpose.
+  const [correcting, setCorrecting] = useState<SessionResponse | null>(null)
+  const [returnFocus, setReturnFocus] = useState(false)
 
-  if (meeting.isError) {
-    return (
+  // A failed background refresh keeps what is shown; only a meeting that never loaded shows the error.
+  if (meeting.data === undefined) {
+    return meeting.isError ? (
       <Alert severity="error" action={<RetryButton onClick={() => void meeting.refetch()} />}>
         {meeting.error.message}
       </Alert>
+    ) : (
+      <Loading />
     )
   }
 
-  if (meeting.data === undefined) return <Loading />
+  const shown = meeting.data
+  const date = formatDate(shown.occurredOn)
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-      <Typography variant="h4" component="h1">
-        {formatDate(meeting.data.occurredOn)}
+      <Link href={`/groups/${groupId}`} variant="body2">
+        {group.data ? `Back to ${group.data.name}` : 'Back to the group'}
+      </Link>
+      <Typography variant="h4" component="h1" sx={{ mt: 1 }}>
+        {group.data ? `${group.data.name}, ${date}` : date}
       </Typography>
-      {group.data && (
-        <Typography color="text.secondary" gutterBottom>
-          {group.data.name}
-        </Typography>
-      )}
 
       {correcting ? (
-        // Keyed by version, so a reload after someone else's change starts the correction again from what they saved.
         <CorrectMeeting
-          key={meeting.data.version}
+          key={correcting.version}
           churchId={churchId}
           groupId={groupId}
-          meeting={meeting.data}
-          onDone={() => setCorrecting(false)}
+          meeting={correcting}
+          onReloaded={setCorrecting}
+          onDone={() => {
+            setCorrecting(null)
+            setReturnFocus(true)
+          }}
         />
       ) : (
-        <MeetingDetails meeting={meeting.data} onCorrect={() => setCorrecting(true)} />
+        <MeetingDetails meeting={shown} focusCorrect={returnFocus} onCorrect={() => setCorrecting(shown)} />
       )}
     </Box>
   )
 }
 
-function MeetingDetails({ meeting, onCorrect }: { meeting: SessionResponse; onCorrect: () => void }) {
+interface MeetingDetailsProps {
+  meeting: SessionResponse
+  /** Moves focus to the Correct button, so closing the editor does not leave focus nowhere. */
+  focusCorrect: boolean
+  onCorrect: () => void
+}
+
+function MeetingDetails({ meeting, focusCorrect, onCorrect }: MeetingDetailsProps) {
+  const correctButton = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (focusCorrect) correctButton.current?.focus()
+  }, [focusCorrect])
+
   return (
     <Stack spacing={3} sx={{ mt: 2 }}>
       {meeting.description && <Typography sx={{ whiteSpace: 'pre-wrap' }}>{meeting.description}</Typography>}
@@ -81,7 +102,7 @@ function MeetingDetails({ meeting, onCorrect }: { meeting: SessionResponse; onCo
       {/* Offered only while the API would accept a correction: Leaders for a week after recording, Staff always. */}
       {meeting.canEdit && (
         <Box>
-          <Button variant="contained" onClick={onCorrect}>
+          <Button ref={correctButton} variant="contained" onClick={onCorrect}>
             Correct attendance
           </Button>
         </Box>
@@ -116,20 +137,28 @@ function PeopleSection({ id, title, people, empty }: { id: string; title: string
 interface CorrectMeetingProps {
   churchId: string
   groupId: string
+  /** The meeting being corrected; its version is what the correction is checked against. */
   meeting: SessionResponse
+  /** Restarts the correction from someone else's newer version. */
+  onReloaded: (meeting: SessionResponse) => void
   onDone: () => void
 }
 
 /** Changes who came and the description; people taken off stay in the meeting's history on the server. */
-function CorrectMeeting({ churchId, groupId, meeting, onDone }: CorrectMeetingProps) {
+function CorrectMeeting({ churchId, groupId, meeting, onReloaded, onDone }: CorrectMeetingProps) {
   const queryClient = useQueryClient()
   const { enqueueSnackbar } = useSnackbar()
-  const { labels } = useChurch()
+  const heading = useRef<HTMLHeadingElement>(null)
   // Everyone already on the meeting, ticked if they came, so a correction can add or take anyone off.
-  const [listed] = useState(() => [...meeting.attendees, ...meeting.absent].sort((a, b) => a.name.localeCompare(b.name)))
+  const listed = [...meeting.attendees, ...meeting.absent].sort((a, b) => a.name.localeCompare(b.name))
   const attendees = useAttendees(listed, meeting.attendees.map(person => person.id))
   const [description, setDescription] = useState(meeting.description ?? '')
   const meetingKey = meetingQuery(churchId, groupId, meeting.id).queryKey
+
+  // Focus moves into the editor that replaced the button, as WCAG 2.4.3 asks.
+  useEffect(() => {
+    heading.current?.focus()
+  }, [])
 
   const save = useMutation({
     mutationFn: ({ confirm, people }: { confirm: boolean; people: NewPerson[] }) =>
@@ -139,22 +168,48 @@ function CorrectMeeting({ churchId, groupId, meeting, onDone }: CorrectMeetingPr
         confirm,
         description: description.trim() || null,
       }),
-    onSuccess: async corrected => {
+    onSuccess: corrected => {
+      // The editor closes first, so it cannot be used again against the version it just replaced.
+      onDone()
       queryClient.setQueryData(meetingKey, corrected)
       // The meeting list shows how many came, so it is refreshed too.
-      await queryClient.invalidateQueries({ queryKey: meetingsQuery(churchId, groupId).queryKey })
+      void queryClient.invalidateQueries({ queryKey: meetingsQuery(churchId, groupId).queryKey })
       enqueueSnackbar('Attendance corrected.', { variant: 'success' })
-      onDone()
     },
-    onError: (error, { people }) => attendees.askToConfirm(error, people),
+    onError: (error, { people }) => {
+      // The week Leaders have to correct a meeting ran out while they were editing.
+      if (error instanceof ApiError && error.status === 403) {
+        onDone()
+        void queryClient.invalidateQueries({ queryKey: meetingKey })
+        enqueueSnackbar('This meeting can no longer be corrected.', { variant: 'error' })
+
+        return
+      }
+
+      attendees.askToConfirm(error, people)
+    },
   })
 
-  // Someone saved a change since this meeting was opened; the API refuses rather than overwrite it.
+  // Loads the version someone else saved and starts again from it, unless the user may no longer correct it.
+  const reload = async () => {
+    const latest = await queryClient.fetchQuery({ ...meetingQuery(churchId, groupId, meeting.id), staleTime: 0 })
+
+    if (latest.canEdit) onReloaded(latest)
+    else onDone()
+  }
+
+  // Someone saved a change since the correction began; the API refuses rather than overwrite it.
   const changedElsewhere = save.error instanceof ApiError && save.error.status === 412
-  const saveError = save.error !== null && !changedElsewhere && attendees.confirmation === null && !save.isPending ? save.error.message : null
+
+  const saveError =
+    save.error !== null && !save.isPending && !changedElsewhere && confirmationReasons(save.error) === null ? save.error.message : null
 
   return (
     <Stack spacing={3} sx={{ mt: 2 }}>
+      <Typography ref={heading} tabIndex={-1} variant="h5" component="h2" sx={{ outline: 'none' }}>
+        Correct attendance
+      </Typography>
+
       <AttendeesEditor churchId={churchId} attendees={attendees} listed={listed} heading="Marked on this meeting" />
 
       <DescriptionField value={description} onChange={setDescription} />
@@ -163,7 +218,7 @@ function CorrectMeeting({ churchId, groupId, meeting, onDone }: CorrectMeetingPr
         <Alert
           severity="warning"
           action={
-            <Button color="inherit" size="small" onClick={() => void queryClient.invalidateQueries({ queryKey: meetingKey })}>
+            <Button color="inherit" size="small" onClick={() => void reload()}>
               Reload
             </Button>
           }
@@ -185,18 +240,10 @@ function CorrectMeeting({ churchId, groupId, meeting, onDone }: CorrectMeetingPr
         </Button>
       </SaveBar>
 
-      <ConfirmMeetingDialog
-        open={attendees.confirmation !== null}
-        groupLabel={labels.one.toLowerCase()}
-        sameDay={attendees.confirmation?.sameDay ?? false}
-        duplicates={attendees.confirmation?.duplicates ?? []}
+      <AttendeesConfirmDialog
+        attendees={attendees}
         saving={save.isPending}
-        onUseExisting={attendees.chooseExisting}
-        onSaveAnyway={() => {
-          attendees.closeConfirmation()
-          save.mutate({ confirm: true, people: attendees.newPeople })
-        }}
-        onClose={attendees.closeConfirmation}
+        onSaveAnyway={() => save.mutate({ confirm: true, people: attendees.newPeople })}
       />
     </Stack>
   )

@@ -4,10 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSnackbar } from 'notistack'
 import { Alert, Box, Stack, TextField, Typography } from '@mui/material'
 import type { components } from '@/api/schema'
+import AttendeesConfirmDialog from '@/components/attendance/AttendeesConfirmDialog'
 import AttendeesEditor from '@/components/attendance/AttendeesEditor'
 import { DescriptionField, SaveBar } from '@/components/attendance/MeetingFields'
 import { useAttendees, type NewPerson } from '@/components/attendance/useAttendees'
-import ConfirmMeetingDialog from '@/components/ConfirmMeetingDialog'
+import { confirmationReasons } from '@/services/apiClient'
 import { Loading, RetryButton } from '@/components/Feedback'
 import { useChurch } from '@/contexts/ChurchContext'
 import { groupQuery, meetingsKey, recordMeeting, rosterQuery } from '@/services/churchQueries'
@@ -40,15 +41,16 @@ function GroupAttendance({ churchId, groupId, timeZoneId }: { churchId: string; 
   const { labels, can } = useChurch()
   const group = useQuery(groupQuery(churchId, groupId))
 
-  if (group.isError) {
-    return (
+  // A failed background refresh keeps the form; only a group that never loaded shows the error.
+  if (group.data === undefined) {
+    return group.isError ? (
       <Alert severity="error" action={<RetryButton onClick={() => void group.refetch()} />}>
         {group.error.message}
       </Alert>
+    ) : (
+      <Loading />
     )
   }
-
-  if (group.data === undefined) return <Loading />
 
   // Leaders lose a group once it ends (the API refuses their saves), so they are told now rather than after filling in the form.
   if (group.data.endsAt !== null && new Date(group.data.endsAt) <= new Date() && !can('recordEndedGroups')) {
@@ -98,7 +100,8 @@ function MeetingForm({ churchId, group, timeZoneId }: { churchId: string; group:
     onError: (error, { people }) => attendees.askToConfirm(error, people),
   })
 
-  const saveError = save.error !== null && attendees.confirmation === null && !save.isPending ? save.error.message : null
+  // A request to confirm is answered in the dialog, never shown as an error, even once its warnings are resolved.
+  const saveError = save.error !== null && !save.isPending && confirmationReasons(save.error) === null ? save.error.message : null
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto' }}>
@@ -156,18 +159,10 @@ function MeetingForm({ churchId, group, timeZoneId }: { churchId: string; group:
         />
       </Stack>
 
-      <ConfirmMeetingDialog
-        open={attendees.confirmation !== null}
-        groupLabel={groupWord}
-        sameDay={attendees.confirmation?.sameDay ?? false}
-        duplicates={attendees.confirmation?.duplicates ?? []}
+      <AttendeesConfirmDialog
+        attendees={attendees}
         saving={save.isPending}
-        onUseExisting={attendees.chooseExisting}
-        onSaveAnyway={() => {
-          attendees.closeConfirmation()
-          save.mutate({ confirm: true, people: attendees.newPeople })
-        }}
-        onClose={attendees.closeConfirmation}
+        onSaveAnyway={() => save.mutate({ confirm: true, people: attendees.newPeople })}
       />
     </Box>
   )

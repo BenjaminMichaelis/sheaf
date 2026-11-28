@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { Checkbox, FormControlLabel, IconButton, List, ListItem, ListItemText, Paper, Typography } from '@mui/material'
 import { Close as CloseIcon } from '@mui/icons-material'
 import NewPersonDialog from '@/components/NewPersonDialog'
@@ -22,16 +22,20 @@ interface AttendeesEditorProps {
  * person". Used both to record a meeting and to correct one.
  */
 export default function AttendeesEditor({ churchId, attendees, listed, heading, status }: AttendeesEditorProps) {
+  const listedHeading = useId()
+  const othersHeading = useId()
+  const [creating, setCreating] = useState({ open: false, name: '' })
+
   return (
     <>
-      <section aria-labelledby="listed-heading">
-        <Typography id="listed-heading" variant="h6" component="h2">
+      <section aria-labelledby={listedHeading}>
+        <Typography id={listedHeading} variant="h6" component="h2">
           {heading}
         </Typography>
         {status}
         {listed.length > 0 && (
           <Paper variant="outlined">
-            <List disablePadding aria-labelledby="listed-heading">
+            <List disablePadding aria-labelledby={listedHeading}>
               {listed.map(person => (
                 <ListItem key={person.id} divider sx={{ py: 0 }}>
                   {/* One focusable checkbox per person, named by its visible label (mui.com/material-ui/react-checkbox/#label). */}
@@ -47,13 +51,18 @@ export default function AttendeesEditor({ churchId, attendees, listed, heading, 
         )}
       </section>
 
-      <section aria-labelledby="others-heading">
-        <Typography id="others-heading" variant="h6" component="h2" gutterBottom>
+      <section aria-labelledby={othersHeading}>
+        <Typography id={othersHeading} variant="h6" component="h2" gutterBottom>
           Also came
         </Typography>
-        <PersonSearch churchId={churchId} label="Find or add a person" onPick={attendees.markPresent} onCreate={attendees.startCreating} />
+        <PersonSearch
+          churchId={churchId}
+          label="Find or add a person"
+          onPick={attendees.markPresent}
+          onCreate={name => setCreating({ open: true, name })}
+        />
         {(attendees.others.length > 0 || attendees.newPeople.length > 0) && (
-          <List aria-labelledby="others-heading">
+          <List aria-labelledby={othersHeading}>
             {attendees.others.map(person => (
               <RemovableItem key={person.id} primary={person.name} onRemove={() => attendees.removeFound(person.id)} />
             ))}
@@ -70,10 +79,13 @@ export default function AttendeesEditor({ churchId, attendees, listed, heading, 
       </section>
 
       <NewPersonDialog
-        open={attendees.creating.open}
-        initialName={attendees.creating.name}
-        onClose={attendees.stopCreating}
-        onAdd={attendees.addNewPerson}
+        open={creating.open}
+        initialName={creating.name}
+        onClose={() => setCreating(previous => ({ ...previous, open: false }))}
+        onAdd={person => {
+          attendees.addNewPerson(person)
+          setCreating(previous => ({ ...previous, open: false }))
+        }}
       />
     </>
   )

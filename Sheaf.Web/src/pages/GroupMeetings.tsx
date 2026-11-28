@@ -22,15 +22,16 @@ function GroupPage({ churchId, groupId }: { churchId: string; groupId: string })
   const { labels, can } = useChurch()
   const group = useQuery(groupQuery(churchId, groupId))
 
-  if (group.isError) {
-    return (
+  // A failed background refresh keeps what is shown; only a group that never loaded shows the error.
+  if (group.data === undefined) {
+    return group.isError ? (
       <Alert severity="error" action={<RetryButton onClick={() => void group.refetch()} />}>
         {group.error.message}
       </Alert>
+    ) : (
+      <Loading />
     )
   }
-
-  if (group.data === undefined) return <Loading />
 
   const phase = phaseOf(group.data, new Date())
 
@@ -81,7 +82,10 @@ function Meetings({ churchId, groupId }: { churchId: string; groupId: string }) 
           <List disablePadding aria-labelledby="meetings-heading">
             {meetings.map((meeting, index) => (
               <ListItem key={meeting.id} disablePadding divider={index < meetings.length - 1}>
-                <ListItemButton href={`/groups/${groupId}/meetings/${meeting.id}`}>
+                <ListItemButton
+                  href={`/groups/${groupId}/meetings/${meeting.id}`}
+                  aria-label={`${formatDate(meeting.occurredOn)}, ${meeting.attendeeCount} present`}
+                >
                   <ListItemText primary={formatDate(meeting.occurredOn)} secondary={`${meeting.attendeeCount} present`} />
                 </ListItemButton>
               </ListItem>

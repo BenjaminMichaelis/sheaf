@@ -35,7 +35,6 @@ export function useAttendees(listed: readonly Named[], initiallyPresent: readonl
   const [newPeople, setNewPeople] = useState<NewPerson[]>([])
   // Only tells new people apart; it never changes what is shown, so it is not state.
   const nextKey = useRef(0)
-  const [creating, setCreating] = useState({ open: false, name: '' })
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
 
   const listedIds = new Set(listed.map(person => person.id))
@@ -73,7 +72,6 @@ export function useAttendees(listed: readonly Named[], initiallyPresent: readonl
   const addNewPerson = (request: PersonRequest) => {
     const key = nextKey.current++
     setNewPeople(previous => [...previous, { key, request }])
-    setCreating(previous => ({ ...previous, open: false }))
   }
 
   const removeNewPerson = (key: number) => setNewPeople(previous => previous.filter(person => person.key !== key))
@@ -93,12 +91,12 @@ export function useAttendees(listed: readonly Named[], initiallyPresent: readonl
 
   /**
    * Opens the confirmation when `error` is the API asking to confirm the save; `people` are the new people that save
-   * sent, which its warnings point into. Returns whether it did.
+   * sent, which its warnings point into.
    */
   const askToConfirm = (error: Error, people: readonly NewPerson[]) => {
     const reasons = confirmationReasons(error)
 
-    if (reasons === null) return false
+    if (reasons === null) return
 
     setConfirmation({
       sameDay: reasons.existingSessionIds.length > 0,
@@ -108,8 +106,6 @@ export function useAttendees(listed: readonly Named[], initiallyPresent: readonl
         return person ? [{ key: person.key, name: fullName(person.request), matches: similar.matches }] : []
       }),
     })
-
-    return true
   }
 
   return {
@@ -118,13 +114,10 @@ export function useAttendees(listed: readonly Named[], initiallyPresent: readonl
     newPeople,
     personIds,
     count: personIds.length + newPeople.length,
-    creating,
     confirmation,
     toggle,
     markPresent,
     removeFound,
-    startCreating: (name: string) => setCreating({ open: true, name }),
-    stopCreating: () => setCreating(previous => ({ ...previous, open: false })),
     addNewPerson,
     removeNewPerson,
     chooseExisting,

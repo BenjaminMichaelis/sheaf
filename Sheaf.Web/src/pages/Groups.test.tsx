@@ -51,7 +51,7 @@ describe('Groups', () => {
 
     expect(await screen.findByRole('heading', { name: 'Villages' })).toBeInTheDocument()
     const currentList = await screen.findByRole('list', { name: 'Current Villages' })
-    expect(within(currentList).getByText('Tuesday village')).toBeInTheDocument()
+    expect(within(currentList).getByRole('link', { name: 'Tuesday village' })).toHaveAttribute('href', '/groups/g1')
     expect(within(currentList).queryByText('Autumn village')).not.toBeInTheDocument()
     const upcomingList = screen.getByRole('list', { name: 'Upcoming' })
     expect(within(upcomingList).getByText('Autumn village')).toBeInTheDocument()

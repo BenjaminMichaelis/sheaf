@@ -5,6 +5,7 @@ import type { components } from '@/api/schema'
 import { json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
 import { formatDate } from '@/utils/dates'
 import GroupMeetings from './GroupMeetings'
+import TakeAttendance from './TakeAttendance'
 
 type Group = components['schemas']['GroupResponse']
 
@@ -63,5 +64,46 @@ describe('GroupMeetings', () => {
 
     expect(await screen.findByText('Ended')).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'Take attendance' })).toBeInTheDocument()
+  })
+
+  it('GroupMeetings_LeaderOnEndedGroup_ShowsItsHistoryInTheChurchsWordsWithoutRecording', async () => {
+    renderGroup({ endsAt: '2025-06-01T05:00:00Z' }, [{ id: 's1', occurredOn: '2025-05-27', attendeeCount: 4, version: 'v' }])
+
+    expect(await screen.findByText('Village')).toBeInTheDocument()
+    expect(screen.getByText('Ended')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /4 present/ })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Take attendance' })).not.toBeInTheDocument()
+  })
+
+  it('GroupMeetings_AfterRecordingAMeeting_ListsIt', async () => {
+    const saved: SessionSummary[] = []
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser()),
+      'GET /api/church/settings': () => json(settings),
+      'GET /api/church/groups/g1': () => json(village),
+      'GET /api/church/groups/g1/sessions': () => json({ items: saved, nextOffset: null }),
+      'GET /api/church/groups/g1/roster': () => json([{ id: 'p-lena', name: 'Lena Leader' }]),
+      'POST /api/church/groups/g1/sessions': async request => {
+        const body: components['schemas']['SessionRequest'] = await request.json()
+        saved.push({ id: 's1', occurredOn: body.occurredOn, attendeeCount: 1, version: 'v' })
+
+        return json({ id: 's1', groupId: 'g1', occurredOn: body.occurredOn, description: null, attendees: [], absent: [], canEdit: true, version: 'v' }, 201)
+      },
+    })
+
+    const { user } = renderApp(
+      <Routes>
+        <Route path="/groups/:groupId" element={<GroupMeetings />} />
+        <Route path="/groups/:groupId/attendance" element={<TakeAttendance />} />
+      </Routes>,
+      '/groups/g1',
+    )
+
+    expect(await screen.findByText('No meetings recorded yet.')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Take attendance' }))
+    await user.click(await screen.findByRole('checkbox', { name: 'Lena Leader' }))
+    await user.click(screen.getByRole('button', { name: 'Save attendance' }))
+
+    expect(await screen.findByRole('link', { name: /1 present/ })).toBeInTheDocument()
   })
 })

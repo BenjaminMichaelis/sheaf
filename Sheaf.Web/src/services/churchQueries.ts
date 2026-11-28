@@ -32,7 +32,8 @@ export function churchSettingsQuery(churchId: string | null) {
 /** The groups the user can reach, one page at a time. */
 export function groupsQuery(churchId: string) {
   return infiniteQueryOptions({
-    queryKey: ['church', churchId, 'groups'],
+    // Ends in 'list', so refreshing the list never also refetches each group's details and meetings under it.
+    queryKey: ['church', churchId, 'groups', 'list'],
     queryFn: async ({ pageParam, signal }) => {
       const { data } = await apiClient.GET('/api/church/groups', {
         params: { query: { offset: pageParam, limit: GROUPS_PAGE_SIZE } },
