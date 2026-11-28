@@ -17,7 +17,7 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261128004049_PersonMerge";
+    public override string LastMigrationId => "20261128055430_PocDemo";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -760,6 +760,302 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                     });
             });
 
+        modelBuilder.Entity("Sheaf.Data.Poc.PocAuditEntry", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("Action")
+                    .IsRequired()
+                    .HasMaxLength(60)
+                    .HasColumnType("nvarchar(60)");
+
+                b.Property<string>("ActorUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<bool>("AiInvolved")
+                    .HasColumnType("bit");
+
+                b.Property<DateTimeOffset>("At")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<bool>("HumanEdited")
+                    .HasColumnType("bit");
+
+                b.Property<Guid?>("PersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid?>("ProposalId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("Summary")
+                    .IsRequired()
+                    .HasMaxLength(500)
+                    .HasColumnType("nvarchar(500)");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "At");
+
+                b.ToTable("PocAuditEntries");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocCapture", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("AiLive")
+                    .HasColumnType("bit");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("CreatedByUserId")
+                    .IsRequired()
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<int>("Kind")
+                    .HasColumnType("int");
+
+                b.Property<bool>("Redacted")
+                    .HasColumnType("bit");
+
+                b.Property<int>("Status")
+                    .HasColumnType("int");
+
+                b.Property<string>("Summary")
+                    .HasMaxLength(500)
+                    .HasColumnType("nvarchar(500)");
+
+                b.Property<string>("Text")
+                    .IsRequired()
+                    .HasMaxLength(4000)
+                    .HasColumnType("nvarchar(4000)");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "CreatedByUserId", "CreatedAt");
+
+                b.ToTable("PocCaptures");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocPersonProfile", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("ClassYear")
+                    .HasMaxLength(20)
+                    .HasColumnType("nvarchar(20)");
+
+                b.Property<DateTimeOffset?>("DoNotContactAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("DoNotContactByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<string>("Dorm")
+                    .HasMaxLength(100)
+                    .HasColumnType("nvarchar(100)");
+
+                b.Property<Guid?>("GuardianPersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("HowWeMet")
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.Property<bool>("IsMinor")
+                    .HasColumnType("bit");
+
+                b.Property<string>("NextStep")
+                    .HasMaxLength(300)
+                    .HasColumnType("nvarchar(300)");
+
+                b.Property<string>("Notes")
+                    .HasMaxLength(1000)
+                    .HasColumnType("nvarchar(1000)");
+
+                b.Property<Guid>("PersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<int>("Source")
+                    .HasColumnType("int");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "GuardianPersonId");
+
+                b.HasIndex("ChurchId", "PersonId")
+                    .IsUnique();
+
+                b.ToTable("PocPersonProfiles");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocProposal", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("AiGenerated")
+                    .HasColumnType("bit");
+
+                b.Property<Guid?>("CaptureId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<DateTimeOffset?>("DecidedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("DecidedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<Guid?>("DuplicatePersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<int>("Kind")
+                    .HasColumnType("int");
+
+                b.Property<string>("OwnerUserId")
+                    .IsRequired()
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<string>("Payload")
+                    .IsRequired()
+                    .HasMaxLength(4000)
+                    .HasColumnType("nvarchar(4000)");
+
+                b.Property<string>("Reasons")
+                    .IsRequired()
+                    .HasMaxLength(1000)
+                    .HasColumnType("nvarchar(1000)");
+
+                b.Property<Guid?>("ResultPersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("SourceExcerpt")
+                    .HasMaxLength(1000)
+                    .HasColumnType("nvarchar(1000)");
+
+                b.Property<int>("Status")
+                    .HasColumnType("int");
+
+                b.Property<Guid?>("TargetPersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("Title")
+                    .IsRequired()
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "CaptureId");
+
+                b.HasIndex("ChurchId", "OwnerUserId", "Status");
+
+                b.ToTable("PocProposals");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocSensitiveNote", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("CaptureId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("Categories")
+                    .IsRequired()
+                    .HasMaxLength(200)
+                    .HasColumnType("nvarchar(200)");
+
+                b.Property<DateTimeOffset>("CreatedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("CreatedByUserId")
+                    .IsRequired()
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.Property<string>("OriginalText")
+                    .IsRequired()
+                    .HasMaxLength(4000)
+                    .HasColumnType("nvarchar(4000)");
+
+                b.Property<DateTimeOffset?>("ReviewedAt")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<string>("ReviewedByUserId")
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "CaptureId");
+
+                b.ToTable("PocSensitiveNotes");
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocTouchpoint", b =>
+            {
+                b.Property<Guid>("ChurchId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<Guid>("Id")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<bool>("AiDrafted")
+                    .HasColumnType("bit");
+
+                b.Property<DateTimeOffset>("At")
+                    .HasColumnType("datetimeoffset");
+
+                b.Property<int>("Kind")
+                    .HasColumnType("int");
+
+                b.Property<string>("Note")
+                    .HasMaxLength(500)
+                    .HasColumnType("nvarchar(500)");
+
+                b.Property<Guid>("PersonId")
+                    .HasColumnType("uniqueidentifier");
+
+                b.Property<string>("UserId")
+                    .IsRequired()
+                    .HasMaxLength(450)
+                    .HasColumnType("nvarchar(450)");
+
+                b.HasKey("ChurchId", "Id");
+
+                b.HasIndex("ChurchId", "PersonId", "At");
+
+                b.ToTable("PocTouchpoints");
+            });
+
         modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
             {
                 b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -977,6 +1273,88 @@ partial class ApplicationDbContextModelSnapshot : ModelSnapshot
                 b.HasOne("Sheaf.Data.Person", null)
                     .WithMany()
                     .HasForeignKey("ChurchId", "OtherPersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "PersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocAuditEntry", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocCapture", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocPersonProfile", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "GuardianPersonId")
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne("Sheaf.Data.Person", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "PersonId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocProposal", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Poc.PocCapture", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "CaptureId")
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocSensitiveNote", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.HasOne("Sheaf.Data.Poc.PocCapture", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId", "CaptureId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+            });
+
+        modelBuilder.Entity("Sheaf.Data.Poc.PocTouchpoint", b =>
+            {
+                b.HasOne("Sheaf.Data.Church", null)
+                    .WithMany()
+                    .HasForeignKey("ChurchId")
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired();
 

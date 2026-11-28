@@ -20,6 +20,7 @@ using Sheaf.Data;
 using Sheaf.Endpoints;
 using Sheaf.Integrations.PlanningCenter;
 using Sheaf.Middleware;
+using Sheaf.Poc;
 
 var builder = WebApplication.CreateBuilder(args);
 var isOpenApiGeneration = Assembly.GetEntryAssembly()?.GetName().Name == "GetDocument.Insider";
@@ -131,6 +132,7 @@ builder.Services.AddScoped<Sheaf.Services.IHouseholdService, Sheaf.Services.Hous
 builder.Services.AddScoped<Sheaf.Services.IAttendanceService, Sheaf.Services.AttendanceService>();
 builder.Services.AddScoped<Sheaf.Services.IPersonMergeService, Sheaf.Services.PersonMergeService>();
 builder.Services.AddPlanningCenter(builder.Configuration);
+builder.Services.AddPoc(builder.Configuration);
 
 var authBuilder = builder.Services.AddAuthentication(options =>
 {
@@ -208,6 +210,12 @@ app.MapAuthEndpoints();
 app.MapTracker();
 app.MapChurchSettings();
 app.MapPlanningCenter();
+app.MapPoc();
+
+if (app.Environment.IsDevelopment() && !isOpenApiGeneration)
+{
+    await app.SeedDemoAsync();
+}
 
 app.Run();
 

@@ -107,6 +107,19 @@ else
     backend.WithEnvironment($"ConnectionStrings__{ConnectionStrings.DatabaseKey}", db);
 }
 
+// POC: Claude is optional. Set the key with
+//   dotnet user-secrets set "Parameters:anthropic-api-key" "<key>" --project Sheaf.AppHost
+// (or an ANTHROPIC_API_KEY environment variable). Without it the backend uses canned AI responses.
+string? anthropicKeyValue = builder.Configuration["Parameters:anthropic-api-key"]
+    ?? builder.Configuration["ANTHROPIC_API_KEY"];
+if (!string.IsNullOrWhiteSpace(anthropicKeyValue))
+{
+    var anthropicKey = builder.Configuration["Parameters:anthropic-api-key"] is { Length: > 0 }
+        ? builder.AddParameter("anthropic-api-key", secret: true)
+        : builder.AddParameter("anthropic-api-key", anthropicKeyValue, secret: true);
+    backend.WithEnvironment("ANTHROPIC_API_KEY", anthropicKey);
+}
+
 backend.WithHttpEndpoint(port: 5285, targetPort: 5285, name: "http", env: "ASPNETCORE_HTTP_PORTS", isProxied: false);
 backend.WithHttpHealthCheck("/alive");
 

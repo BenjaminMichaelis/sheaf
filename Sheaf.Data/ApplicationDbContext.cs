@@ -49,6 +49,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
 
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
+    public DbSet<Poc.PocPersonProfile> PocPersonProfiles => Set<Poc.PocPersonProfile>();
+    public DbSet<Poc.PocTouchpoint> PocTouchpoints => Set<Poc.PocTouchpoint>();
+    public DbSet<Poc.PocCapture> PocCaptures => Set<Poc.PocCapture>();
+    public DbSet<Poc.PocSensitiveNote> PocSensitiveNotes => Set<Poc.PocSensitiveNote>();
+    public DbSet<Poc.PocProposal> PocProposals => Set<Poc.PocProposal>();
+    public DbSet<Poc.PocAuditEntry> PocAuditEntries => Set<Poc.PocAuditEntry>();
+
     public Guid ChurchIdOrThrow => _currentChurch.ChurchId
         ?? throw new InvalidOperationException("A church tenant is required for this query.");
 
@@ -193,6 +200,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
             entity.HasOne<Church>().WithMany().HasForeignKey(link => link.ChurchId)
                 .OnDelete(DeleteBehavior.Restrict).IsRequired();
         });
+        Poc.PocModel.Configure(builder);
 
         if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
