@@ -212,6 +212,8 @@ describe('Meeting', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Correct attendance' }))
     expect(screen.getByRole('heading', { name: 'Correct attendance' })).toHaveFocus()
+    // The editor's sections sit under its heading in the outline.
+    expect(screen.getByRole('heading', { level: 3, name: 'Marked on this meeting' })).toBeInTheDocument()
     await user.click(screen.getByRole('checkbox', { name: 'Lena Leader' }))
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
