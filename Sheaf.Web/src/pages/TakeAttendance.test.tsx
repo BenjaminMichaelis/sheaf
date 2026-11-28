@@ -231,6 +231,23 @@ describe('TakeAttendance', () => {
     expect(saved.map(request => request.confirm)).toEqual([false, true])
   })
 
+  it('TakeAttendance_SaveAnywayInFlight_SendsOnlyOneConfirmedRequest', async () => {
+    const { saved } = mockAttendanceApi({
+      save: (_, attempt) => (attempt === 1 ? confirmation({ existingSessionIds: ['s0'] }) : new Promise<Response>(() => {})),
+    })
+
+    const { user } = renderAttendance()
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Max Member' }))
+    await user.click(await saveButton())
+    const dialog = await screen.findByRole('dialog', { name: 'Check before saving' })
+    await user.click(within(dialog).getByRole('button', { name: 'Save anyway' }))
+
+    // The dialog closes on Save anyway, so the page's own Save button must refuse a second press while it is sent.
+    expect(await saveButton()).toBeDisabled()
+    expect(saved.map(request => request.confirm)).toEqual([false, true])
+  })
+
   it('TakeAttendance_DateChangedToOneWithoutThem_DoesNotSaveRosterTicksNoLongerShown', async () => {
     const today = churchDateOf(new Date(), TIME_ZONE)
     const { saved } = mockAttendanceApi({ roster: occurredOn => (occurredOn === today ? [lena, max] : []) })

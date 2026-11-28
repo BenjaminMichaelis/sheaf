@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, ListItemIcon, Menu, MenuItem, Typography } from '@mui/material'
 import { Check, ExpandMore } from '@mui/icons-material'
@@ -12,6 +12,7 @@ export default function ChurchSwitcher() {
   const { enqueueSnackbar } = useSnackbar()
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const [switching, setSwitching] = useState(false)
+  const menuId = useId()
 
   if (church === null) return null
 
@@ -46,9 +47,12 @@ export default function ChurchSwitcher() {
         color="inherit"
         endIcon={<ExpandMore />}
         onClick={event => setAnchor(event.currentTarget)}
-        disabled={switching}
+        // The spinner takes the arrow's place rather than covering the church name.
+        loading={switching}
+        loadingPosition="end"
         aria-haspopup="menu"
-        aria-expanded={anchor !== null}
+        aria-controls={anchor ? menuId : undefined}
+        aria-expanded={anchor ? 'true' : undefined}
         aria-label={`${church.churchName}, switch church`}
         sx={{ textTransform: 'none', minWidth: 0 }}
       >
@@ -56,10 +60,12 @@ export default function ChurchSwitcher() {
           {church.churchName}
         </Typography>
       </Button>
-      <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
+      <Menu slotProps={{ list: { id: menuId } }} anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
         {churches.map(option => (
+          // menuitemradio makes MUI announce the current church as checked.
           <MenuItem
             key={option.churchId}
+            role="menuitemradio"
             selected={option.churchId === church.churchId}
             onClick={() => void select(option.churchId)}
           >

@@ -12,8 +12,9 @@ export default function ChurchConflictDialog({ reload = () => window.location.re
   useEffect(() => onChurchConflict(() => setOpen(true)), [])
 
   return (
-    <Dialog open={open} onClose={() => setOpen(false)} aria-labelledby="church-conflict-title">
-      <DialogTitle id="church-conflict-title">Your church changed</DialogTitle>
+    // MUI names the dialog by its DialogTitle.
+    <Dialog open={open} onClose={() => setOpen(false)}>
+      <DialogTitle>Your church changed</DialogTitle>
       <DialogContent>
         <DialogContentText>
           This page was opened for a different church than the one you now have selected, perhaps in another tab.

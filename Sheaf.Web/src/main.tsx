@@ -6,7 +6,6 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import App from './App.tsx'
 import { createQueryClient } from './services/queryClient'
 import { initTelemetry } from './services/telemetry'
-import './index.css'
 
 initTelemetry()
 

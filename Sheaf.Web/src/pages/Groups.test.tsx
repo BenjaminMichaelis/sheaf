@@ -226,7 +226,7 @@ describe('Groups', () => {
     expect(await screen.findByText('First church village')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Church 1, switch church' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Church 2' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Church 2' }))
     await user.click(await screen.findByRole('button', { name: 'Open navigation' }))
     await user.click(await screen.findByRole('link', { name: 'Circles' }))
 

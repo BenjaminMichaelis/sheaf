@@ -297,11 +297,12 @@ function MeetingForm({ churchId, group, timeZoneId }: { churchId: string; group:
         {saveError && <Alert severity="error">{saveError}</Alert>}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {/* Disabled while saving so a meeting is never submitted twice. */}
+          {/* `loading` also disables it, so a meeting is never submitted twice. */}
           <Button
             variant="contained"
             onClick={() => save.mutate({ confirm: false, people: newPeople })}
-            disabled={save.isPending || !dateIsValid || !rosterReady || attendeeCount === 0}
+            loading={save.isPending}
+            disabled={!dateIsValid || !rosterReady || attendeeCount === 0}
           >
             Save attendance
           </Button>

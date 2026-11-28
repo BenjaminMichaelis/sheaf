@@ -79,10 +79,10 @@ export default function Register() {
             fullWidth
             size="large"
             sx={{ mt: 3 }}
-            disabled={loading}
+            loading={loading}
             data-testid="register-button"
           >
-            {loading ? 'Registering...' : 'Register'}
+            Register
           </Button>
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="body2">

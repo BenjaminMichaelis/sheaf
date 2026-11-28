@@ -52,7 +52,7 @@ describe('Layout', () => {
 
     const { user } = renderLayout()
     await user.click(await screen.findByRole('button', { name: 'Church 1, switch church' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Church 2' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Church 2' }))
 
     expect(await screen.findByRole('button', { name: 'Church 2, switch church' })).toBeInTheDocument()
 
@@ -61,6 +61,33 @@ describe('Layout', () => {
       .find(request => request.method === 'POST')
 
     expect(new URL(switchRequest?.url ?? 'http://x').pathname).toBe(`/api/auth/church/${SECOND_CHURCH}`)
+  })
+
+  it('Layout_SwitchChurchInFlight_DisablesSwitcher', async () => {
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser('Leader', [FIRST_CHURCH, SECOND_CHURCH])),
+      'GET /api/church/settings': () => json(villageSettings),
+      [`POST /api/auth/church/${SECOND_CHURCH}`]: () => new Promise<Response>(() => {}),
+    })
+
+    const { user } = renderLayout()
+    await user.click(await screen.findByRole('button', { name: 'Church 1, switch church' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Church 2' }))
+
+    expect(screen.getByRole('button', { name: 'Church 1, switch church' })).toBeDisabled()
+  })
+
+  it('Layout_OpenChurchMenu_MarksOnlyCurrentChurchChecked', async () => {
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser('Leader', [FIRST_CHURCH, SECOND_CHURCH])),
+      'GET /api/church/settings': () => json(villageSettings),
+    })
+
+    const { user } = renderLayout()
+    await user.click(await screen.findByRole('button', { name: 'Church 1, switch church' }))
+
+    expect(screen.getByRole('menuitemradio', { name: 'Church 1' })).toBeChecked()
+    expect(screen.getByRole('menuitemradio', { name: 'Church 2' })).not.toBeChecked()
   })
 
   it('Layout_DesktopWidth_ShowsNavigationWithoutMenuButton', async () => {

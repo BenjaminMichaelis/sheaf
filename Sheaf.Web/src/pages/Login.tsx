@@ -61,10 +61,10 @@ export default function Login() {
             fullWidth
             size="large"
             sx={{ mt: 3 }}
-            disabled={loading}
+            loading={loading}
             data-testid="login-button"
           >
-            {loading ? 'Logging in...' : 'Login'}
+            Login
           </Button>
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="body2">

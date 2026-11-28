@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Alert, Box, Button, Chip, List, ListItem, ListItemText, Paper, Typography } from '@mui/material'
 import { Loading, RetryButton } from '@/components/Feedback'
@@ -149,8 +148,7 @@ function GroupList({ groups, phase, canRecord = false, timeZoneId, label, labell
             {phase === 'ended' && <Chip label="Ended" size="small" />}
             {canRecord && (
               <Button
-                component={RouterLink}
-                to={`/groups/${group.id}/attendance`}
+                href={`/groups/${group.id}/attendance`}
                 size="small"
                 sx={{ ml: 1, flexShrink: 0 }}
                 aria-label={`Take attendance for ${group.name}`}
