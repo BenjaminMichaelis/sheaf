@@ -1,4 +1,5 @@
 import { infiniteQueryOptions, queryOptions, skipToken, type QueryKey } from '@tanstack/react-query'
+import type { components } from '@/api/schema'
 import { apiClient, churchHeaders } from './apiClient'
 
 const GROUPS_PAGE_SIZE = 50
@@ -44,4 +45,74 @@ export function groupsQuery(churchId: string) {
     initialPageParam: 0,
     getNextPageParam: lastPage => lastPage.nextOffset,
   })
+}
+
+export function groupQuery(churchId: string, groupId: string) {
+  return queryOptions({
+    queryKey: ['church', churchId, 'groups', groupId],
+    queryFn: async ({ signal }) => {
+      const { data } = await apiClient.GET('/api/church/groups/{id}', {
+        params: { path: { id: groupId } },
+        headers: churchHeaders(churchId),
+        signal,
+      })
+
+      if (!data) throw new Error('Group response is empty.')
+
+      return data
+    },
+  })
+}
+
+/** The active people on the group's roster on `occurredOn` (YYYY-MM-DD in the church's zone), by name. */
+export function rosterQuery(churchId: string, groupId: string, occurredOn: string) {
+  return queryOptions({
+    queryKey: ['church', churchId, 'groups', groupId, 'roster', occurredOn],
+    queryFn: async ({ signal }) => {
+      const { data } = await apiClient.GET('/api/church/groups/{groupId}/roster', {
+        params: { path: { groupId }, query: { occurredOn } },
+        headers: churchHeaders(churchId),
+        signal,
+      })
+
+      return data ?? []
+    },
+  })
+}
+
+/** The minimum name length the lookup API searches for. */
+export const LOOKUP_MIN_LENGTH = 2
+
+/** Active people whose name matches `name`; nothing is requested for a shorter name than the API searches for. */
+export function peopleLookupQuery(churchId: string, name: string) {
+  return queryOptions({
+    queryKey: ['church', churchId, 'people', 'lookup', name],
+    queryFn:
+      name.length < LOOKUP_MIN_LENGTH
+        ? skipToken
+        : async ({ signal }) => {
+            const { data } = await apiClient.GET('/api/church/people/lookup', {
+              params: { query: { name } },
+              headers: churchHeaders(churchId),
+              signal,
+            })
+
+            return data ?? []
+          },
+  })
+}
+
+type SessionRequest = components['schemas']['SessionRequest']
+
+/** Records a meeting and who came, creating new people in the same save. */
+export async function recordMeeting(churchId: string, groupId: string, request: SessionRequest) {
+  const { data } = await apiClient.POST('/api/church/groups/{groupId}/sessions', {
+    params: { path: { groupId } },
+    headers: churchHeaders(churchId),
+    body: request,
+  })
+
+  if (!data) throw new Error('Meeting response is empty.')
+
+  return data
 }
