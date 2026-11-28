@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   UserInfo,
   LoginRequest,
@@ -30,6 +30,8 @@ interface AuthContextType {
   updateProfile: (request: UpdateProfileRequest) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
+  /** Selects another of the account's churches; the API re-issues the session for it. */
+  switchChurch: (churchId: string) => Promise<void>
 }
 
 const PENDING_VERIFICATION_LIFETIME_MS = 10 * 60 * 1000
@@ -41,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [pendingVerification, setPendingVerification] = useState<PendingVerification | null>(null)
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const { data } = await apiClient.GET('/api/auth/user')
 
@@ -55,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   // Codes expire after about 10 minutes, so there is no reason to hold the password longer than that.
   useEffect(() => {
@@ -89,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = async (credentials: LoginRequest) => {
+  const login = useCallback(async (credentials: LoginRequest) => {
     try {
       const { data } = await apiClient.POST('/api/auth/login', { body: credentials })
 
@@ -106,15 +108,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       throw error
     }
-  }
+  }, [])
 
-  const register = async (data: RegisterRequest) => {
+  const register = useCallback(async (data: RegisterRequest) => {
     await apiClient.POST('/api/auth/register', { body: data })
 
     setPendingVerification({ email: data.email, password: data.password })
-  }
+  }, [])
 
-  const confirmEmail = async (request: ConfirmEmailRequest) => {
+  const confirmEmail = useCallback(async (request: ConfirmEmailRequest) => {
     const { data } = await apiClient.POST('/api/auth/confirm-email', { body: request })
 
     if (data === undefined) {
@@ -123,9 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setPendingVerification(null)
     setUser(data)
-  }
+  }, [])
 
-  const confirmEmailChange = async (request: ConfirmEmailChangeRequest) => {
+  const confirmEmailChange = useCallback(async (request: ConfirmEmailChangeRequest) => {
     const { data } = await apiClient.POST('/api/auth/email/confirm', { body: request })
 
     if (data === undefined) {
@@ -133,9 +135,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(data)
-  }
+  }, [])
 
-  const updateProfile = async (request: UpdateProfileRequest) => {
+  const updateProfile = useCallback(async (request: UpdateProfileRequest) => {
     const { data } = await apiClient.PUT('/api/auth/profile', { body: request })
 
     if (data === undefined) {
@@ -143,40 +145,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(data)
-  }
+  }, [])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     setPendingVerification(null)
     await apiClient.POST('/api/auth/logout')
 
     setUser(null)
-  }
+  }, [])
 
-  const clearPendingVerification = () => setPendingVerification(null)
+  const switchChurch = useCallback(async (churchId: string) => {
+    const { data } = await apiClient.POST('/api/auth/church/{churchId}', { params: { path: { churchId } } })
+
+    if (data === undefined) {
+      throw new Error('Church switch response is empty')
+    }
+
+    setUser(data)
+  }, [])
+
+  const clearPendingVerification = useCallback(() => setPendingVerification(null), [])
 
   // A new object restarts the expiry effect above.
-  const renewPendingVerification = () => setPendingVerification((pending) => (pending === null ? null : { ...pending }))
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        pendingVerification,
-        login,
-        register,
-        confirmEmail,
-        clearPendingVerification,
-        renewPendingVerification,
-        confirmEmailChange,
-        updateProfile,
-        logout,
-        refreshUser,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const renewPendingVerification = useCallback(
+    () => setPendingVerification((pending) => (pending === null ? null : { ...pending })),
+    [],
   )
+
+  // Stable functions and a memoized value, so consumers re-render only when the user or loading state changes
+  // (react.dev/reference/react/useContext#optimizing-re-renders-when-passing-objects-and-functions).
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      pendingVerification,
+      login,
+      register,
+      confirmEmail,
+      clearPendingVerification,
+      renewPendingVerification,
+      confirmEmailChange,
+      updateProfile,
+      logout,
+      refreshUser,
+      switchChurch,
+    }),
+    [
+      user,
+      loading,
+      pendingVerification,
+      login,
+      register,
+      confirmEmail,
+      clearPendingVerification,
+      renewPendingVerification,
+      confirmEmailChange,
+      updateProfile,
+      logout,
+      refreshUser,
+      switchChurch,
+    ],
+  )
+
+  return <AuthContext value={value}>{children}</AuthContext>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

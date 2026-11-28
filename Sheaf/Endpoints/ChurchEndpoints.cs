@@ -58,15 +58,18 @@ internal sealed class ChurchHeaderEndpointFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         HttpContext http = context.HttpContext;
-        if (HttpMethods.IsGet(http.Request.Method)
+        StringValues values = http.Request.Headers[ChurchHeader];
+        // Writes must name the church. Reads may omit it, but a read that names a church must match the selection,
+        // so a stale tab cannot show one church's data under another (the web app sends it on every church request).
+        bool safe = HttpMethods.IsGet(http.Request.Method)
             || HttpMethods.IsHead(http.Request.Method)
             || HttpMethods.IsOptions(http.Request.Method)
-            || HttpMethods.IsTrace(http.Request.Method))
+            || HttpMethods.IsTrace(http.Request.Method);
+        if (safe && values.Count == 0)
         {
             return await next(context);
         }
 
-        StringValues values = http.Request.Headers[ChurchHeader];
         return values.Count == 1
             && values[0] is { Length: 36 } value
             && Guid.TryParseExact(value, "D", out Guid headerChurchId)

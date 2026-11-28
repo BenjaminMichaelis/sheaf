@@ -2,17 +2,19 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { CssBaseline } from '@mui/material'
 import { SnackbarProvider } from 'notistack'
 import { AuthProvider } from './contexts/AuthContext'
+import { ChurchProvider } from './contexts/ChurchContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
 
 // Pages
+import Groups from './pages/Groups'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import Account from './pages/Account'
-import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
   return (
@@ -20,17 +22,34 @@ function App() {
       <CssBaseline />
       <SnackbarProvider maxSnack={3}>
         <AuthProvider>
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Home />} />
-              <Route path="login" element={<Login />} />
-              <Route path="register" element={<Register />} />
-              <Route path="verify-email" element={<VerifyEmail />} />
-              <Route path="forgot-password" element={<ForgotPassword />} />
-              <Route path="account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
+          <ChurchProvider>
+            <Routes>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Home />} />
+                <Route path="login" element={<Login />} />
+                <Route path="register" element={<Register />} />
+                <Route path="verify-email" element={<VerifyEmail />} />
+                <Route path="forgot-password" element={<ForgotPassword />} />
+                <Route
+                  path="account"
+                  element={
+                    <ProtectedRoute>
+                      <Account />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="groups"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <Groups />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </ChurchProvider>
         </AuthProvider>
       </SnackbarProvider>
     </ThemeProvider>
