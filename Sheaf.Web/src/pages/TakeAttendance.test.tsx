@@ -21,7 +21,17 @@ const village = { id: 'g1', name: 'Tuesday village', startsAt: '2025-01-01T12:00
 const lena = { id: 'p-lena', name: 'Lena Leader' }
 const max = { id: 'p-max', name: 'Max Member' }
 const zoe: PersonMatch = { id: 'p-zoe', name: 'Zoe Visitor', householdLabel: 'Visitor household', groups: null }
-const savedMeeting = { id: 's1', groupId: 'g1', occurredOn: '2026-11-27', description: null, attendees: [], absent: [], version: 'v' }
+
+const savedMeeting: components['schemas']['SessionResponse'] = {
+  id: 's1',
+  groupId: 'g1',
+  occurredOn: '2026-11-27',
+  description: null,
+  attendees: [],
+  absent: [],
+  canEdit: true,
+  version: 'v',
+}
 
 const problem = (status: number, body: ProblemBody) =>
   new Response(JSON.stringify({ status, ...body }), { status, headers: { 'content-type': 'application/problem+json' } })
@@ -74,7 +84,7 @@ function renderAttendance() {
   return renderApp(
     <Routes>
       <Route path="/groups/:groupId/attendance" element={<TakeAttendance />} />
-      <Route path="/groups" element={<p>Groups page</p>} />
+      <Route path="/groups/:groupId" element={<p>Group page</p>} />
     </Routes>,
     '/groups/g1/attendance',
   )
@@ -92,7 +102,7 @@ async function createOption() {
 }
 
 describe('TakeAttendance', () => {
-  it('TakeAttendance_TickRosterAndSave_RecordsChurchDateAndReturnsToGroups', async () => {
+  it('TakeAttendance_TickRosterAndSave_RecordsChurchDateAndOpensTheGroup', async () => {
     // 03:00 UTC on March 1 is still February 28 in Chicago, so a meeting recorded then belongs to February 28.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-03-01T03:00:00Z'))
@@ -108,7 +118,7 @@ describe('TakeAttendance', () => {
       await user.type(screen.getByLabelText('Description (optional)'), 'Potluck')
       await user.click(await saveButton())
 
-      expect(await screen.findByText('Groups page')).toBeInTheDocument()
+      expect(await screen.findByText('Group page')).toBeInTheDocument()
       expect(screen.getByText('Attendance saved.')).toBeInTheDocument()
       expect(saved).toHaveLength(1)
       expect(saved[0]).toMatchObject({ occurredOn: '2026-02-28', personIds: [lena.id], confirm: false, description: 'Potluck' })
@@ -132,7 +142,7 @@ describe('TakeAttendance', () => {
     expect(within(screen.getByRole('list', { name: 'Also came' })).getByText('Zoe Visitor')).toBeInTheDocument()
     await user.click(await saveButton())
 
-    expect(await screen.findByText('Groups page')).toBeInTheDocument()
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
     expect(saved[0]?.personIds).toEqual([zoe.id])
   })
 
@@ -165,7 +175,7 @@ describe('TakeAttendance', () => {
     await user.keyboard('{Enter}')
 
     expect(saved).toEqual([])
-    expect(screen.queryByText('Groups page')).not.toBeInTheDocument()
+    expect(screen.queryByText('Group page')).not.toBeInTheDocument()
   })
 
   it('TakeAttendance_SearchFails_SaysSoInsteadOfOnlyOfferingToCreate', async () => {
@@ -189,7 +199,7 @@ describe('TakeAttendance', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Add' }))
     await user.click(await saveButton())
 
-    expect(await screen.findByText('Groups page')).toBeInTheDocument()
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
     expect(saved[0]?.newPeople).toEqual([{ firstName: 'Mary Ann', lastName: 'Smith', email: null, phone: '555-0100' }])
   })
 
@@ -211,7 +221,7 @@ describe('TakeAttendance', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Use this person: Zoe Visitor' }))
     await user.click(await saveButton())
 
-    expect(await screen.findByText('Groups page')).toBeInTheDocument()
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
     expect(saved[1]).toMatchObject({ personIds: [zoe.id], newPeople: [], confirm: false })
   })
 
@@ -228,7 +238,7 @@ describe('TakeAttendance', () => {
     expect(within(dialog).getByText(/only if the village met twice/)).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Save anyway' }))
 
-    expect(await screen.findByText('Groups page')).toBeInTheDocument()
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
     expect(saved.map(request => request.confirm)).toEqual([false, true])
   })
 
@@ -246,7 +256,7 @@ describe('TakeAttendance', () => {
     await user.click(await screen.findByRole('option', { name: /^Zoe Visitor/ }))
     await user.click(await saveButton())
 
-    expect(await screen.findByText('Groups page')).toBeInTheDocument()
+    expect(await screen.findByText('Group page')).toBeInTheDocument()
     expect(saved[0]).toMatchObject({ occurredOn: '2025-06-01', personIds: [zoe.id] })
   })
 

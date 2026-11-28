@@ -116,3 +116,64 @@ export async function recordMeeting(churchId: string, groupId: string, request: 
 
   return data
 }
+
+const MEETINGS_PAGE_SIZE = 50
+
+/** The prefix shared by everything cached about one group's meetings, so a save can refresh all of it at once. */
+export function meetingsKey(churchId: string, groupId: string) {
+  return ['church', churchId, 'groups', groupId, 'meetings'] as const
+}
+
+/** A group's meetings, newest first, with how many came; one page at a time. */
+export function meetingsQuery(churchId: string, groupId: string) {
+  return infiniteQueryOptions({
+    queryKey: [...meetingsKey(churchId, groupId), 'list'],
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await apiClient.GET('/api/church/groups/{groupId}/sessions', {
+        params: { path: { groupId }, query: { offset: pageParam, limit: MEETINGS_PAGE_SIZE } },
+        headers: churchHeaders(churchId),
+        signal,
+      })
+
+      return { items: data?.items ?? [], nextOffset: data?.nextOffset == null ? null : Number(data.nextOffset) }
+    },
+    initialPageParam: 0,
+    getNextPageParam: lastPage => lastPage.nextOffset,
+  })
+}
+
+/** One meeting: who came, who on the roster did not, and whether the user may still correct it. */
+export function meetingQuery(churchId: string, groupId: string, sessionId: string) {
+  return queryOptions({
+    queryKey: [...meetingsKey(churchId, groupId), sessionId],
+    queryFn: async ({ signal }) => {
+      const { data } = await apiClient.GET('/api/church/groups/{groupId}/sessions/{sessionId}', {
+        params: { path: { groupId, sessionId } },
+        headers: churchHeaders(churchId),
+        signal,
+      })
+
+      if (!data) throw new Error('Meeting response is empty.')
+
+      return data
+    },
+  })
+}
+
+type AttendeesRequest = components['schemas']['AttendeesRequest']
+
+/**
+ * Replaces who came to a meeting and its description. `version` is the meeting as the user last saw it: if someone
+ * changed it since, the API refuses with 412 rather than overwrite their change.
+ */
+export async function correctMeeting(churchId: string, groupId: string, sessionId: string, version: string, request: AttendeesRequest) {
+  const { data } = await apiClient.PUT('/api/church/groups/{groupId}/sessions/{sessionId}', {
+    params: { path: { groupId, sessionId }, header: { 'If-Match': `"${version}"` } },
+    headers: churchHeaders(churchId),
+    body: request,
+  })
+
+  if (!data) throw new Error('Meeting response is empty.')
+
+  return data
+}
