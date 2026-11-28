@@ -228,6 +228,31 @@ public class AttendanceTests : ChurchApiTestBase
     }
 
     [Test]
+    [Arguments(ChurchMembershipRole.Leader, 7, true)]
+    [Arguments(ChurchMembershipRole.Leader, 8, false)]
+    [Arguments(ChurchMembershipRole.Staff, 30, true)]
+    public async Task GetGroupSession_DaysAfterRecording_SaysWhetherCallerCanStillCorrectIt(ChurchMembershipRole role, int daysAgo, bool expected)
+    {
+        // The same rule as changing the meeting, so the screen offers a correction exactly when the API would accept one.
+        using var f = await SeedGroupAsync(role, callerLeads: role == ChurchMembershipRole.Leader);
+        var session = await AddSessionAsync(f, Today.AddDays(-60), Time.GetUtcNow().AddDays(-daysAgo), f.Member.Id);
+
+        using var response = await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/sessions/{session.Id}");
+
+        await Assert.That((await TrackerReadAsync<SessionResponse>(response)).CanEdit).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task RecordGroupSession_JustRecorded_CanCorrectIt()
+    {
+        using var f = await SeedGroupAsync();
+
+        using var response = await SendAsync(f, HttpMethod.Post, $"/groups/{f.Group.Id}/sessions", new SessionRequest(Today, [f.Member.Id]));
+
+        await Assert.That((await TrackerReadAsync<SessionResponse>(response, HttpStatusCode.Created)).CanEdit).IsTrue();
+    }
+
+    [Test]
     [Arguments(90, HttpStatusCode.OK)]
     [Arguments(91, HttpStatusCode.NotFound)]
     public async Task GetPerson_AttendedLeadersGroupDaysAgo_VisibleOnlyWithinNinetyDays(int daysAgo, HttpStatusCode expected)
