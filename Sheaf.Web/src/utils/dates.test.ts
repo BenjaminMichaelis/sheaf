@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { churchDateOf, formatChurchDate } from './dates'
+import { churchDateOf, formatChurchDate, formatDate } from './dates'
 
 describe('formatChurchDate', () => {
   it('formatChurchDate_InstantAfterMidnightInChurchZone_ShowsChurchCalendarDate', () => {
@@ -19,5 +19,11 @@ describe('churchDateOf', () => {
   it('churchDateOf_InstantAfterMidnightInChurchZone_ReturnsChurchCalendarDate', () => {
     expect(churchDateOf('2026-03-01T06:30:00Z', 'America/Chicago')).toBe('2026-03-01')
     expect(churchDateOf('2026-03-01T06:30:00Z', 'America/Los_Angeles')).toBe('2026-02-28')
+  })
+})
+
+describe('formatDate', () => {
+  it('formatDate_CalendarDate_ShowsThatDateWhateverTheBrowserZone', () => {
+    expect(formatDate('2026-03-01')).toBe(new Date(Date.UTC(2026, 2, 1, 12)).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' }))
   })
 })

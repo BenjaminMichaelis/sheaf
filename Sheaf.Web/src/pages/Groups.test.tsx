@@ -51,7 +51,7 @@ describe('Groups', () => {
 
     expect(await screen.findByRole('heading', { name: 'Villages' })).toBeInTheDocument()
     const currentList = await screen.findByRole('list', { name: 'Current Villages' })
-    expect(within(currentList).getByText('Tuesday village')).toBeInTheDocument()
+    expect(within(currentList).getByRole('link', { name: 'Tuesday village' })).toHaveAttribute('href', '/groups/g1')
     expect(within(currentList).queryByText('Autumn village')).not.toBeInTheDocument()
     const upcomingList = screen.getByRole('list', { name: 'Upcoming' })
     expect(within(upcomingList).getByText('Autumn village')).toBeInTheDocument()
@@ -269,10 +269,11 @@ describe('Groups', () => {
     expect(screen.queryByText('Earlier village')).not.toBeInTheDocument()
   })
 
-  it.each([
-    { role: 'Leader' as const, endedOffered: false },
-    { role: 'Staff' as const, endedOffered: true },
-  ])('Groups_$role_OffersAttendanceForCurrentGroupsAndForEndedOnlyToStaff', async ({ role, endedOffered }) => {
+  // %s, not $role: Vitest would read "$role_Offers…" as one property name and print "undefined".
+  it.each<['Leader' | 'Staff', boolean]>([
+    ['Leader', false],
+    ['Staff', true],
+  ])('Groups_%s_OffersAttendanceForCurrentGroupsAndForEndedOnlyToStaff', async (role, endedOffered) => {
     mockApi({
       'GET /api/auth/user': () => json(signedInUser(role)),
       'GET /api/church/settings': () => json(villageSettings),

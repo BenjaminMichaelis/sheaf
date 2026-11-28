@@ -11,6 +11,9 @@ import Groups from './pages/Groups'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import GroupMeetings from './pages/GroupMeetings'
+import Meeting from './pages/Meeting'
+import Person from './pages/Person'
 import TakeAttendance from './pages/TakeAttendance'
 
 function App() {
@@ -33,10 +36,34 @@ function App() {
                   }
                 />
                 <Route
+                  path="groups/:groupId"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <GroupMeetings />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="groups/:groupId/attendance"
                   element={
                     <ProtectedRoute requireChurch>
                       <TakeAttendance />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="groups/:groupId/meetings/:sessionId"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <Meeting />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="people/:personId"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <Person />
                     </ProtectedRoute>
                   }
                 />
