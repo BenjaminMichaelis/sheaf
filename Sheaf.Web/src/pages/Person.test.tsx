@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { components } from '@/api/schema'
 import { json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
-import { formatDate } from '@/utils/dates'
+import { formatChurchDate, formatDate } from '@/utils/dates'
 import Person from './Person'
 
 type PersonResponse = components['schemas']['PersonResponse']
@@ -14,7 +14,8 @@ type PersonGroup = components['schemas']['PersonGroupResponse']
 
 type PersonAttendance = components['schemas']['PersonAttendanceResponse']
 
-const settings = { name: 'Church 1', timeZoneId: 'America/Chicago', groupLabel: 'Village', groupLabelPlural: 'Villages' }
+const TIME_ZONE = 'America/Chicago'
+const settings = { name: 'Church 1', timeZoneId: TIME_ZONE, groupLabel: 'Village', groupLabelPlural: 'Villages' }
 
 const max = (changes: Partial<PersonResponse> = {}): PersonResponse => ({
   id: 'p-max',
@@ -109,9 +110,15 @@ describe('Person', () => {
     expect(screen.getByText('The Member Family: Mia')).toBeInTheDocument()
     // The church's own word, and current roles apart from past ones (UI-PPL-04).
     expect(screen.getByRole('heading', { name: 'Villages' })).toBeInTheDocument()
-    const current = await screen.findByRole('list', { name: 'Current Villages' })
+    const current = await screen.findByRole('list', { name: 'Current' })
     expect(within(current).getByRole('link', { name: /Tuesday village/ })).toHaveAttribute('href', '/groups/g1')
-    expect(within(screen.getByRole('list', { name: 'Past and upcoming' })).getByText(/Leader,/)).toBeInTheDocument()
+    expect(within(current).getByText(`Member, since ${formatChurchDate('2025-01-01T12:00:00Z', TIME_ZONE)}`)).toBeInTheDocument()
+    const past = screen.getByRole('list', { name: 'Past and upcoming' })
+    expect(
+      within(past).getByText(`Leader, ${formatChurchDate('2024-03-01T12:00:00Z', TIME_ZONE)} – ${formatChurchDate('2024-06-01T12:00:00Z', TIME_ZONE)}`),
+    ).toBeInTheDocument()
+    expect(within(past).queryByText('Tuesday village')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('term').map(term => term.textContent)).toEqual(['Email', 'Phone', 'Household'])
     const meetings = await screen.findByRole('list', { name: 'Attendance' })
     expect(within(meetings).getByRole('link', { name: `${formatDate('2026-11-24')}, Tuesday village` })).toHaveAttribute('href', '/groups/g1/meetings/s1')
   })
@@ -162,7 +169,7 @@ describe('Person', () => {
     expect(screen.getByRole('button', { name: 'Edit details' })).toHaveFocus()
   })
 
-  it('Person_StaffMarksInactive_SendsIt', async () => {
+  it('Person_StaffMarksInactive_SendsIsActiveFalse', async () => {
     const { updates } = mockPersonApi({ role: 'Staff' })
     const { user } = renderPerson()
 
@@ -216,5 +223,109 @@ describe('Person', () => {
 
     expect(await screen.findByText('Invalid tracker input.')).toBeInTheDocument()
     expect(screen.getByLabelText(/^Name/)).toHaveValue('Max Member')
+  })
+
+  it('Person_MergedRecord_ShowsNoHistory', async () => {
+    const { historyRequests } = mockPersonApi({ role: 'Staff', reads: [max({ mergedIntoId: 'p-kept', isActive: false })] })
+    renderPerson()
+
+    expect(await screen.findByRole('link', { name: 'another person' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Attendance' })).not.toBeInTheDocument()
+    expect(historyRequests).toEqual([])
+  })
+
+  it('Person_EditOnlyContactsOfMultiWordName_KeepsTheNamePartsAsStored', async () => {
+    const anna = { name: 'Anna van der Berg', firstName: 'Anna', lastName: 'van der Berg' }
+    const { updates } = mockPersonApi({ reads: [max(anna)], update: () => json(max({ ...anna, version: 'v2' })) })
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.clear(screen.getByLabelText('Phone (optional)'))
+    await user.type(screen.getByLabelText('Phone (optional)'), '555-0123')
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+
+    expect(await screen.findByText('Details saved.')).toBeInTheDocument()
+    expect(updates[0]?.request).toMatchObject({ firstName: 'Anna', lastName: 'van der Berg', phone: '555-0123' })
+  })
+
+  it('Person_NameChangedToOneWord_SendsItAsFirstNameOnly', async () => {
+    const { updates } = mockPersonApi()
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.clear(screen.getByLabelText(/^Name/))
+    await user.type(screen.getByLabelText(/^Name/), 'Maxie')
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+
+    expect(await screen.findByText('Details saved.')).toBeInTheDocument()
+    expect(updates[0]?.request).toMatchObject({ firstName: 'Maxie', lastName: null })
+  })
+
+  it('Person_NameCleared_SaysANameIsNeededAndCannotSave', async () => {
+    mockPersonApi()
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.clear(screen.getByLabelText(/^Name/))
+
+    expect(screen.getByText('Enter a name.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save details' })).toBeDisabled()
+  })
+
+  it('Person_ReloadedAfterSomeoneElsesChange_SavesAgainstTheirVersion', async () => {
+    let attempts = 0
+
+    const { updates } = mockPersonApi({
+      reads: [max(), max({ phone: '555-0199', version: 'v2' })],
+      update: () => (++attempts === 1 ? problem(412, 'The resource changed since it was read.') : json(max({ version: 'v3' }))),
+    })
+
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+    await user.click(await screen.findByRole('button', { name: 'Reload' }))
+    await screen.findByDisplayValue('555-0199')
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+
+    expect(await screen.findByText('Details saved.')).toBeInTheDocument()
+    expect(updates.map(update => update.ifMatch)).toEqual(['"v1"', '"v2"'])
+  })
+
+  it('Person_ReloadedVersionCanNoLongerBeEdited_ClosesTheFormAndSaysSo', async () => {
+    mockPersonApi({ reads: [max(), max({ canEdit: false, version: 'v2' })], update: () => problem(412, 'The resource changed since it was read.') })
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+    await user.click(await screen.findByRole('button', { name: 'Reload' }))
+
+    expect(await screen.findByText('You can no longer edit these details.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveFocus())
+  })
+
+  it('Person_AccessLostWhileEditing_ClosesTheFormAndSaysSo', async () => {
+    mockPersonApi({ reads: [max(), () => problem(404, 'Resource not found.')], update: () => problem(404, 'Resource not found.') })
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.click(screen.getByRole('button', { name: 'Save details' }))
+
+    expect(await screen.findByText('You can no longer edit these details.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+  })
+
+  it('Person_Cancel_KeepsTheDetailsAsTheyWereAndReturnsFocus', async () => {
+    const { updates } = mockPersonApi()
+    const { user } = renderPerson()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit details' }))
+    await user.clear(screen.getByLabelText('Phone (optional)'))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.getByRole('link', { name: '555-0100' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit details' })).toHaveFocus()
+    expect(updates).toEqual([])
   })
 })

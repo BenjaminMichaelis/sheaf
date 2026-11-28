@@ -39,7 +39,8 @@ export default function Person() {
   const { church } = useChurch()
 
   // The route only renders this with a church selected.
-  return church ? <PersonPage churchId={church.churchId} personId={personId} /> : null
+  // Keyed by person, so moving from one person to another (a merged record's link) starts fresh.
+  return church ? <PersonPage key={personId} churchId={church.churchId} personId={personId} /> : null
 }
 
 function PersonPage({ churchId, personId }: { churchId: string; personId: string }) {
@@ -127,13 +128,15 @@ function PersonDetails({ person, editButton, onEdit }: PersonDetailsProps) {
           Email
         </Typography>
         <Typography component="dd" sx={{ m: 0 }}>
-          {person.email ? <Link href={`mailto:${person.email}`}>{person.email}</Link> : 'None'}
+          {/* Encoded, so an address the server never checked can't add mail headers to the link. */}
+          {person.email ? <Link href={`mailto:${encodeURIComponent(person.email).replace(/%40/g, '@')}`}>{person.email}</Link> : 'None'}
         </Typography>
         <Typography component="dt" color="text.secondary">
           Phone
         </Typography>
         <Typography component="dd" sx={{ m: 0 }}>
-          {person.phone ? <Link href={`tel:${person.phone}`}>{person.phone}</Link> : 'None'}
+          {/* A tel: link holds digits, a leading + and the visual separators RFC 3966 allows, so spaces are dropped. */}
+          {person.phone ? <Link href={`tel:${person.phone.replace(/[^\d+().-]/g, '')}`}>{person.phone}</Link> : 'None'}
         </Typography>
         <Typography component="dt" color="text.secondary">
           Household
@@ -184,10 +187,23 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
     heading.current?.focus()
   }, [])
 
+  // The name box shows the stored parts joined, so they are split again only when the name was changed: otherwise a
+  // first name of two words or a last name like "van der Berg" would be re-split on every save.
+  const nameChanged = name.trim() !== fullName(person)
+
+  // The user lost the right to edit while editing (no longer in their group, merged, or the role ended).
+  function closeAsNoLongerEditable() {
+    void queryClient.invalidateQueries({ queryKey: personKey(churchId, person.id) })
+    onDone()
+    enqueueSnackbar('You can no longer edit these details.', { variant: 'error' })
+  }
+
+  const lostAccess = (error: Error) => error instanceof ApiError && (error.status === 403 || error.status === 404)
+
   const save = useMutation({
     mutationFn: () =>
       updatePerson(churchId, person.id, person.version, {
-        ...splitName(name),
+        ...(nameChanged ? splitName(name) : { firstName: person.firstName, lastName: person.lastName }),
         email: email.trim() || null,
         phone: phone.trim() || null,
         // Left out for Leaders, so the API keeps the current value.
@@ -199,30 +215,46 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
 
       // The rest of the household's pages show this person's first name, so those are refreshed.
       for (const member of updated.householdMembers) void queryClient.invalidateQueries({ queryKey: personKey(churchId, member.id) })
+
+      // A new name also shows on meetings, rosters and search results.
+      if (updated.name !== person.name) {
+        void queryClient.invalidateQueries({ queryKey: ['church', churchId, 'groups'] })
+        void queryClient.invalidateQueries({ queryKey: ['church', churchId, 'people', 'lookup'] })
+      }
+
       enqueueSnackbar('Details saved.', { variant: 'success' })
+    },
+    onError: error => {
+      if (lostAccess(error)) closeAsNoLongerEditable()
     },
   })
 
   const reload = useMutation({
     mutationFn: () => queryClient.fetchQuery({ ...personQuery(churchId, person.id), staleTime: 0 }),
-    onSuccess: latest => {
-      if (latest.canEdit) return onReloaded(latest)
-
-      onDone()
-      enqueueSnackbar('You can no longer edit these details.', { variant: 'error' })
+    onSuccess: latest => (latest.canEdit ? onReloaded(latest) : closeAsNoLongerEditable()),
+    onError: error => {
+      if (lostAccess(error)) closeAsNoLongerEditable()
     },
   })
 
   // Someone saved a change since editing began; the API refuses rather than overwrite it.
   const changedElsewhere = save.error instanceof ApiError && save.error.status === 412
-  const saveError = save.error !== null && !save.isPending && !changedElsewhere ? save.error.message : null
+  const saveError = save.error !== null && !save.isPending && !changedElsewhere && !lostAccess(save.error) ? save.error.message : null
+  const nameMissing = !name.trim()
 
   return (
     <Stack spacing={2} sx={{ mt: 1 }}>
       <Typography ref={heading} tabIndex={-1} variant="h6" component="h2" sx={{ outline: 'none' }}>
         Edit details
       </Typography>
-      <TextField label="Name" value={name} onChange={event => setName(event.target.value)} required />
+      <TextField
+        label="Name"
+        value={name}
+        onChange={event => setName(event.target.value)}
+        required
+        error={nameMissing}
+        helperText={nameMissing ? 'Enter a name.' : undefined}
+      />
       <TextField label="Email (optional)" type="email" value={email} onChange={event => setEmail(event.target.value)} />
       <TextField label="Phone (optional)" type="tel" value={phone} onChange={event => setPhone(event.target.value)} />
       {managesPeople && (
@@ -245,7 +277,7 @@ function EditPerson({ churchId, person, onReloaded, onDone }: EditPersonProps) {
       {saveError && <Alert severity="error">{saveError}</Alert>}
 
       <Box sx={{ display: 'flex', gap: 2 }}>
-        <Button variant="contained" onClick={() => save.mutate()} disabled={save.isPending || changedElsewhere || !name.trim()}>
+        <Button variant="contained" onClick={() => save.mutate()} disabled={save.isPending || changedElsewhere || nameMissing}>
           Save details
         </Button>
         <Button onClick={onDone} disabled={save.isPending}>
@@ -275,7 +307,14 @@ function PersonGroups({ churchId, personId }: { churchId: string; personId: stri
       )}
       {groups.isPending && <Loading />}
       {groups.data?.length === 0 && <Typography color="text.secondary">Not in any {labels.many.toLowerCase()} you can see.</Typography>}
-      {current.length > 0 && <RoleList label={`Current ${labels.many}`} roles={current} timeZoneId={timeZoneId} />}
+      {current.length > 0 && (
+        <>
+          <Typography id="person-current-groups-heading" variant="subtitle1" component="h3" sx={{ mb: 1 }}>
+            Current
+          </Typography>
+          <RoleList labelledBy="person-current-groups-heading" roles={current} timeZoneId={timeZoneId} />
+        </>
+      )}
       {past.length > 0 && (
         <>
           <Typography id="person-past-groups-heading" variant="subtitle1" component="h3" sx={{ mt: 2, mb: 1 }}>
@@ -292,11 +331,11 @@ interface RoleListProps {
   roles: PersonGroup[]
   /** Dates are left out until the church's time zone is known. */
   timeZoneId: string | null
-  label?: string
-  labelledBy?: string
+  /** Id of the visible heading that names the list. */
+  labelledBy: string
 }
 
-function RoleList({ roles, timeZoneId, label, labelledBy }: RoleListProps) {
+function RoleList({ roles, timeZoneId, labelledBy }: RoleListProps) {
   const dates = (role: PersonGroup) => {
     if (timeZoneId === null) return role.role
     const date = (instant: string) => formatChurchDate(instant, timeZoneId)
@@ -307,7 +346,7 @@ function RoleList({ roles, timeZoneId, label, labelledBy }: RoleListProps) {
 
   return (
     <Paper variant="outlined">
-      <List disablePadding aria-label={label} aria-labelledby={labelledBy}>
+      <List disablePadding aria-labelledby={labelledBy}>
         {roles.map((role, index) => (
           <ListItem key={`${role.groupId}-${role.startsAt}`} disablePadding divider={index < roles.length - 1}>
             <ListItemButton href={`/groups/${role.groupId}`}>

@@ -73,8 +73,9 @@ describe('Meeting', () => {
     expect(await screen.findByRole('heading', { name: `Tuesday village, ${formatDate('2026-11-24')}` })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Back to Tuesday village' })).toHaveAttribute('href', '/groups/g1')
     expect(screen.getByText('Potluck')).toBeInTheDocument()
-    expect(within(screen.getByRole('list', { name: 'Came (1)' })).getByText('Lena Leader')).toBeInTheDocument()
-    expect(within(screen.getByRole('list', { name: 'Absent (1)' })).getByText('Max Member')).toBeInTheDocument()
+    // Each name opens that person's page.
+    expect(within(screen.getByRole('list', { name: 'Came (1)' })).getByRole('link', { name: 'Lena Leader' })).toHaveAttribute('href', '/people/p-lena')
+    expect(within(screen.getByRole('list', { name: 'Absent (1)' })).getByRole('link', { name: 'Max Member' })).toHaveAttribute('href', '/people/p-max')
   })
 
   it('Meeting_CannotBeCorrectedAnyMore_OffersNoCorrection', async () => {
