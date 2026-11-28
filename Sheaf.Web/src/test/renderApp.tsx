@@ -6,9 +6,9 @@ import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import type { UserInfo } from '@/types'
+import AppThemeProvider from '@/components/AppThemeProvider'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { ChurchProvider } from '@/contexts/ChurchContext'
-import { ThemeProvider } from '@/contexts/ThemeContext'
 import { createQueryClient } from '@/services/queryClient'
 
 export type ChurchRole = NonNullable<UserInfo['currentChurch']>['role']
@@ -62,7 +62,7 @@ export function renderApp(ui: ReactElement, path = '/') {
 
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
+      <AppThemeProvider>
         <SnackbarProvider>
           <MemoryRouter initialEntries={[path]}>
             <AuthProvider>
@@ -70,7 +70,7 @@ export function renderApp(ui: ReactElement, path = '/') {
             </AuthProvider>
           </MemoryRouter>
         </SnackbarProvider>
-      </ThemeProvider>
+      </AppThemeProvider>
     </QueryClientProvider>,
   )
 

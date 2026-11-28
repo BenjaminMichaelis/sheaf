@@ -3,6 +3,8 @@ import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FIRST_CHURCH, SECOND_CHURCH, json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
 import { setScreenWidth } from '@/test/screen'
+import Login from '@/pages/Login'
+import Register from '@/pages/Register'
 import Layout from './Layout'
 
 const villageSettings = {
@@ -83,5 +85,25 @@ describe('Layout', () => {
     expect(await screen.findByRole('button', { name: 'Logout' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open navigation' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+  })
+
+  it('Layout_SignedOutFollowsAuthLinks_NavigatesBetweenRegisterAndLogin', async () => {
+    mockApi({ 'GET /api/auth/user': () => new Response(null, { status: 401 }) })
+
+    const { user } = renderApp(
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<p>Home page</p>} />
+          <Route path="login" element={<Login />} />
+          <Route path="register" element={<Register />} />
+        </Route>
+      </Routes>,
+    )
+
+    await user.click(await screen.findByRole('link', { name: 'Register' }))
+    expect(await screen.findByRole('heading', { name: 'Register' })).toBeInTheDocument()
+
+    await user.click(within(screen.getByRole('main')).getByRole('link', { name: 'Login' }))
+    expect(await screen.findByRole('heading', { name: 'Login' })).toBeInTheDocument()
   })
 })

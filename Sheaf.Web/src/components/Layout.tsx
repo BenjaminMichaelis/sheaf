@@ -17,12 +17,12 @@ import {
   useMediaQuery,
   useTheme as useMuiTheme,
 } from '@mui/material'
-import { Brightness4, Brightness7, Groups as GroupsIcon, Home as HomeIcon, Menu as MenuIcon } from '@mui/icons-material'
+import { Groups as GroupsIcon, Home as HomeIcon, Menu as MenuIcon } from '@mui/icons-material'
 import { useAuth } from '@/contexts/AuthContext'
 import { useChurch } from '@/contexts/ChurchContext'
-import { useTheme } from '@/contexts/ThemeContext'
 import ChurchConflictDialog from './ChurchConflictDialog'
 import ChurchSwitcher from './ChurchSwitcher'
+import ColorModeMenu from './ColorModeMenu'
 
 const DRAWER_WIDTH = 240
 
@@ -36,7 +36,6 @@ export default function Layout() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { church, labels } = useChurch()
-  const { mode, toggleTheme } = useTheme()
   // Under createRoot the first render already reads the real width (mui.com/material-ui/react-use-media-query).
   const isDesktop = useMediaQuery(useMuiTheme().breakpoints.up('md'))
   const [menuOpen, setMenuOpen] = useState(false)
@@ -100,13 +99,7 @@ export default function Layout() {
             <ChurchSwitcher />
           </Box>
 
-          <IconButton
-            onClick={toggleTheme}
-            color="inherit"
-            aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {mode === 'dark' ? <Brightness7 /> : <Brightness4 />}
-          </IconButton>
+          <ColorModeMenu />
 
           {user?.isAuthenticated ? (
             <Button color="inherit" onClick={handleLogout}>
@@ -114,10 +107,10 @@ export default function Layout() {
             </Button>
           ) : (
             <>
-              <Button color="inherit" onClick={() => navigate('/login')}>
+              <Button color="inherit" href="/login">
                 Login
               </Button>
-              <Button color="inherit" onClick={() => navigate('/register')}>
+              <Button color="inherit" href="/register">
                 Register
               </Button>
             </>
