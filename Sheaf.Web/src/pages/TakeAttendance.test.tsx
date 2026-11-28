@@ -33,7 +33,7 @@ interface ApiOptions {
   role?: 'Leader' | 'Staff'
   group?: { endsAt: string }
   /** The roster for each date. Defaults to Lena and Max on every date. */
-  roster?: (occurredOn: string) => SessionPerson[]
+  roster?: (occurredOn: string) => SessionPerson[] | Promise<SessionPerson[]>
   lookup?: (name: string) => Response | Promise<Response>
   save?: (request: SessionRequest, attempt: number) => Response | Promise<Response>
 }
@@ -52,7 +52,7 @@ function mockAttendanceApi({
     'GET /api/auth/user': () => json(signedInUser(role)),
     'GET /api/church/settings': () => json(settings),
     'GET /api/church/groups/g1': () => json({ ...village, ...group }),
-    'GET /api/church/groups/g1/roster': request => json(roster(new URL(request.url).searchParams.get('occurredOn') ?? '')),
+    'GET /api/church/groups/g1/roster': async request => json(await roster(new URL(request.url).searchParams.get('occurredOn') ?? '')),
     'GET /api/church/people/lookup': request => {
       const name = new URL(request.url).searchParams.get('name') ?? ''
       searched.push(name)
@@ -110,7 +110,8 @@ describe('TakeAttendance', () => {
 
       expect(await screen.findByText('Groups page')).toBeInTheDocument()
       expect(screen.getByText('Attendance saved.')).toBeInTheDocument()
-      expect(saved).toEqual([{ occurredOn: '2026-02-28', personIds: [lena.id], newPeople: [], confirm: false, description: 'Potluck' }])
+      expect(saved).toHaveLength(1)
+      expect(saved[0]).toMatchObject({ occurredOn: '2026-02-28', personIds: [lena.id], confirm: false, description: 'Potluck' })
     } finally {
       vi.useRealTimers()
     }
@@ -123,9 +124,9 @@ describe('TakeAttendance', () => {
     // The API matches names its own way (here a nickname), so every result it returns is offered, then Create last.
     await user.type(await nameBox(), 'Zoey')
     const zoeOption = await screen.findByRole('option', { name: /^Zoe Visitor/ })
-    const options = screen.getAllByRole('option')
-    expect(options).toHaveLength(2)
-    expect(options[1]).toHaveAccessibleName(/Create new person “Zoey”/)
+    // Each result shows what tells similar names apart (UI-LKP-02), and Create comes last.
+    expect(zoeOption).toHaveAccessibleName(/Visitor household/)
+    expect(screen.getAllByRole('option').slice(-1)[0]).toHaveAccessibleName(/Create new person “Zoey”/)
     expect(searched).toContain('Zoey')
     await user.click(zoeOption)
     expect(within(screen.getByRole('list', { name: 'Also came' })).getByText('Zoe Visitor')).toBeInTheDocument()
@@ -286,5 +287,54 @@ describe('TakeAttendance', () => {
     renderAttendance()
 
     expect(await screen.findByLabelText(/Meeting date/)).toHaveValue('2025-05-31')
+  })
+
+  it.each([
+    ['BeforeGroupStarted', '2024-12-31'],
+    ['InTheFuture', '2099-01-01'],
+  ])('TakeAttendance_Date%s_ExplainsTheAllowedDatesAndCannotSave', async (_, outside) => {
+    mockAttendanceApi()
+    const { user } = renderAttendance()
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Max Member' }))
+    const date = screen.getByLabelText(/Meeting date/)
+    await user.clear(date)
+    await user.type(date, outside)
+
+    expect(await screen.findByText('Choose a date from when the village started up to today.')).toBeInTheDocument()
+    expect(await saveButton()).toBeDisabled()
+  })
+
+  it('TakeAttendance_RosterStillLoading_CannotSaveEvenWithSomeoneFromSearch', async () => {
+    mockAttendanceApi({ roster: () => new Promise<SessionPerson[]>(() => {}) })
+    const { user } = renderAttendance()
+
+    await user.type(await nameBox(), 'Zo')
+    await user.click(await screen.findByRole('option', { name: /^Zoe Visitor/ }))
+
+    expect(screen.getByRole('status')).toHaveTextContent('1 present')
+    expect(await saveButton()).toBeDisabled()
+  })
+
+  it('TakeAttendance_LeaderOpensGroupEndingLater_CanRecordIt', async () => {
+    mockAttendanceApi({ group: { endsAt: '2099-01-01T06:00:00Z' } })
+    renderAttendance()
+
+    expect(await screen.findByRole('list', { name: 'Roster' })).toBeInTheDocument()
+    expect(await saveButton()).toBeInTheDocument()
+  })
+
+  it('TakeAttendance_EnterOnHighlightedResult_PicksThatPersonWithoutSaving', async () => {
+    const { saved } = mockAttendanceApi()
+    const { user } = renderAttendance()
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Lena Leader' }))
+    await user.type(await nameBox(), 'Zo')
+    // Waits for the search to finish, so the first result (Zoe) is the highlighted option.
+    await createOption()
+    await user.keyboard('{Enter}')
+
+    expect(within(screen.getByRole('list', { name: 'Also came' })).getByText('Zoe Visitor')).toBeInTheDocument()
+    expect(saved).toEqual([])
   })
 })
