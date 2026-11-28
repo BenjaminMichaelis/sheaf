@@ -838,6 +838,7 @@ export interface components {
             startsAt: string;
             /** Format: date-time */
             endsAt: null | string;
+            isCurrent: boolean;
         };
         PersonLookupResponse: {
             /** Format: uuid */
