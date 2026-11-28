@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { UserInfo } from '@/types'
 
-import { apiClient } from './apiClient'
+import { apiClient, CHURCH_CONFLICT_PROBLEM_TYPE, ChurchConflictError, onChurchConflict, setActiveChurch } from './apiClient'
 
 describe('apiClient', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    setActiveChurch(null)
   })
 
   it('GET_User_IncludesCredentialsAndReturnsTypedResponse', async () => {
@@ -153,6 +154,40 @@ describe('apiClient', () => {
     await expect(apiClient.POST('/api/auth/register', {
       body: { email: 'leader@example.com', password: 'password', confirmPassword: 'different' },
     })).rejects.toThrow('Passwords do not match.')
+  })
+
+  it('POST_ChurchRequestWithActiveChurch_SendsChurchHeader', async () => {
+    const churchId = '019a0000-0000-7000-8000-000000000001'
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ id: 'household-1', label: null, members: [], version: 'v' }), { status: 201 }),
+    )
+
+    setActiveChurch(churchId)
+
+    await apiClient.POST('/api/church/households', { body: { memberIds: [] } })
+    await apiClient.POST('/api/auth/logout')
+
+    const [churchRequest, authRequest] = fetchMock.mock.calls.map(([request]) => new Request(request))
+    expect(churchRequest?.headers.get('X-Sheaf-Church')).toBe(churchId)
+    expect(authRequest?.headers.get('X-Sheaf-Church')).toBeNull()
+  })
+
+  it('POST_ChurchConflictProblem_RejectsWithChurchConflictAndNotifiesListeners', async () => {
+    const listener = vi.fn()
+    const stop = onChurchConflict(listener)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      type: CHURCH_CONFLICT_PROBLEM_TYPE,
+      title: 'Church selection does not match this request.',
+      status: 409,
+      detail: 'Reload the page to use the active church, then retry.',
+    }), { status: 409, headers: { 'content-type': 'application/problem+json' } }))
+
+    await expect(apiClient.POST('/api/church/households', { body: { memberIds: [] } }))
+      .rejects.toBeInstanceOf(ChurchConflictError)
+    stop()
+
+    expect(listener).toHaveBeenCalledOnce()
   })
 
   it('POST_LogoutUnauthorizedWithoutBody_RejectsWithStatus', async () => {

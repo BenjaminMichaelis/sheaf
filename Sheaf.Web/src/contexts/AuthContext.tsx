@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from 'react'
 import { UserInfo, LoginRequest, RegisterRequest } from '@/types'
 import { apiClient } from '@/services/apiClient'
 
@@ -9,6 +9,8 @@ interface AuthContextType {
   register: (data: RegisterRequest) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
+  /** Selects another of the account's churches; the API re-issues the session for it. */
+  switchChurch: (churchId: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -82,8 +84,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  // Stable identity so ChurchContext's memoized value does not change on every AuthProvider render.
+  const switchChurch = useCallback(async (churchId: string) => {
+    const { data } = await apiClient.POST('/api/auth/church/{churchId}', { params: { path: { churchId } } })
+
+    if (data === undefined) {
+      throw new Error('Church switch response is empty')
+    }
+
+    setUser(data)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, switchChurch }}>
       {children}
     </AuthContext.Provider>
   )
