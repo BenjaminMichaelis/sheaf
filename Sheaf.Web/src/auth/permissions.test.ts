@@ -10,6 +10,7 @@ describe('can', () => {
   ])('can_%s_OffersGroupManagement%sAndChurchSettings%s', (role, manages, managesChurch) => {
     expect(can(role, 'manageGroups')).toBe(manages)
     expect(can(role, 'managePeople')).toBe(manages)
+    expect(can(role, 'recordEndedGroups')).toBe(manages)
     expect(can(role, 'manageChurch')).toBe(managesChurch)
   })
 

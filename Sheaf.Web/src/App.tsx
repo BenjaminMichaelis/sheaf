@@ -11,6 +11,7 @@ import Groups from './pages/Groups'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import TakeAttendance from './pages/TakeAttendance'
 
 function App() {
   return (
@@ -28,6 +29,14 @@ function App() {
                   element={
                     <ProtectedRoute requireChurch>
                       <Groups />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="groups/:groupId/attendance"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <TakeAttendance />
                     </ProtectedRoute>
                   }
                 />
