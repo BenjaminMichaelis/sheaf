@@ -34,6 +34,9 @@ public static class TrackerEndpoints
         api.MapGet("/groups/{groupId:guid}/sessions/{sessionId:guid}", async Task<Ok<SessionResponse>> (Guid groupId, Guid sessionId, IAttendanceService s, CancellationToken ct) =>
             TypedResults.Ok(await s.GetSessionAsync(groupId, sessionId, ct)))
             .Tracker("GetGroupSession", "Get a meeting with who came and which roster members were absent");
+        api.MapGet("/groups/{groupId:guid}/roster", async Task<Ok<SessionPersonResponse[]>> (Guid groupId, DateOnly occurredOn, IAttendanceService s, CancellationToken ct) =>
+            TypedResults.Ok(await s.GetRosterAsync(groupId, occurredOn, ct)))
+            .Tracker("GetGroupRoster", "List the active people on a group's roster on a date, by name only, for taking attendance");
         // Recording can create people and reports possible duplicates by name, so it shares lookup's per-account limit.
         api.MapPost("/groups/{groupId:guid}/sessions", async Task<Created<SessionResponse>> (Guid groupId, SessionRequest request, IAttendanceService s, CancellationToken ct) =>
             {

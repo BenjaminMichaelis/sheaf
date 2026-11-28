@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { Alert, Box, Button, Chip, CircularProgress, List, ListItem, ListItemText, Paper, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, List, ListItem, ListItemText, Paper, Typography } from '@mui/material'
+import { Loading, RetryButton } from '@/components/Feedback'
 import type { components } from '@/api/schema'
 import { useChurch } from '@/contexts/ChurchContext'
 import { groupsQuery } from '@/services/churchQueries'
@@ -26,7 +28,7 @@ export default function Groups() {
 }
 
 function ChurchGroups({ churchId }: { churchId: string }) {
-  const { labels, timeZoneId, settingsError, reloadSettings } = useChurch()
+  const { labels, timeZoneId, settingsError, reloadSettings, can } = useChurch()
 
   const { data, error, isError, isFetching, isFetchingNextPage, isFetchNextPageError, hasNextPage, fetchNextPage, refetch } =
     useInfiniteQuery(groupsQuery(churchId))
@@ -69,7 +71,7 @@ function ChurchGroups({ churchId }: { churchId: string }) {
       )}
 
       {current.length > 0 && (
-        <GroupList groups={current} phase="current" label={`Current ${labels.many}`} timeZoneId={timeZoneId} />
+        <GroupList groups={current} phase="current" canRecord label={`Current ${labels.many}`} timeZoneId={timeZoneId} />
       )}
 
       {upcoming.length > 0 && (
@@ -80,7 +82,7 @@ function ChurchGroups({ churchId }: { churchId: string }) {
 
       {ended.length > 0 && (
         <GroupSection id="ended-groups-heading" title="Ended">
-          <GroupList groups={ended} phase="ended" labelledBy="ended-groups-heading" timeZoneId={timeZoneId} />
+          <GroupList groups={ended} phase="ended" canRecord={can('recordEndedGroups')} labelledBy="ended-groups-heading" timeZoneId={timeZoneId} />
         </GroupSection>
       )}
 
@@ -90,11 +92,7 @@ function ChurchGroups({ churchId }: { churchId: string }) {
         </Alert>
       )}
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress aria-label="Loading" />
-        </Box>
-      )}
+      {loading && <Loading />}
 
       {canLoadMore && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
@@ -105,14 +103,6 @@ function ChurchGroups({ churchId }: { churchId: string }) {
   )
 }
 
-/** An alert's action button, styled as MUI's Alert examples show. */
-function RetryButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button color="inherit" size="small" onClick={onClick}>
-      Retry
-    </Button>
-  )
-}
 
 function GroupSection({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
@@ -128,6 +118,8 @@ function GroupSection({ id, title, children }: { id: string; title: string; chil
 interface GroupListProps {
   groups: Group[]
   phase: Phase
+  /** Whether the user may record attendance for these groups: Leaders lose that once a group ends, Staff never do. */
+  canRecord?: boolean
   /** Dates are left out until the church's time zone is known. */
   timeZoneId: string | null
   /** Accessible name for the list when no visible heading names it. */
@@ -136,7 +128,7 @@ interface GroupListProps {
   labelledBy?: string
 }
 
-function GroupList({ groups, phase, timeZoneId, label, labelledBy }: GroupListProps) {
+function GroupList({ groups, phase, canRecord = false, timeZoneId, label, labelledBy }: GroupListProps) {
   const dates = (group: Group) => {
     if (timeZoneId === null) return undefined
     const date = (instant: string) => formatChurchDate(instant, timeZoneId)
@@ -155,6 +147,17 @@ function GroupList({ groups, phase, timeZoneId, label, labelledBy }: GroupListPr
           <ListItem key={group.id} divider={index < groups.length - 1}>
             <ListItemText primary={group.name} secondary={dates(group)} />
             {phase === 'ended' && <Chip label="Ended" size="small" />}
+            {canRecord && (
+              <Button
+                component={RouterLink}
+                to={`/groups/${group.id}/attendance`}
+                size="small"
+                sx={{ ml: 1, flexShrink: 0 }}
+                aria-label={`Take attendance for ${group.name}`}
+              >
+                Take attendance
+              </Button>
+            )}
           </ListItem>
         ))}
       </List>

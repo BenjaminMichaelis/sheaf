@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { Box, TextField, Button, Typography, Paper } from '@mui/material'
+import { useNavigate } from 'react-router-dom'
+import { Box, TextField, Button, Typography, Paper, Link } from '@mui/material'
 import { useSnackbar } from 'notistack'
 import { apiClient } from '@/services/apiClient'
 import { passwordMismatch } from '@/services/passwords'
@@ -126,7 +126,7 @@ export default function ForgotPassword() {
         )}
         <Box sx={{ mt: 2, textAlign: 'center' }}>
           <Typography variant="body2">
-            <Link to="/login">
+            <Link href="/login">
               Back to login
             </Link>
           </Typography>

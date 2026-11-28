@@ -268,6 +268,30 @@ describe('Groups', () => {
     expect(await screen.findByRole('progressbar', { name: 'Loading' })).toBeInTheDocument()
     expect(screen.queryByText('Earlier village')).not.toBeInTheDocument()
   })
+
+  it.each([
+    { role: 'Leader' as const, endedOffered: false },
+    { role: 'Staff' as const, endedOffered: true },
+  ])('Groups_$role_OffersAttendanceForCurrentGroupsAndForEndedOnlyToStaff', async ({ role, endedOffered }) => {
+    mockApi({
+      'GET /api/auth/user': () => json(signedInUser(role)),
+      'GET /api/church/settings': () => json(villageSettings),
+      'GET /api/church/groups': () =>
+        json({
+          items: [group('g1', 'Tuesday village', -30), group('g2', 'Spring village', -90, -1), group('g3', 'Autumn village', 14)],
+          nextOffset: null,
+        }),
+    })
+
+    renderApp(<Groups />, '/groups')
+
+    expect(await screen.findByRole('link', { name: 'Take attendance for Tuesday village' })).toHaveAttribute('href', '/groups/g1/attendance')
+    expect(screen.queryByRole('link', { name: 'Take attendance for Autumn village' })).not.toBeInTheDocument()
+    const ended = screen.queryByRole('link', { name: 'Take attendance for Spring village' })
+
+    if (endedOffered) expect(ended).toBeInTheDocument()
+    else expect(ended).not.toBeInTheDocument()
+  })
 })
 
 /** The groups page inside the app's layout, with login, so tests can switch church, log out and navigate back. */

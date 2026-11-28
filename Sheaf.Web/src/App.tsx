@@ -1,9 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { CssBaseline } from '@mui/material'
 import { SnackbarProvider } from 'notistack'
 import { AuthProvider } from './contexts/AuthContext'
 import { ChurchProvider } from './contexts/ChurchContext'
-import { ThemeProvider } from './contexts/ThemeContext'
+import AppThemeProvider from './components/AppThemeProvider'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -15,11 +14,11 @@ import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import Account from './pages/Account'
+import TakeAttendance from './pages/TakeAttendance'
 
 function App() {
   return (
-    <ThemeProvider>
-      <CssBaseline />
+    <AppThemeProvider>
       <SnackbarProvider maxSnack={3}>
         <AuthProvider>
           <ChurchProvider>
@@ -46,13 +45,21 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
+                <Route
+                  path="groups/:groupId/attendance"
+                  element={
+                    <ProtectedRoute requireChurch>
+                      <TakeAttendance />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
           </ChurchProvider>
         </AuthProvider>
       </SnackbarProvider>
-    </ThemeProvider>
+    </AppThemeProvider>
   )
 }
 

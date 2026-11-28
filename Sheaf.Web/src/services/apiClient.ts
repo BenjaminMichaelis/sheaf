@@ -7,6 +7,9 @@ export const EMAIL_NOT_CONFIRMED = 'tag:sheaf,2026:problems/email-not-confirmed'
 /** Problem type the API returns when a church request names a different church than the signed-in selection. */
 export const CHURCH_CONFLICT_PROBLEM_TYPE = 'tag:sheaf,2026:problems/church-header-conflict'
 
+/** Problem type the API returns when a save looks like a duplicate and must be resent with confirm to go ahead. */
+export const CONFIRMATION_REQUIRED_PROBLEM_TYPE = 'urn:sheaf:problem:confirmation-required'
+
 const CHURCH_HEADER = 'X-Sheaf-Church'
 
 type ProblemDetails = components['schemas']['HttpValidationProblemDetails']
@@ -97,5 +100,37 @@ function parseProblem(response: Response, body: string): ProblemDetails | null {
     return JSON.parse(body) as ProblemDetails
   } catch {
     return null
+  }
+}
+
+type PersonMatch = components['schemas']['PersonLookupResponse']
+
+/**
+ * People who may already exist for the new person at `index` in the request. Mirrors the API's SimilarPeopleResponse,
+ * which reaches the client as a Problem Details extension that the OpenAPI document does not describe.
+ */
+export interface SimilarPeople {
+  index: number
+  matches: PersonMatch[]
+}
+
+/** What a "confirm to save anyway" response warns about. */
+export interface ConfirmationReasons {
+  /** Meetings already recorded for the group on the same date. */
+  existingSessionIds: string[]
+  similarPeople: SimilarPeople[]
+}
+
+/** The warnings in `error` when the API asked for confirmation, or null for any other failure. */
+export function confirmationReasons(error: Error): ConfirmationReasons | null {
+  if (!(error instanceof ApiError) || error.problem?.type !== CONFIRMATION_REQUIRED_PROBLEM_TYPE) return null
+
+  // SAFETY: The problem type is the API's confirmation problem, whose extensions are these optional members (they are
+  // top-level members the generated type does not list). Each is still checked to be an array before use.
+  const { existingSessionIds, similarPeople } = error.problem as ProblemDetails & Partial<ConfirmationReasons>
+
+  return {
+    existingSessionIds: Array.isArray(existingSessionIds) ? existingSessionIds : [],
+    similarPeople: Array.isArray(similarPeople) ? similarPeople : [],
   }
 }

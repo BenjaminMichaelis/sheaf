@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useNavigate, Link, Navigate } from 'react-router-dom'
-import { Box, TextField, Button, Typography, Paper } from '@mui/material'
+import { useNavigate, Navigate } from 'react-router-dom'
+import { Box, TextField, Button, Typography, Paper, Link } from '@mui/material'
 import { useSnackbar } from 'notistack'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiClient } from '@/services/apiClient'
@@ -142,7 +142,7 @@ export default function VerifyEmail() {
           )}
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="body2">
-              <Link to="/login" onClick={clearPendingVerification}>
+              <Link href="/login" onClick={clearPendingVerification}>
                 Back to login
               </Link>
             </Typography>

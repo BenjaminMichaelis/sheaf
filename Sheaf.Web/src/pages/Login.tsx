@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { Box, TextField, Button, Typography, Paper } from '@mui/material'
+import { useNavigate } from 'react-router-dom'
+import { Box, TextField, Button, Typography, Paper, Link } from '@mui/material'
 import { useSnackbar } from 'notistack'
 import { useAuth } from '@/contexts/AuthContext'
 import { ApiError, EMAIL_NOT_CONFIRMED } from '@/services/apiClient'
@@ -75,13 +75,13 @@ export default function Login() {
           </Button>
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              <Link to="/forgot-password">
+              <Link href="/forgot-password">
                 Forgot password?
               </Link>
             </Typography>
             <Typography variant="body2">
               Don't have an account?{' '}
-              <Link to="/register">
+              <Link href="/register">
                 Register
               </Link>
             </Typography>
