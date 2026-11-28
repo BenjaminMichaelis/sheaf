@@ -1,8 +1,14 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { theme } from '@/theme'
+import { PHONE_WIDTH, setScreenWidth } from '@/test/screen'
 import AppThemeProvider from './AppThemeProvider'
 import ColorModeMenu from './ColorModeMenu'
+
+// The requirement is that the browser chrome matches the page background, whatever the palette's colors are.
+const LIGHT_BACKGROUND = theme.colorSchemes.light?.palette.background.default
+const DARK_BACKGROUND = theme.colorSchemes.dark?.palette.background.default
 
 function renderMenu() {
   const user = userEvent.setup()
@@ -37,24 +43,35 @@ describe('ColorModeMenu', () => {
     document.head.querySelectorAll('meta[name="theme-color"]').forEach(meta => meta.remove())
   })
 
-  it('ColorModeMenu_NoSavedChoice_FollowsSystemLightScheme', () => {
+  it('ColorModeMenu_NoSavedChoiceOnLightSystem_UsesSystemModeWithLightBackground', () => {
     renderMenu()
 
     expect(screen.getByRole('button', { name: 'Color mode: System' })).toBeInTheDocument()
-    expect(themeColors()).toEqual(['#fff', '#fff'])
+    expect(themeColors()).toEqual([LIGHT_BACKGROUND, LIGHT_BACKGROUND])
   })
 
-  it('ColorModeMenu_ChooseDark_ShowsDarkModeAndDarkThemeColor', async () => {
+  it('ColorModeMenu_NoSavedChoiceOnDarkSystem_UsesSystemModeWithDarkBackground', () => {
+    setScreenWidth(PHONE_WIDTH, 'dark')
+
+    renderMenu()
+
+    expect(DARK_BACKGROUND).not.toEqual(LIGHT_BACKGROUND)
+    expect(screen.getByRole('button', { name: 'Color mode: System' })).toBeInTheDocument()
+    expect(themeColors()).toEqual([DARK_BACKGROUND, DARK_BACKGROUND])
+  })
+
+  it('ColorModeMenu_ChooseDarkOnLightSystem_ShowsDarkModeAndDarkBackground', async () => {
     const { user } = renderMenu()
 
     await user.click(screen.getByRole('button', { name: 'Color mode: System' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
 
     expect(screen.getByRole('button', { name: 'Color mode: Dark' })).toBeInTheDocument()
-    expect(themeColors()).toEqual(['#121212', '#121212'])
+    expect(themeColors()).toEqual([DARK_BACKGROUND, DARK_BACKGROUND])
   })
 
-  it('ColorModeMenu_SavedDarkChoice_StartsInDarkMode', async () => {
+  // Remembering the choice is MUI's storage; this checks the requirement that a returning user keeps their choice.
+  it('ColorModeMenu_ChoiceFromEarlierVisit_IsRestoredOnNextVisit', async () => {
     const { user } = renderMenu()
     await user.click(screen.getByRole('button', { name: 'Color mode: System' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }))
@@ -63,7 +80,7 @@ describe('ColorModeMenu', () => {
     renderMenu()
 
     expect(screen.getByRole('button', { name: 'Color mode: Dark' })).toBeInTheDocument()
-    expect(themeColors()).toEqual(['#121212', '#121212'])
+    expect(themeColors()).toEqual([DARK_BACKGROUND, DARK_BACKGROUND])
   })
 
   it('ColorModeMenu_OpenAfterChoosingLight_MarksOnlyLightChecked', async () => {
