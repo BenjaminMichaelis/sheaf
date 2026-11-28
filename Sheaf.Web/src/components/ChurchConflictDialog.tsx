@@ -3,7 +3,7 @@ import { Button, Dialog, DialogActions, DialogContent, DialogContentText, Dialog
 import { onChurchConflict } from '@/services/apiClient'
 
 /**
- * Explains a refused change when this page still acts for a church the account no longer has selected
+ * Explains a refused request when this page still acts for a church the account no longer has selected
  * (usually after switching church in another tab), and offers to reload into the selected church.
  */
 export default function ChurchConflictDialog({ reload = () => window.location.reload() }: { reload?: () => void }) {
@@ -16,8 +16,8 @@ export default function ChurchConflictDialog({ reload = () => window.location.re
       <DialogTitle id="church-conflict-title">Your church changed</DialogTitle>
       <DialogContent>
         <DialogContentText>
-          This page was opened for a different church than the one you now have selected, so your change was not
-          saved. Reload to continue in the selected church.
+          This page was opened for a different church than the one you now have selected, perhaps in another tab.
+          Nothing was loaded or saved for the wrong church. Reload to continue in the selected church.
         </DialogContentText>
       </DialogContent>
       <DialogActions>

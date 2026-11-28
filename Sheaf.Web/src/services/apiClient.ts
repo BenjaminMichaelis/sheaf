@@ -45,9 +45,11 @@ apiClient.use({
   },
   async onResponse({ request, response }) {
     if (!response.ok) {
-      const body = request.method === 'GET' ? '' : await response.clone().text()
+      // Every failure's body is read so Problem Details (recovery guidance, church conflicts) reach the user. A plain
+      // body is only shown for writes; for reads it is often an HTML error page from a proxy.
+      const body = await response.clone().text()
 
-      let message = body || `HTTP error! status: ${response.status}`
+      let message = (request.method !== 'GET' && body) || `HTTP error! status: ${response.status}`
 
       if (response.headers.get('content-type')?.includes('application/problem+json') && body) {
         try {

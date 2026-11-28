@@ -190,6 +190,36 @@ describe('apiClient', () => {
     expect(listener).toHaveBeenCalledOnce()
   })
 
+  it('GET_ProblemDetailsFailure_RejectsWithServerGuidance', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      title: 'Fix the church time zone at /api/church/settings.',
+      status: 500,
+    }), { status: 500, headers: { 'content-type': 'application/problem+json' } }))
+
+    await expect(apiClient.GET('/api/church/groups')).rejects.toThrow('Fix the church time zone at /api/church/settings.')
+  })
+
+  it('GET_ChurchConflictProblem_RejectsWithChurchConflictAndNotifiesListeners', async () => {
+    const listener = vi.fn()
+    const stop = onChurchConflict(listener)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      type: CHURCH_CONFLICT_PROBLEM_TYPE,
+      title: 'Church selection does not match this request.',
+      status: 409,
+    }), { status: 409, headers: { 'content-type': 'application/problem+json' } }))
+
+    await expect(apiClient.GET('/api/church/groups')).rejects.toBeInstanceOf(ChurchConflictError)
+    stop()
+
+    expect(listener).toHaveBeenCalledOnce()
+  })
+
+  it('GET_PlainTextFailure_RejectsWithStatusOnly', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>Bad gateway</html>', { status: 502 }))
+
+    await expect(apiClient.GET('/api/church/groups')).rejects.toThrow('HTTP error! status: 502')
+  })
+
   it('POST_LogoutUnauthorizedWithoutBody_RejectsWithStatus', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }))
 

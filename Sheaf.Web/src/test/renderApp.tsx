@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { SnackbarProvider } from 'notistack'
 import { render } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import type { UserInfo } from '@/types'
 import { AuthProvider } from '@/contexts/AuthContext'
@@ -27,6 +28,7 @@ export function signedInUser(role: ChurchRole = 'Leader', churches = [FIRST_CHUR
   }
 }
 
+/** A stub may return a never-settling promise to model a request still in flight. */
 type Handler = (request: Request) => Response | Promise<Response>
 
 export const json = <T,>(body: T, status = 200) =>
@@ -46,9 +48,11 @@ export function mockApi(routes: Record<string, Handler>) {
   })
 }
 
-/** Renders `ui` inside the app's providers at `path`. */
+/** Renders `ui` inside the app's providers at `path`, with a user-event session set up first as Testing Library recommends. */
 export function renderApp(ui: ReactElement, path = '/') {
-  return render(
+  const user = userEvent.setup()
+
+  const result = render(
     <ThemeProvider>
       <SnackbarProvider>
         <MemoryRouter initialEntries={[path]}>
@@ -59,4 +63,6 @@ export function renderApp(ui: ReactElement, path = '/') {
       </SnackbarProvider>
     </ThemeProvider>,
   )
+
+  return { user, ...result }
 }

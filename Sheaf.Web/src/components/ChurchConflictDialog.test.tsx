@@ -6,6 +6,7 @@ import ChurchConflictDialog from './ChurchConflictDialog'
 
 describe('ChurchConflictDialog', () => {
   it('ChurchConflictDialog_ChangeRefusedForOtherChurch_ExplainsAndOffersReload', async () => {
+    const user = userEvent.setup()
     const reload = vi.fn()
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       type: CHURCH_CONFLICT_PROBLEM_TYPE,
@@ -18,7 +19,7 @@ describe('ChurchConflictDialog', () => {
     await apiClient.POST('/api/church/households', { body: { memberIds: [] } }).catch(() => {})
 
     expect(await screen.findByRole('dialog', { name: 'Your church changed' })).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
     expect(reload).toHaveBeenCalledOnce()
   })
 })

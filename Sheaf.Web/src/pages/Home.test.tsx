@@ -1,6 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { FIRST_CHURCH, SECOND_CHURCH, json, mockApi, renderApp, signedInUser } from '@/test/renderApp'
@@ -27,15 +26,15 @@ function renderRoutes(path = '/') {
 
 describe('Home', () => {
   it('Home_MemberOfChurchesWithNoneSelected_LetsUserChooseOne', async () => {
-    const user = { ...signedInUser('Leader', [FIRST_CHURCH, SECOND_CHURCH]), currentChurch: null }
+    const account = { ...signedInUser('Leader', [FIRST_CHURCH, SECOND_CHURCH]), currentChurch: null }
     mockApi({
-      'GET /api/auth/user': () => json(user),
+      'GET /api/auth/user': () => json(account),
       'GET /api/church/settings': () => json(settings),
-      [`POST /api/auth/church/${SECOND_CHURCH}`]: () => json({ ...user, currentChurch: user.churches?.[1] ?? null }),
+      [`POST /api/auth/church/${SECOND_CHURCH}`]: () => json({ ...account, currentChurch: account.churches?.[1] ?? null }),
     })
 
-    renderRoutes()
-    await userEvent.click(await screen.findByRole('button', { name: /Church 2/ }))
+    const { user } = renderRoutes()
+    await user.click(await screen.findByRole('button', { name: /Church 2/ }))
 
     expect(await screen.findByRole('heading', { name: 'Church 2' })).toBeInTheDocument()
     expect(screen.queryByText("You're not part of a church yet")).not.toBeInTheDocument()
