@@ -173,6 +173,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/church/people/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the groups a Person is or was in or led, with dates, for those who may edit them; Leaders see only their own groups */
+        get: operations["GetPersonGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/church/people/{id}/attendance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the meetings a Person came to, newest first, for those who may edit them; Leaders see only their own groups */
+        get: operations["GetPersonAttendance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/church/people/duplicates": {
         parameters: {
             query?: never;
@@ -776,10 +810,35 @@ export interface components {
             /** Format: int32 */
             nextOffset: null | number | string;
         };
+        PagedResponseOfPersonAttendanceResponse: {
+            items: components["schemas"]["PersonAttendanceResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
+        };
         PagedResponseOfSessionSummaryResponse: {
             items: components["schemas"]["SessionSummaryResponse"][];
             /** Format: int32 */
             nextOffset: null | number | string;
+        };
+        PersonAttendanceResponse: {
+            /** Format: uuid */
+            sessionId: string;
+            /** Format: uuid */
+            groupId: string;
+            groupName: string;
+            /** Format: date */
+            occurredOn: string;
+        };
+        PersonGroupResponse: {
+            /** Format: uuid */
+            groupId: string;
+            groupName: string;
+            role: components["schemas"]["GroupRole"];
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: null | string;
+            isCurrent: boolean;
         };
         PersonLookupResponse: {
             /** Format: uuid */
@@ -1328,6 +1387,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PersonResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetPersonGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonGroupResponse"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetPersonAttendance: {
+        parameters: {
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedResponseOfPersonAttendanceResponse"];
                 };
             };
             /** @description Bad Request */
