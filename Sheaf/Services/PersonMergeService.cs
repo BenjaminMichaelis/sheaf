@@ -26,11 +26,6 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
     public const string ConflictReasonKey = "reason";
     /// <summary>Both people sign in with their own account, and a person can be linked to only one.</summary>
     public const string BothLinkedReason = "bothLinkedToAccounts";
-    /// <summary>
-    /// The two people held different roles in one group at the same time. Joining them would invent or drop a role, so
-    /// Staff end or change one of the assignments first; the problem's "groupIds" member names the groups.
-    /// </summary>
-    public const string OverlappingRolesReason = "overlappingGroupRoles";
 
     /// <summary>
     /// Pairs of active, unmerged people with the same full name, email, or phone, minus pairs Staff dismissed. Names and
@@ -46,6 +41,7 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         {
             p.Id,
             p.CreatedAt,
+            // Phone is never null here; the fallback only satisfies nullable flow analysis instead of using "!".
             Digits = (p.Phone ?? "").Replace(" ", "").Replace("-", "").Replace(".", "").Replace("(", "").Replace(")", "").Replace("+", "")
         }).Where(p => p.Digits != "");
         // Each pair once, earlier record first: it is usually the original and the suggested survivor.
@@ -94,11 +90,11 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
     private static DuplicateReason[] Reasons(int name, int email, int phone)
     {
         var reasons = new List<DuplicateReason>();
-        if (name == 1)
+        if (name > 0)
             reasons.Add(DuplicateReason.Name);
-        if (email == 1)
+        if (email > 0)
             reasons.Add(DuplicateReason.Email);
-        if (phone == 1)
+        if (phone > 0)
             reasons.Add(DuplicateReason.Phone);
         return [.. reasons];
     }
@@ -138,7 +134,8 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         }
         catch (TrackerException)
         {
-            // A concurrent request may have stored the same pair first; that is the outcome asked for.
+            // The only failure expected here is the unique-index race with a concurrent dismissal of the same pair, whose
+            // outcome is the one asked for; anything else is rethrown.
             db.ChangeTracker.Clear();
             if (!await DismissedAsync(low, high, ct))
                 throw;
@@ -158,9 +155,9 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
     /// duplicate's account link when it has none; if both have one, nothing is saved and the result is 409.</item>
     /// <item>Attendance moves to the survivor. Where both were present at the same meeting, the earlier record stays and
     /// the other is taken off the list, kept as history like any removal.</item>
-    /// <item>Group assignments move to the survivor. Assignments in the same group and role whose intervals overlap
-    /// become one, from the earliest start to the latest end. If the two held different roles in a group at the same
-    /// time, nothing is saved and the result is 409.</item>
+    /// <item>Group assignments move to the survivor. Assignments in the same group whose intervals overlap become one,
+    /// from the earliest start. Across roles Leader wins, but only as long as the leadership lasted, so a past leadership
+    /// never becomes current access (see <see cref="JoinAssignments"/>).</item>
     /// <item>Dismissed pairs that named the duplicate name the survivor.</item>
     /// <item>A household the merge leaves with nobody in it is deleted.</item>
     /// <item>The duplicate keeps its values, but becomes inactive, leaves its household and account, and records whom
@@ -201,12 +198,6 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         var ids = new[] { survivor.Id, duplicate.Id };
         var assignments = await db.GroupAssignments.Where(a => ids.Contains(a.PersonId)).ToListAsync(ct);
         var joined = JoinAssignments(assignments);
-        if (joined.ConflictingGroupIds.Length > 0)
-            throw new TrackerException(TrackerFailure.Conflict, new Dictionary<string, object?>
-            {
-                [ConflictReasonKey] = OverlappingRolesReason,
-                ["groupIds"] = joined.ConflictingGroupIds
-            });
         var attendance = await db.Attendances.Where(a => ids.Contains(a.PersonId)).ToListAsync(ct);
         var now = scope.Now;
         var survivorHousehold = survivor.HouseholdId;
@@ -219,6 +210,10 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         // then move rows onto the survivor in any order.
         RemoveSharedAttendance(attendance, actor.UserId, now);
         db.GroupAssignments.RemoveRange(joined.Absorbed);
+        // A change that leaves an interval closed takes no open slot, so it is safe now; one that opens an interval waits
+        // until the absorbed open rows are gone.
+        foreach (var change in joined.Changes.Where(c => c.EndsAt is not null))
+            change.Apply();
         duplicate.MergedIntoId = survivor.Id;
         duplicate.MergedAt = now;
         duplicate.MergedByUserId = actor.UserId;
@@ -229,8 +224,8 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         await scope.SaveAsync(ct, TrackerFailure.PreconditionFailed);
 
         // Second save: widen and move what remains, and apply the chosen fields.
-        foreach (var (assignment, endsAt) in joined.Widened)
-            assignment.EndsAt = endsAt;
+        foreach (var change in joined.Changes.Where(c => c.EndsAt is null))
+            change.Apply();
         foreach (var a in attendance)
             a.PersonId = survivor.Id;
         foreach (var a in assignments.Except(joined.Absorbed))
@@ -282,44 +277,81 @@ public sealed class PersonMergeService(ApplicationDbContext db, TrackerScope sco
         }
     }
 
-    private sealed record JoinedAssignments(List<GroupAssignment> Absorbed, List<(GroupAssignment Assignment, DateTimeOffset? EndsAt)> Widened,
-        Guid[] ConflictingGroupIds);
+    /// <summary>A kept assignment's new interval and role.</summary>
+    private readonly record struct AssignmentChange(GroupAssignment Assignment, DateTimeOffset StartsAt, DateTimeOffset? EndsAt, GroupRole Role)
+    {
+        public void Apply()
+        {
+            Assignment.StartsAt = StartsAt;
+            Assignment.EndsAt = EndsAt;
+            Assignment.Role = Role;
+        }
+    }
+
+    private sealed record JoinedAssignments(List<GroupAssignment> Absorbed, List<AssignmentChange> Changes);
 
     /// <summary>
     /// Plans how two people's assignments become one person's. In each group, sorted by start, an assignment that begins
-    /// before the current run ends (an open run never ends) joins it: the run's first assignment is widened to the latest
-    /// end and the others are absorbed. Intervals that only touch stay separate, as a role change leaves them. An overlap
-    /// between different roles cannot be joined without inventing or dropping a role, so its group is reported instead.
+    /// before the current run ends (an open run never ends) joins that run; intervals that only touch stay separate, as a
+    /// role change leaves them. Each run of two or more becomes one interval from its earliest start:
+    /// <list type="bullet">
+    /// <item>All one role: that role, to the run's latest end.</item>
+    /// <item>Mixed roles, Leader wins: Leader, but never longer than the leadership itself. If a Leader interval is still
+    /// open, the joined Leader interval is open. Otherwise it ends when the last Leader interval did, and any Member time
+    /// after that stays a separate Member interval, so a past leadership never becomes current access.</item>
+    /// </list>
+    /// The run's first assignment and, when needed, one more are kept and changed; the rest are absorbed (deleted).
     /// </summary>
     private static JoinedAssignments JoinAssignments(List<GroupAssignment> assignments)
     {
         var absorbed = new List<GroupAssignment>();
-        var widened = new List<(GroupAssignment, DateTimeOffset?)>();
-        var conflicts = new HashSet<Guid>();
+        var changes = new List<AssignmentChange>();
         foreach (var group in assignments.GroupBy(a => a.GroupId))
         {
-            GroupAssignment? run = null;
+            var run = new List<GroupAssignment>();
             DateTimeOffset? runEnd = null;
             foreach (var a in group.OrderBy(a => a.StartsAt).ThenBy(a => a.Id))
             {
-                if (run is null || (runEnd is { } end && a.StartsAt >= end))
+                if (run.Count > 0 && runEnd is { } end && a.StartsAt >= end)
                 {
-                    if (run is not null && runEnd != run.EndsAt)
-                        widened.Add((run, runEnd));
-                    run = a;
-                    runEnd = a.EndsAt;
-                    continue;
+                    Plan(run, runEnd, absorbed, changes);
+                    run = [];
                 }
-                if (a.Role != run.Role)
-                    conflicts.Add(group.Key);
-                runEnd = runEnd is null || a.EndsAt is null ? null : (a.EndsAt > runEnd ? a.EndsAt : runEnd);
-                absorbed.Add(a);
+                runEnd = run.Count == 0 ? a.EndsAt : Later(runEnd, a.EndsAt);
+                run.Add(a);
             }
-            if (run is not null && runEnd != run.EndsAt)
-                widened.Add((run, runEnd));
+            Plan(run, runEnd, absorbed, changes);
         }
-        return new(absorbed, widened, [.. conflicts]);
+        return new(absorbed, changes);
     }
+
+    private static void Plan(List<GroupAssignment> run, DateTimeOffset? runEnd, List<GroupAssignment> absorbed, List<AssignmentChange> changes)
+    {
+        if (run.Count < 2)
+            return;
+        var first = run[0];
+        var leaders = run.Where(a => a.Role == GroupRole.Leader).ToArray();
+        if (leaders.Length == 0 || leaders.Length == run.Count)
+        {
+            changes.Add(new(first, first.StartsAt, runEnd, first.Role));
+            absorbed.AddRange(run.Skip(1));
+            return;
+        }
+        var leaderEnd = leaders.Select(a => a.EndsAt).Aggregate(Later);
+        changes.Add(new(first, first.StartsAt, leaderEnd, GroupRole.Leader));
+        // Members stayed on after the last leadership ended: that time is kept as Member, starting where Leader ended.
+        if (leaderEnd is { } ended && (runEnd is null || runEnd > ended))
+        {
+            changes.Add(new(run[1], ended, runEnd, GroupRole.Member));
+            absorbed.AddRange(run.Skip(2));
+        }
+        else
+            absorbed.AddRange(run.Skip(1));
+    }
+
+    /// <summary>The later of two ends, where null (still open) is latest.</summary>
+    private static DateTimeOffset? Later(DateTimeOffset? a, DateTimeOffset? b) =>
+        a is null || b is null ? null : (a > b ? a : b);
 
     /// <summary>
     /// Moves "not a duplicate" decisions from the duplicate to the survivor. A decision about the merged pair itself, or

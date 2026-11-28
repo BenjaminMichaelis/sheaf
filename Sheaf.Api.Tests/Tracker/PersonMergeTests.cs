@@ -323,7 +323,7 @@ public class PersonMergeTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task MergePerson_OverlappingDifferentRoles_ReturnsConflictNamingTheGroupAndChangesNothing()
+    public async Task MergePerson_PastLeadershipOverlapsCurrentMembership_LeaderEndsWhenLeadershipDidAndMembershipContinues()
     {
         using var f = await SeedAsync();
         var survivor = await AddPersonAsync(f, "Ann", "Lee");
@@ -333,16 +333,34 @@ public class PersonMergeTests : ChurchApiTestBase
             new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Member, StartsAt = now.AddDays(-100) },
             new GroupAssignment { GroupId = f.Group.Id, PersonId = duplicate.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(-300), EndsAt = now.AddDays(-50) });
 
-        var response = await MergeAsync(f, survivor, duplicate);
+        await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
 
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Conflict);
-        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>() ?? throw new InvalidOperationException("Missing problem.");
-        await Assert.That((await ExtensionAsync(problem, "reason")).GetString()).IsEqualTo("overlappingGroupRoles");
-        var groups = (await ExtensionAsync(problem, "groupIds")).EnumerateArray().Select(g => g.GetGuid()).ToArray();
-        await Assert.That(groups).IsEquivalentTo([f.Group.Id]);
-        await Assert.That((await GetPersonAsync(f, duplicate.Id)).MergedIntoId).IsNull();
         var leaders = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/leaders"));
-        await Assert.That(leaders.Items.Select(a => a.PersonId)).IsEquivalentTo([duplicate.Id]);
+        var members = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/members"));
+        var leader = await Assert.That(leaders.Items).HasSingleItem();
+        await Assert.That((leader.PersonId, leader.StartsAt, leader.EndsAt)).IsEqualTo((survivor.Id, now.AddDays(-300), (DateTimeOffset?)now.AddDays(-50)));
+        var member = await Assert.That(members.Items).HasSingleItem();
+        await Assert.That((member.PersonId, member.StartsAt, member.EndsAt)).IsEqualTo((survivor.Id, now.AddDays(-50), (DateTimeOffset?)null));
+    }
+
+    [Test]
+    public async Task MergePerson_CurrentLeadershipOverlapsMembership_JoinsIntoOneOpenLeaderInterval()
+    {
+        using var f = await SeedAsync();
+        var survivor = await AddPersonAsync(f, "Ann", "Lee");
+        var duplicate = await AddPersonAsync(f, "Ann", "Lee");
+        var now = Time.GetUtcNow();
+        await SeedAsync(f,
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = survivor.Id, Role = GroupRole.Member, StartsAt = now.AddDays(-100) },
+            new GroupAssignment { GroupId = f.Group.Id, PersonId = duplicate.Id, Role = GroupRole.Leader, StartsAt = now.AddDays(-30) });
+
+        await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
+
+        var leaders = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/leaders"));
+        var members = await TrackerReadAsync<PagedResponse<AssignmentResponse>>(await SendAsync(f, HttpMethod.Get, $"/groups/{f.Group.Id}/members"));
+        await Assert.That(members.Items).IsEmpty();
+        var leader = await Assert.That(leaders.Items).HasSingleItem();
+        await Assert.That((leader.PersonId, leader.StartsAt, leader.EndsAt)).IsEqualTo((survivor.Id, now.AddDays(-100), (DateTimeOffset?)null));
     }
 
     [Test]
@@ -442,6 +460,36 @@ public class PersonMergeTests : ChurchApiTestBase
     }
 
     [Test]
+    public async Task GetDuplicatePeople_PairMatchingOnSeveralKeys_ListsItOnceWithEveryReason()
+    {
+        using var f = await SeedAsync();
+        var original = await AddPersonAsync(f, "Ann", "Lee", email: "ann@example.com", phone: "555-0100", daysAgo: 2);
+        var copy = await AddPersonAsync(f, "Ann", "Lee", email: "ann@example.com", phone: "5550100", daysAgo: 1);
+
+        var candidates = await GetCandidatesAsync(f);
+
+        var pair = await Assert.That(candidates).HasSingleItem();
+        await Assert.That((pair.Person.Id, pair.Other.Id)).IsEqualTo((original.Id, copy.Id));
+        await Assert.That(pair.Reasons).IsEquivalentTo([DuplicateReason.Name, DuplicateReason.Email, DuplicateReason.Phone]);
+    }
+
+    [Test]
+    public async Task GetDuplicatePeople_InactiveLookalike_IsNotSuggested()
+    {
+        using var f = await SeedAsync();
+        await AddPersonAsync(f, "Ann", "Lee");
+        var inactive = await AddPersonAsync(f, "Ann", "Lee");
+        await InChurchAsync(f.ChurchId, async db =>
+        {
+            var stored = await db.People.SingleAsync(p => p.Id == inactive.Id);
+            stored.IsActive = false;
+            await db.SaveChangesAsync();
+        });
+
+        await Assert.That(await GetCandidatesAsync(f)).IsEmpty();
+    }
+
+    [Test]
     public async Task GetDuplicatePeople_WithoutPeopleManage_ReturnsForbidden()
     {
         using var f = await SeedAsync(ChurchMembershipRole.Leader);
@@ -531,7 +579,8 @@ public class PersonMergeTests : ChurchApiTestBase
         using var f = await SeedAsync();
         var survivor = await AddPersonAsync(f, "Ann", "Lee", daysAgo: 2);
         var duplicate = await AddPersonAsync(f, "Ann", "Lee", daysAgo: 1);
-        await SendAsync(f, HttpMethod.Post, "/people/duplicates/dismissals", new DuplicateDismissalRequest(survivor.Id, duplicate.Id));
+        var dismissed = await SendAsync(f, HttpMethod.Post, "/people/duplicates/dismissals", new DuplicateDismissalRequest(survivor.Id, duplicate.Id));
+        await Assert.That(dismissed.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
 
         var merged = await TrackerReadAsync<PersonResponse>(await MergeAsync(f, survivor, duplicate));
 
