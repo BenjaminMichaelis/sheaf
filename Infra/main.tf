@@ -35,4 +35,5 @@ module "prod" {
   acr_login_server = module.shared.acr_login_server
   location         = local.location
   tags             = local.default_tags
+  planning_center  = var.planning_center
 }

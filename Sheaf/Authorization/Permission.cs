@@ -16,7 +16,9 @@ public enum Permission
     /// <summary>Manage every person: create and edit anyone, activate or deactivate, and resolve duplicates.</summary>
     PeopleManage,
     /// <summary>Change church-wide settings, such as the time zone meeting dates are kept in.</summary>
-    ManageChurch
+    ManageChurch,
+    /// <summary>Connect, inspect, and disconnect external systems such as Planning Center.</summary>
+    ManageIntegrations
 }
 
 /// <summary>
@@ -29,7 +31,7 @@ public static class RolePermissions
     // Coordinator behaves like a Leader until coordinator-specific scope is defined.
     private static readonly Permission[] Coordinator = [.. Leader];
     private static readonly Permission[] Staff = [.. Coordinator, Permission.TrackerManage, Permission.PeopleManage];
-    private static readonly Permission[] Admin = [.. Staff, Permission.ManageMemberships, Permission.ManageChurch];
+    private static readonly Permission[] Admin = [.. Staff, Permission.ManageMemberships, Permission.ManageChurch, Permission.ManageIntegrations];
 
     private static readonly FrozenDictionary<ChurchMembershipRole, FrozenSet<Permission>> Map =
         new Dictionary<ChurchMembershipRole, FrozenSet<Permission>>

@@ -23,27 +23,19 @@ defaults:
 env:
   TERRAFORM_VERSION: '1.14.6'
 
+# A newer push to the same pull request makes the older run's results moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # Build and test backend
-  build:
+  frontend:
+    name: Frontend lint, test & build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Install pinned pnpm
-        run: |
-          $package = Get-Content Sheaf.Web/package.json -Raw | ConvertFrom-Json
-          npm install --global $package.packageManager
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Install frontend dependencies
-        working-directory: Sheaf.Web
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-frontend
 
       - name: Lint frontend
         working-directory: Sheaf.Web
@@ -57,16 +49,19 @@ jobs:
         working-directory: Sheaf.Web
         run: pnpm run build
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
+  dotnet-checks:
+    name: .NET formatting, API client & migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Install pinned workload set
-        run: dotnet workload update
+      # gen:api runs openapi-typescript from Sheaf.Web/node_modules.
+      - uses: ./.github/actions/setup-frontend
 
-      - name: Restore .NET dependencies
-        run: dotnet restore Sheaf.Backend.slnf
+      - uses: ./.github/actions/setup-backend
+
+      - name: Enforce formatting
+        run: .\.github\scripts\Invoke-DotNetFormatStrict.ps1 -Targets Sheaf.Backend.slnf
 
       - name: Verify generated API client
         run: |
@@ -80,23 +75,24 @@ jobs:
             exit 1
           }
 
-      - name: Enforce formatting
-        run: |
-          .\.github\scripts\Invoke-DotNetFormatStrict.ps1 -Targets Sheaf.Backend.slnf
- 
-      - name: Build
-        run: dotnet build Sheaf.Backend.slnf --no-restore --configuration Release
-
-      - name: Restore .NET Tools
-        run: dotnet tool restore
-
+      # Builds the AppHost (and Sheaf.Data) itself; this job has no separate full build.
       - name: Check for Pending Database Changes
         run: |
           dotnet tool run dotnet-ef migrations has-pending-model-changes `
             --configuration Release `
             --project Sheaf.Data/Sheaf.Data.csproj `
-            --startup-project Sheaf.AppHost/Sheaf.AppHost.csproj `
-            --no-build
+            --startup-project Sheaf.AppHost/Sheaf.AppHost.csproj
+
+  dotnet-test:
+    name: .NET build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-backend
+
+      - name: Build
+        run: dotnet build Sheaf.Backend.slnf --no-restore --configuration Release
 
       # Microsoft Testing Platform can stop the run once 10 tests fail in CI:
       # https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-cli-options
@@ -110,13 +106,18 @@ jobs:
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN']);
             core.exportVariable('ACTIONS_RESULTS_URL', process.env['ACTIONS_RESULTS_URL']);
 
+      # No --report-trx-filename: every test project shares trx-data, so a fixed name makes each project overwrite the
+      # last one's report. Since MTP 2.3.0 the default name is {asm}_{tfm}_{arch}.trx, one file per test project:
+      # https://learn.microsoft.com/dotnet/core/testing/microsoft-testing-platform-test-reports
       - name: Test
-        run: dotnet test --solution Sheaf.Backend.slnf --no-build --configuration Release --verbosity normal --maximum-failed-tests 10 --results-directory trx-data --report-trx --report-trx-filename tests.trx
+        run: dotnet test --solution Sheaf.Backend.slnf --no-build --configuration Release --verbosity normal --maximum-failed-tests 10 --results-directory trx-data --report-trx
 
+      # Skip the SDK's consolidated copy under trx-data/merged so failures are not listed twice.
       - name: Generate merged failure playlist from TRX
         if: always()
         run: |
           $trxFiles = Get-ChildItem -Path "trx-data" -Recurse -File -Filter "*.trx" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Directory.Name -ne 'merged' } |
             Select-Object -ExpandProperty FullName
 
           if (-not $trxFiles) {
@@ -148,13 +149,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  publish:
+    name: .NET publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Publishing Sheaf.Web runs `pnpm run build` and copies dist/ into wwwroot.
+      - uses: ./.github/actions/setup-frontend
+
+      - uses: ./.github/actions/setup-backend
+
       - name: Publish
-        run: dotnet publish Sheaf.Backend.slnf --configuration Release --no-build
+        run: dotnet publish Sheaf.Backend.slnf --no-restore --configuration Release
 
       - name: Build Database Bundle
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
-          dotnet ef migrations bundle `
+          dotnet tool run dotnet-ef migrations bundle `
             --self-contained `
             --no-build `
             --configuration Release `
@@ -169,6 +181,20 @@ jobs:
           name: DatabaseMigration
           path: 'efbundle'
           retention-days: 1
+
+  # The main branch ruleset requires a check named "build". This job keeps that name and passes only when every job
+  # split out of the original build job succeeded, so the ruleset does not need to list each job.
+  build:
+    name: build
+    if: always()
+    needs: [frontend, dotnet-checks, dotnet-test, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI jobs to succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          Write-Error "One or more CI jobs did not succeed: ${{ toJSON(needs) }}"
+          exit 1
 
   # Build the backend image on every run, without pushing, so Dockerfile and base-image changes are checked before they
   # reach a deploy.

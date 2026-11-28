@@ -232,6 +232,89 @@ rostered person does not attend; no separate absence workflow or visitor categor
 is introduced. Existing consent/trust requirements and Person erasure/anonymization
 policy remain applicable; inactivity does not trigger erasure.
 
+### Planning Center connection
+
+A church Admin (`ManageIntegrations`) connects the church to one Planning Center
+organization with OpenID Connect (authorization code + PKCE), run by ASP.NET Core's
+OpenID Connect handler (scheme `PlanningCenter`). The handler validates state,
+correlation, the code exchange, and the id token (signature, issuer, audience, nonce)
+against Planning Center's discovery document; the organization comes from the id
+token. Its events save the connection and redirect, so it never signs anyone in. Sheaf
+revokes tokens itself, since the handler has no revoke. Refreshing tokens comes with the
+first feature that calls Planning Center's API. Sheaf uses one Planning Center
+OAuth application for all churches; it is configured in the `PlanningCenter` section.
+Locally, set the AppHost's optional parameters, which it passes to the API (unset ones
+are skipped, and the integration stays unconfigured):
+
+```pwsh
+dotnet user-secrets set Parameters:planning-center-client-id "<client id>" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-client-secret "<secret>" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-redirect-uri "http://localhost:5285/api/integrations/planning-center/callback" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-return-url "<frontend origin>/settings/integrations" --project Sheaf.AppHost
+dotnet user-secrets set Parameters:planning-center-user-agent "Sheaf (<contact URL or email>)" --project Sheaf.AppHost
+```
+
+The AppHost now keeps its secrets (including the SQL Server password Aspire generates) in
+its user secrets. If an existing persistent `Sheaf-sql` container then fails with "Login
+failed for user 'sa'", its data volume holds a password from before; give the checkout its
+own container and volume instead of reusing it:
+
+```pwsh
+dotnet user-secrets set Sheaf:ContainerSuffix "<name>" --project Sheaf.AppHost
+```
+
+In production, set the Terraform variable `planning_center` in `Infra`. Store the client
+secret in Azure Key Vault and pass its versionless secret ID as
+`client_secret_key_vault_secret_id`; the container app reads it through a Key Vault
+reference with the app's managed identity, which needs the Key Vault Secrets User role
+on that secret. The secret value never goes into Terraform.
+
+ClientId, ClientSecret, and RedirectUri must be set together or not at all; startup
+fails otherwise. Planning Center requires a `User-Agent` naming the app and a way to
+contact its operator, and may answer 403 to one that does not. The default,
+`Sheaf/1.0`, has no contact, so outside Development and Testing startup fails unless
+`UserAgent` includes an email or URL.
+
+The redirect URI must be registered on the Planning Center OAuth application exactly.
+Sheaf's sign-in cookie is host-only, so the callback must be served on the host that
+set it: the API's host, or a frontend host that proxies `/api` to the API. `ReturnUrl`
+(the frontend page to come back to) is required once the integration is configured.
+Without these settings the status endpoint reports `configured: false` and connecting
+returns 503.
+
+- `GET /api/church/integrations/planning-center` returns the connection status.
+- `GET /api/church/integrations/planning-center/connect?churchId=<selected church>` is
+  a browser navigation, not a fetch: it redirects to Planning Center. It returns 400
+  without `churchId`, 409 when `churchId` is not the selected church, 403 for a
+  cross-site navigation (`Sec-Fetch-Site: cross-site`, following the Fetch Metadata
+  resource isolation policy at https://web.dev/articles/fetch-metadata), and 503 when
+  unconfigured.
+- The callback redirects to `ReturnUrl` with `planningCenter=Connected`, `Denied`,
+  `InvalidRequest`, `OrganizationInUse`, or `Failed`. Only the membership that started
+  the connection can finish it, checked before the code is exchanged; a return without
+  that Sheaf session is `InvalidRequest`.
+- `DELETE /api/church/integrations/planning-center` revokes the token in Planning
+  Center and forgets it, or returns 409 if another admin changed the connection
+  meanwhile. Revoking does not remove Sheaf from the organization's
+  authorized applications in Planning Center (planningcenter/developers#1419); a
+  Planning Center admin removes it there if wanted.
+
+Connections are stored as provider-neutral `ChurchIntegrations` rows (one per church
+and provider), so another church management system can be added without a schema
+change. Each provider's credentials are serialized into one value encrypted at rest
+with Data Protection. The shared `IntegrationTenantLinks` table ensures an external
+account, such as a Planning Center organization, is connected to only one church at a
+time. Token requests are never retried, because an authorization code is single-use.
+
+Planning Center behavior to honor when refresh arrives (Phase 2): access tokens last 2
+hours and refresh tokens 90 days from the last refresh, so an idle connection needs a
+background refresh; every refresh issues a new refresh token, and the old one is revoked
+only once the new access token is used (planningcenter/developers#1310), and a repeat
+authorization also gets a new pair (seen against the live service); a dead refresh
+token is answered with `invalid_grant` (HTTP 401) or `invalid_request` with \"The refresh
+token is no longer valid\" (#284, #1310, #1318), while other errors, such as a firewall's
+403 page, must not be treated as a dead token (#1310).
+
 ### Mobile (Avalonia)
 
 `Sheaf.Mobile*` holds the shared app plus Android, iOS, Browser and Desktop heads. Install workloads with `dotnet workload restore`. Android is built locally; iOS requires macOS (built in CI). Mobile apps run separately from Aspire; point them at the API (Android emulator: `http://10.0.2.2:5285`, iOS simulator: `http://localhost:5285`).

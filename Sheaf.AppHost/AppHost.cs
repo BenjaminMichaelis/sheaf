@@ -90,6 +90,17 @@ if (!builder.ExecutionContext.IsPublishMode)
             await db.Resource.GetConnectionStringAsync(context.CancellationToken)
             ?? throw new InvalidOperationException($"Connection string '{ConnectionStrings.DatabaseKey}' could not be resolved.");
     });
+
+    // Planning Center is optional: an unset optional parameter is not prompted for and its variable is omitted, so
+    // Sheaf reports the integration unconfigured. Production sets these through Infra (planning_center).
+    // https://aspire.dev/fundamentals/external-parameters/#optional-parameters
+    backend
+        .WithEnvironment("PlanningCenter__ClientId", builder.AddParameter("planning-center-client-id").AsOptional())
+        .WithEnvironment("PlanningCenter__ClientSecret",
+            builder.AddParameter("planning-center-client-secret", secret: true).AsOptional())
+        .WithEnvironment("PlanningCenter__RedirectUri", builder.AddParameter("planning-center-redirect-uri").AsOptional())
+        .WithEnvironment("PlanningCenter__ReturnUrl", builder.AddParameter("planning-center-return-url").AsOptional())
+        .WithEnvironment("PlanningCenter__UserAgent", builder.AddParameter("planning-center-user-agent").AsOptional());
 }
 else
 {
