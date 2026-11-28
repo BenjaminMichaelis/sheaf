@@ -45,8 +45,9 @@ export function ChurchProvider({ children }: { children: ReactNode }) {
   const [failure, setFailure] = useState<{ churchId: string; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
 
-  // Layout effects (this one included) all run before any child's useEffect, so the first requests children make
-  // already carry the church.
+  // Not documented as an ordering guarantee: this relies on React committing layout effects (this one included)
+  // before any passive useEffect, so children's first requests already carry the church. Requests made outside a
+  // render cycle read the latest value, which is what the header check needs.
   useLayoutEffect(() => {
     setActiveChurch(churchId)
   }, [churchId])
@@ -101,7 +102,7 @@ export function ChurchProvider({ children }: { children: ReactNode }) {
     [church, churches, current, settingsError, reloadSettings, switchChurch],
   )
 
-  return <ChurchContext.Provider value={value}>{children}</ChurchContext.Provider>
+  return <ChurchContext value={value}>{children}</ChurchContext>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

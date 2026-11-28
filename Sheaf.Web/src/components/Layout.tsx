@@ -37,9 +37,8 @@ export default function Layout() {
   const { user, logout } = useAuth()
   const { church, labels } = useChurch()
   const { mode, toggleTheme } = useTheme()
-  // noSsr: this app only renders in the browser, so read the real width on the first render instead of
-  // flashing the phone layout on desktop.
-  const isDesktop = useMediaQuery(useMuiTheme().breakpoints.up('md'), { noSsr: true })
+  // Under createRoot the first render already reads the real width (mui.com/material-ui/react-use-media-query).
+  const isDesktop = useMediaQuery(useMuiTheme().breakpoints.up('md'))
   const [menuOpen, setMenuOpen] = useState(false)
 
   // Navigation only makes sense once the user is acting in a church.

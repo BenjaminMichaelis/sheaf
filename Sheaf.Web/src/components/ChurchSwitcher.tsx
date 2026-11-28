@@ -49,7 +49,7 @@ export default function ChurchSwitcher() {
         disabled={switching}
         aria-haspopup="menu"
         aria-expanded={anchor !== null}
-        aria-label={`Current church: ${church.churchName}. Switch church`}
+        aria-label={`${church.churchName}, switch church`}
         sx={{ textTransform: 'none', minWidth: 0 }}
       >
         <Typography variant="subtitle1" component="span" noWrap>

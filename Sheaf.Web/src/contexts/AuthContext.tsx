@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { UserInfo, LoginRequest, RegisterRequest } from '@/types'
 import { apiClient } from '@/services/apiClient'
 
@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const { data } = await apiClient.GET('/api/auth/user')
 
@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = async (credentials: LoginRequest) => {
+  const login = useCallback(async (credentials: LoginRequest) => {
     const { data } = await apiClient.POST('/api/auth/login', { body: credentials })
 
     if (data === undefined) {
@@ -66,9 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(data)
-  }
+  }, [])
 
-  const register = async (data: RegisterRequest) => {
+  const register = useCallback(async (data: RegisterRequest) => {
     const result = await apiClient.POST('/api/auth/register', { body: data })
 
     if (result.data === undefined) {
@@ -76,15 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(result.data)
-  }
+  }, [])
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await apiClient.POST('/api/auth/logout')
 
     setUser(null)
-  }
+  }, [])
 
-  // Stable identity so ChurchContext's memoized value does not change on every AuthProvider render.
   const switchChurch = useCallback(async (churchId: string) => {
     const { data } = await apiClient.POST('/api/auth/church/{churchId}', { params: { path: { churchId } } })
 
@@ -95,11 +94,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data)
   }, [])
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, switchChurch }}>
-      {children}
-    </AuthContext.Provider>
+  // Stable functions and a memoized value, so consumers re-render only when the user or loading state changes
+  // (react.dev/reference/react/useContext#optimizing-re-renders-when-passing-objects-and-functions).
+  const value = useMemo(
+    () => ({ user, loading, login, register, logout, refreshUser, switchChurch }),
+    [user, loading, login, register, logout, refreshUser, switchChurch],
   )
+
+  return <AuthContext value={value}>{children}</AuthContext>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
