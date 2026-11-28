@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { UserInfo, LoginRequest, RegisterRequest } from '@/types'
 import { apiClient } from '@/services/apiClient'
+import { isOtherChurchQuery } from '@/services/churchQueries'
 
 interface AuthContextType {
   user: UserInfo | null
@@ -18,6 +20,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+
+  // Church queries are keyed by church, so nothing cached for one church is shown under another; these drop what is no
+  // longer needed. A changed account clears everything, so nothing from the previous account can be shown.
+  const keepOnlyChurchOf = useCallback(
+    (next: UserInfo) => {
+      const churchId = next.isAuthenticated ? (next.currentChurch?.churchId ?? null) : null
+      queryClient.removeQueries({ predicate: query => isOtherChurchQuery(query.queryKey, churchId) })
+    },
+    [queryClient],
+  )
 
   const refreshUser = useCallback(async () => {
     try {
@@ -27,13 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('User response is empty')
       }
 
+      keepOnlyChurchOf(data)
       setUser(data)
     } catch {
+      queryClient.clear()
       setUser(null)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [queryClient, keepOnlyChurchOf])
 
   useEffect(() => {
     let cancelled = false
@@ -65,8 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Login response is empty')
     }
 
+    queryClient.clear()
     setUser(data)
-  }, [])
+  }, [queryClient])
 
   const register = useCallback(async (data: RegisterRequest) => {
     const result = await apiClient.POST('/api/auth/register', { body: data })
@@ -75,14 +91,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Registration response is empty')
     }
 
+    queryClient.clear()
     setUser(result.data)
-  }, [])
+  }, [queryClient])
 
   const logout = useCallback(async () => {
     await apiClient.POST('/api/auth/logout')
 
+    queryClient.clear()
     setUser(null)
-  }, [])
+  }, [queryClient])
 
   const switchChurch = useCallback(async (churchId: string) => {
     const { data } = await apiClient.POST('/api/auth/church/{churchId}', { params: { path: { churchId } } })
@@ -91,8 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Church switch response is empty')
     }
 
+    keepOnlyChurchOf(data)
     setUser(data)
-  }, [])
+  }, [keepOnlyChurchOf])
 
   // Stable functions and a memoized value, so consumers re-render only when the user or loading state changes
   // (react.dev/reference/react/useContext#optimizing-re-renders-when-passing-objects-and-functions).
