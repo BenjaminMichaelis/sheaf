@@ -35,6 +35,28 @@ Content-Type: application/json
 
 {"firstName":"Ada","lastName":"Lovelace","email":null,"phone":null,"isActive":true}
 
+### Staff list suggested duplicates (same name, email, or phone); the earlier record comes first
+GET {{baseUrl}}/api/church/people/duplicates
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+
+### Staff mark a pair as different people so it is no longer suggested
+POST {{baseUrl}}/api/church/people/duplicates/dismissals
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"personId":"{{personId}}","otherPersonId":"{{otherPersonId}}"}
+
+### Staff merge a duplicate into this person; If-Match is the survivor's version. Fields default to "Merge"; cannot be undone
+POST {{baseUrl}}/api/church/people/{{personId}}/merge
+If-Match: "{{version}}"
+Cookie: {{cookie}}
+X-Sheaf-Church: {{churchId}}
+Content-Type: application/json
+
+{"duplicateId":"{{otherPersonId}}","duplicateVersion":"{{otherVersion}}","fields":{"email":"Duplicate","household":"Survivor"}}
+
 ### Group types
 GET {{baseUrl}}/api/church/group-types
 Cookie: {{cookie}}

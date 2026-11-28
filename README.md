@@ -209,6 +209,35 @@ supported. Ending a group retains it and all assignment intervals; group end bou
 their effective activity without rewriting history. There are no tracker delete or
 automatic-merge endpoints.
 
+Every guest becomes a Person, so duplicates are expected. Staff and Admin
+(`PeopleManage`) review them: `GET /people/duplicates` lists pairs of active people
+with the same full name, email or phone (phones compare digits only), earlier record
+first, and `POST /people/duplicates/dismissals` marks a pair as different people so it
+stops appearing. `POST /people/{survivorId}/merge` takes the survivor's version in
+If-Match and the duplicate's id and version in the body. For last name, email, phone and
+household, each field can be `Merge` (the default: the survivor's value, or the
+duplicate's when the survivor's is blank), `Survivor` or `Duplicate`. First name keeps
+the survivor's unless `Duplicate` is chosen. In one transaction, the merge:
+
+- moves attendance to the survivor. Where both were at the same meeting, the earlier
+  record stays and the other is taken off the list as history.
+- moves group assignments. Overlapping intervals in the same group join into one, and
+  separate ones stay separate. Across roles Leader wins, but never longer than the
+  leadership itself: time counts as Leader only where a Leader interval covers it, and
+  all other time stays Member. So leadership never starts earlier, lasts longer or fills
+  a gap between leaderships, and a past or scheduled leadership never becomes current
+  access.
+- moves the account link if only the duplicate has one. If both have one, it returns
+  409 with `reason: bothLinkedToAccounts`.
+- makes the survivor active if either person was.
+- moves "not a duplicate" decisions to the survivor.
+- deletes any household it leaves empty.
+
+The duplicate is kept as read-only history: inactive, with no household or account, and
+with `mergedIntoId`, the time and the merging account recorded. Only Staff and Admin can
+read it, and lookup, assignment, households and further merges treat it as gone. A merge
+cannot be undone.
+
 People, households and groups carry a `version`, returned in the body and as a strong
 `ETag`. Updating a person, household or group, and ending a group, require that version
 in `If-Match`: a missing header returns 428 and a version that is no longer current

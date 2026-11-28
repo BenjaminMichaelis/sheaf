@@ -293,6 +293,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/church/people/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Staff list pairs of active people with the same name, email, or phone, except pairs marked as different */
+        get: operations["GetDuplicatePeople"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/church/people/duplicates/dismissals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Staff mark two people as different so the pair is no longer suggested */
+        post: operations["DismissDuplicatePeople"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/church/people/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Staff merge a duplicate into this Person, moving attendance, group history, household, and account link; it cannot be undone */
+        post: operations["MergePerson"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/church/group-types": {
         parameters: {
             query?: never;
@@ -721,6 +772,30 @@ export interface components {
             password: string;
             code: string;
         };
+        DuplicateCandidateResponse: {
+            person: components["schemas"]["DuplicatePersonResponse"];
+            other: components["schemas"]["DuplicatePersonResponse"];
+            reasons: components["schemas"]["DuplicateReason"][];
+        };
+        DuplicateDismissalRequest: {
+            /** Format: uuid */
+            personId: string;
+            /** Format: uuid */
+            otherPersonId: string;
+        };
+        DuplicatePersonResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            email: null | string;
+            phone: null | string;
+            householdLabel: null | string;
+            hasAccount: boolean;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @enum {unknown} */
+        DuplicateReason: "Name" | "Email" | "Phone";
         EmailRequest: {
             email: string;
         };
@@ -805,6 +880,11 @@ export interface components {
             /** Format: int32 */
             nextOffset: null | number | string;
         };
+        PagedResponseOfDuplicateCandidateResponse: {
+            items: components["schemas"]["DuplicateCandidateResponse"][];
+            /** Format: int32 */
+            nextOffset: null | number | string;
+        };
         PagedResponseOfGroupResponse: {
             items: components["schemas"]["GroupResponse"][];
             /** Format: int32 */
@@ -826,6 +906,25 @@ export interface components {
             name: string;
             householdLabel: null | string;
             groups: null | string[];
+        };
+        /**
+         * @default Merge
+         * @enum {unknown}
+         */
+        PersonMergeChoice: "Merge" | "Survivor" | "Duplicate";
+        PersonMergeFields: {
+            firstName?: components["schemas"]["PersonMergeChoice"];
+            lastName?: components["schemas"]["PersonMergeChoice"];
+            email?: components["schemas"]["PersonMergeChoice"];
+            phone?: components["schemas"]["PersonMergeChoice"];
+            household?: components["schemas"]["PersonMergeChoice"];
+        };
+        PersonMergeRequest: {
+            /** Format: uuid */
+            duplicateId: string;
+            /** Format: uuid */
+            duplicateVersion: string;
+            fields?: null | components["schemas"]["PersonMergeFields"];
         };
         PersonRequest: {
             firstName: string;
@@ -850,6 +949,8 @@ export interface components {
             canEdit: boolean;
             /** Format: uuid */
             version: string;
+            /** Format: uuid */
+            mergedIntoId?: null | string;
         };
         PlanningCenterStatusResponse: {
             configured: boolean;
@@ -1744,6 +1845,205 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    GetDuplicatePeople: {
+        parameters: {
+            query?: {
+                offset?: number | string;
+                limit?: number | string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PagedResponseOfDuplicateCandidateResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    DismissDuplicatePeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateDismissalRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    MergePerson: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonMergeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

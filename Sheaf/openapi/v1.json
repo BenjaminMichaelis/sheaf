@@ -949,6 +949,281 @@
         ]
       }
     },
+    "/api/church/people/duplicates": {
+      "get": {
+        "tags": [
+          "Tracker"
+        ],
+        "summary": "Staff list pairs of active people with the same name, email, or phone, except pairs marked as different",
+        "operationId": "GetDuplicatePeople",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResponseOfDuplicateCandidateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
+    },
+    "/api/church/people/duplicates/dismissals": {
+      "post": {
+        "tags": [
+          "Tracker"
+        ],
+        "summary": "Staff mark two people as different so the pair is no longer suggested",
+        "operationId": "DismissDuplicatePeople",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateDismissalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
+    },
+    "/api/church/people/{id}/merge": {
+      "post": {
+        "tags": [
+          "Tracker"
+        ],
+        "summary": "Staff merge a duplicate into this Person, moving attendance, group history, household, and account link; it cannot be undone",
+        "operationId": "MergePerson",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "identityCookie": [ ]
+          }
+        ]
+      }
+    },
     "/api/church/group-types": {
       "get": {
         "tags": [
@@ -3819,6 +4094,98 @@
           }
         }
       },
+      "DuplicateCandidateResponse": {
+        "required": [
+          "person",
+          "other",
+          "reasons"
+        ],
+        "type": "object",
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/DuplicatePersonResponse"
+          },
+          "other": {
+            "$ref": "#/components/schemas/DuplicatePersonResponse"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateReason"
+            }
+          }
+        }
+      },
+      "DuplicateDismissalRequest": {
+        "required": [
+          "personId",
+          "otherPersonId"
+        ],
+        "type": "object",
+        "properties": {
+          "personId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "otherPersonId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DuplicatePersonResponse": {
+        "required": [
+          "id",
+          "name",
+          "email",
+          "phone",
+          "householdLabel",
+          "hasAccount",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "phone": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "householdLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasAccount": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DuplicateReason": {
+        "enum": [
+          "Name",
+          "Email",
+          "Phone"
+        ]
+      },
       "EmailRequest": {
         "required": [
           "email"
@@ -4141,6 +4508,30 @@
           }
         }
       },
+      "PagedResponseOfDuplicateCandidateResponse": {
+        "required": [
+          "items",
+          "nextOffset"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCandidateResponse"
+            }
+          },
+          "nextOffset": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "PagedResponseOfGroupResponse": {
         "required": [
           "items",
@@ -4243,6 +4634,61 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "PersonMergeChoice": {
+        "enum": [
+          "Merge",
+          "Survivor",
+          "Duplicate"
+        ],
+        "default": "Merge"
+      },
+      "PersonMergeFields": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "$ref": "#/components/schemas/PersonMergeChoice"
+          },
+          "lastName": {
+            "$ref": "#/components/schemas/PersonMergeChoice"
+          },
+          "email": {
+            "$ref": "#/components/schemas/PersonMergeChoice"
+          },
+          "phone": {
+            "$ref": "#/components/schemas/PersonMergeChoice"
+          },
+          "household": {
+            "$ref": "#/components/schemas/PersonMergeChoice"
+          }
+        }
+      },
+      "PersonMergeRequest": {
+        "required": [
+          "duplicateId",
+          "duplicateVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "duplicateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "duplicateVersion": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fields": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PersonMergeFields"
+              }
+            ]
           }
         }
       },
@@ -4353,6 +4799,13 @@
           },
           "version": {
             "type": "string",
+            "format": "uuid"
+          },
+          "mergedIntoId": {
+            "type": [
+              "null",
+              "string"
+            ],
             "format": "uuid"
           }
         }
