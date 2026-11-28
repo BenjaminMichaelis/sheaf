@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSnackbar } from 'notistack'
-import { Alert, Box, Button, Link, List, ListItem, ListItemText, Paper, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Link, List, ListItem, ListItemButton, ListItemText, Paper, Stack, Typography } from '@mui/material'
 import type { components } from '@/api/schema'
 import AttendeesConfirmDialog from '@/components/attendance/AttendeesConfirmDialog'
 import AttendeesEditor from '@/components/attendance/AttendeesEditor'
@@ -128,8 +128,11 @@ function PeopleSection({ id, title, people, empty }: { id: string; title: string
         <Paper variant="outlined">
           <List dense disablePadding aria-labelledby={id}>
             {people.map((person, index) => (
-              <ListItem key={person.id} divider={index < people.length - 1}>
-                <ListItemText primary={person.name} />
+              // Each name opens the person's page; what it shows is up to the API (basic details for a recent visitor).
+              <ListItem key={person.id} disablePadding divider={index < people.length - 1}>
+                <ListItemButton href={`/people/${person.id}`}>
+                  <ListItemText primary={person.name} />
+                </ListItemButton>
               </ListItem>
             ))}
           </List>
