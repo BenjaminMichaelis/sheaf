@@ -21,21 +21,10 @@ using TUnit.AspNetCore;
 
 namespace Sheaf.Api.Tests.Authentication;
 
-public class IdentityRequestSecurityTests : WebApplicationTest<ApiWebApplicationFactory, Program>
+public class IdentityRequestSecurityTests : InMemoryApiTest
 {
     private const string Password = "Security-test-Password1!";
     private const string CookieName = "__Host-sheaf";
-    private readonly AdjustableTimeProvider _time = new();
-
-    protected override void ConfigureTestServices(IServiceCollection services)
-    {
-        string database = Guid.NewGuid().ToString("N");
-        services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
-        services.RemoveAll<IDbContextOptionsConfiguration<ApplicationDbContext>>();
-        services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(database)
-            .UseMultiTenancy().UseMembershipSecurity());
-        services.AddSingleton<TimeProvider>(_time);
-    }
 
     [Test]
     public async Task Login_RepeatedWrongPassword_LocksOutAndReturns401()
@@ -90,7 +79,7 @@ public class IdentityRequestSecurityTests : WebApplicationTest<ApiWebApplication
         DateTimeOffset expires = await Assert.That(ticket.Properties.ExpiresUtc).IsNotNull();
         await Assert.That(expires - issued).IsEqualTo(TimeSpan.FromDays(14));
 
-        _time.Advance(TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1));
+        Time.Advance(TimeSpan.FromDays(7) + TimeSpan.FromMinutes(1));
         using HttpResponseMessage renewed = await GetUserAsync(client, ReadCookie(response));
         await Assert.That(renewed.StatusCode).IsEqualTo(HttpStatusCode.OK);
         AuthenticationTicket renewedTicket = ReadTicket(ReadCookie(renewed));
@@ -98,24 +87,16 @@ public class IdentityRequestSecurityTests : WebApplicationTest<ApiWebApplication
         await Assert.That(renewedExpiry).IsGreaterThan(expires);
     }
 
-    private HttpClient CreateClient() => Factory.CreateDefaultClient(new Uri("https://localhost"));
-
     private async Task<ApplicationUser> CreateUserAsync()
     {
         string email = $"{Guid.NewGuid():N}@example.com";
-        ApplicationUser user = new() { UserName = email, Email = email, EmailConfirmed = true };
+        ApplicationUser user = new() { UserName = email, Email = email, EmailConfirmed = true, FirstName = "Test", LastName = "User" };
         await InScopeAsync(async services =>
         {
             IdentityResult result = await services.GetRequiredService<UserManager<ApplicationUser>>().CreateAsync(user, Password);
             await Assert.That(result.Succeeded).IsTrue();
         });
         return user;
-    }
-
-    private async Task InScopeAsync(Func<IServiceProvider, Task> action)
-    {
-        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
-        await action(scope.ServiceProvider);
     }
 
     private static async Task<HttpResponseMessage> GetUserAsync(HttpClient client, string cookie)
@@ -140,12 +121,5 @@ public class IdentityRequestSecurityTests : WebApplicationTest<ApiWebApplication
             ?? throw new InvalidOperationException("The response contained no Identity cookie.");
         return options.TicketDataFormat.Unprotect(value)
             ?? throw new InvalidOperationException("The Identity cookie could not be unprotected.");
-    }
-
-    private sealed class AdjustableTimeProvider : TimeProvider
-    {
-        private DateTimeOffset _now = DateTimeOffset.UtcNow;
-        public override DateTimeOffset GetUtcNow() => _now;
-        public void Advance(TimeSpan elapsed) => _now += elapsed;
     }
 }

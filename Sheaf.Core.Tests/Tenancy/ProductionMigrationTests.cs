@@ -1,4 +1,8 @@
+using System.Data.Common;
+
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -45,6 +49,58 @@ public class SqlServerMigrationTests
             await Assert.That(await db.ChurchMemberships.IgnoreQueryFilters().AsNoTracking().ToListAsync()).IsEmpty();
         });
     }
+
+    [Test]
+    [ClassDataSource<ProductionSqlServerFixture>]
+    public async Task MigrateAsync_AccountConfirmedBeforeEmailVerification_MustVerifyAgainWithNewStamp(ProductionSqlServerFixture sql)
+    {
+        const string userId = "legacy-account";
+        const string oldStamp = "legacy-stamp";
+        await sql.InDatabaseScopeAsync(null, async db =>
+        {
+            // Registration used to confirm every email without sending anything.
+            string[] migrations = db.Database.GetMigrations().ToArray();
+            int verification = Array.FindIndex(migrations, m => m.EndsWith("_AccountEmailVerification", StringComparison.Ordinal));
+            await Assert.That(verification).IsGreaterThan(0);
+            await db.GetService<IMigrator>().MigrateAsync(migrations[verification - 1]);
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO [AspNetUsers] ([Id], [UserName], [NormalizedUserName], [Email], [NormalizedEmail], [EmailConfirmed],
+                    [SecurityStamp], [PhoneNumberConfirmed], [TwoFactorEnabled], [LockoutEnabled], [AccessFailedCount])
+                VALUES ({userId}, 'legacy@example.com', 'LEGACY@EXAMPLE.COM', 'legacy@example.com', 'LEGACY@EXAMPLE.COM', CAST(1 AS bit),
+                    {oldStamp}, CAST(0 AS bit), CAST(0 AS bit), CAST(1 AS bit), 0)
+                """);
+
+            await db.Database.MigrateAsync();
+
+            ApplicationUser user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == userId);
+            await Assert.That(user.EmailConfirmed).IsFalse();
+            await Assert.That(user.SecurityStamp).IsNotEqualTo(oldStamp);
+            await Assert.That((user.FirstName, user.LastName)).IsEqualTo(("", ""));
+        });
+    }
+
+    [Test]
+    [ClassDataSource<ProductionSqlServerFixture>]
+    public async Task MigrateAsync_SecondAccountWithSameEmail_RejectedByDatabase(ProductionSqlServerFixture sql)
+    {
+        // Identity checks uniqueness before saving; the index is what stops two racing registrations.
+        await sql.InDatabaseScopeAsync(null, async db =>
+        {
+            await db.Database.MigrateAsync();
+            await InsertUserAsync(db, "first", "FIRST@EXAMPLE.COM", "SAME@EXAMPLE.COM");
+
+            await Assert.That(async () => await InsertUserAsync(db, "second", "SECOND@EXAMPLE.COM", "SAME@EXAMPLE.COM"))
+                .Throws<DbException>();
+        });
+    }
+
+    private static Task<int> InsertUserAsync(ApplicationDbContext db, string id, string normalizedUserName, string normalizedEmail) =>
+        db.Database.ExecuteSqlAsync($"""
+            INSERT INTO [AspNetUsers] ([Id], [UserName], [NormalizedUserName], [Email], [NormalizedEmail], [EmailConfirmed],
+                [PhoneNumberConfirmed], [TwoFactorEnabled], [LockoutEnabled], [AccessFailedCount], [FirstName], [LastName])
+            VALUES ({id}, {normalizedUserName}, {normalizedUserName}, {normalizedEmail}, {normalizedEmail}, CAST(1 AS bit),
+                CAST(0 AS bit), CAST(0 AS bit), CAST(1 AS bit), 0, '', '')
+            """);
 
     [Test]
     [ClassDataSource<ProductionSqlServerFixture>]

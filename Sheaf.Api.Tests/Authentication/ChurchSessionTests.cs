@@ -116,13 +116,25 @@ public class ChurchSessionTests : ChurchApiTestBase
     }
 
     [Test]
-    public async Task Register_NewAccount_ReturnsAuthenticatedUnselectedCookie()
+    public async Task ConfirmEmail_NewAccount_ReturnsAuthenticatedUnselectedCookie()
     {
         using HttpClient client = CreateClient();
         string email = $"{Guid.NewGuid():N}@example.com";
+        using (HttpResponseMessage registered = await client.PostAsJsonAsync(
+            "/api/auth/register", new RegisterRequest(email, Password, Password, "Lena", "Leader")))
+        {
+            await Assert.That(registered.StatusCode).IsEqualTo(HttpStatusCode.Accepted);
+        }
+        string code = "";
+        await InScopeAsync(async services =>
+        {
+            UserManager<ApplicationUser> users = services.GetRequiredService<UserManager<ApplicationUser>>();
+            ApplicationUser user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException("Not registered.");
+            code = await users.GenerateEmailConfirmationTokenAsync(user);
+        });
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(
-            "/api/auth/register", new RegisterRequest(email, Password, Password));
+            "/api/auth/confirm-email", new ConfirmEmailRequest(email, Password, code));
         UserInfo info = await ReadUserAsync(response);
         ClaimsPrincipal principal = ReadTicket(ReadCookie(response)).Principal;
 

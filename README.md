@@ -57,6 +57,55 @@ The check rejects stale-tab writes whose cookie and displayed church disagree; i
 cancel requests already in flight or serialize concurrent cookie updates. This consistency
 header is not CSRF protection; the request-origin gate described below provides that protection.
 
+### Accounts and email verification
+
+An account can't sign in until its email is verified. `POST /api/auth/register` takes a
+name, email and password, emails a six-digit code, and returns 202 without signing in.
+It answers the same way when the address already has an account, and never changes an
+existing account: a verified owner gets a "you already have an account" email, and an
+unverified one gets a code. `POST /api/auth/confirm-email` takes the code and a password,
+verifies the email, **sets that password**, and signs in. The
+code proves the caller owns the address, so someone who registered another person's
+address first is locked out once the owner confirms. A correct password on an unverified
+account makes login return 403 with type `tag:sheaf,2026:problems/email-not-confirmed`
+and email a new code; a wrong one returns the usual 401.
+
+`resend-confirmation` and `forgot-password` always return 202 and send at most one email
+per address per minute. `reset-password` takes the emailed code, sets the new password,
+verifies the email, lifts any lockout, and signs out other sessions at their next cookie
+check (within five minutes). A signed-in account changes its sign-in email with
+`POST /api/auth/email` (current password; a code goes to the new address, or a notice if
+another account uses it) and `POST /api/auth/email/confirm`; the old address is told about
+the change. The sign-in email is separate from `Person.Email`, which staff and leaders can
+edit. `PUT /api/auth/profile` changes the account's first and last name.
+
+Codes exist only once emailed (`EmailCodeTokenProvider`, stored in `AspNetUserTokens`).
+Each works once, expires after 10 minutes, is discarded after 5 wrong guesses, and becomes
+invalid if the account's email or security stamp changes. Each guess is recorded before it
+is compared, so parallel guesses can't exceed the limit. Anonymous requests (register,
+resend, forgot password) send at most 10 codes per account and purpose per day. Signing in
+with the correct password can send codes up to 20 a day in all, so using up the anonymous
+allowance can't stop the owner from verifying, and knowing the password still doesn't give
+unlimited guesses. A stranger can still use up the cap to block forgot-password for a day.
+Wrong codes don't count toward sign-in lockout, so guessing can't lock someone out. Stored
+codes are protected with Data Protection, so reading the database isn't enough to test
+guesses offline. Emails are unique (`EmailIndex` is a unique index).
+
+Email is queued and sent after the response. Locally the AppHost runs Mailpit; open its
+web UI from the dashboard to read codes. Without the AppHost, Development logs each
+message instead. Outside Development and Testing, startup requires:
+
+| Configuration key | Notes |
+| --- | --- |
+| `Email:Smtp:Host` | Required |
+| `Email:From` | Required, e.g. `Sheaf <no-reply@example.org>` |
+| `Email:Smtp:Port` | Default 587 |
+| `Email:Smtp:EnableSsl` | Default true, and must stay true. Port 465 uses TLS from the start; other ports require STARTTLS |
+| `Email:Smtp:UserName`, `Email:Smtp:Password` | Optional |
+
+The `AccountEmailVerification` migration marks every existing account unverified and
+ends existing sessions, since registration used to confirm emails without sending anything.
+
 ### Authentication request security
 
 Every POST, PUT, PATCH, and DELETE, including anonymous login and registration, must
@@ -79,8 +128,8 @@ expiry; non-remembered cookies remain session cookies. SameSite is None in Devel
 and Lax elsewhere. Existing cookies under the old name require a fresh login.
 
 Incorrect passwords count toward account lockout; all failed logins return the same
-401 response, including unknown and locked accounts. Login, registration, and church
-switching share an IP-based, queue-free fixed-window limiter returning 429. Its counters
+401 response, including unknown and locked accounts. Login, registration, the account
+email endpoints, and church switching share an IP-based, queue-free fixed-window limiter returning 429. Its counters
 are in-memory and **per application instance**, not distributed across replicas.
 These positive settings are tunable (defaults shown):
 

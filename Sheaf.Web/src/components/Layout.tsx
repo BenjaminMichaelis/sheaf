@@ -102,9 +102,14 @@ export default function Layout() {
           <ColorModeMenu />
 
           {user?.isAuthenticated ? (
-            <Button color="inherit" onClick={handleLogout}>
-              Logout
-            </Button>
+            <>
+              <Button color="inherit" onClick={() => navigate('/account')}>
+                Account
+              </Button>
+              <Button color="inherit" onClick={handleLogout}>
+                Logout
+              </Button>
+            </>
           ) : (
             <>
               <Button color="inherit" href="/login">

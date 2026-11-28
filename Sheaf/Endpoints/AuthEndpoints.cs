@@ -7,25 +7,41 @@ using Sheaf.Authentication;
 using Sheaf.Authorization;
 using Sheaf.Core.Authentication;
 using Sheaf.Data;
+using Sheaf.Email;
 
 namespace Sheaf.Endpoints;
 
 internal static class AuthEndpoints
 {
-    private static readonly string[] PasswordMismatchErrors = ["Passwords do not match."];
-
     internal static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/auth").WithTags("Auth");
 
-        group.MapPost("/login", async Task<Results<Ok<UserInfo>, UnauthorizedHttpResult>> (
+        group.MapPost("/login", async Task<Results<Ok<UserInfo>, UnauthorizedHttpResult, ProblemHttpResult>> (
             LoginRequest request, SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager,
-            IChurchAccessService churchAccess, ICurrentChurch currentChurch, CancellationToken cancellationToken) =>
+            AccountEmails emails, IChurchAccessService churchAccess, ICurrentChurch currentChurch,
+            CancellationToken cancellationToken) =>
         {
             var user = await userManager.FindByEmailAsync(request.Email);
             if (user is null)
             {
                 return TypedResults.Unauthorized();
+            }
+
+            if (!user.EmailConfirmed)
+            {
+                // SignInManager reports "not allowed" before it checks the password, which would tell anyone that the
+                // address has an unverified account. Check the password first, and only then say verification is needed.
+                if (!await AccountEndpoints.CheckPasswordAsync(userManager, user, request.Password))
+                {
+                    return TypedResults.Unauthorized();
+                }
+                await emails.SendConfirmationCodeAsync(user, passwordProven: true);
+                return TypedResults.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    type: AccountEndpoints.EmailNotConfirmedProblem,
+                    title: "Verify your email address.",
+                    detail: "Enter the code we emailed you to finish signing in.");
             }
 
             var result = await signInManager.PasswordSignInAsync(
@@ -49,48 +65,7 @@ internal static class AuthEndpoints
         .Produces<UserInfo>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized);
 
-        group.MapPost("/register", async Task<Results<Ok<UserInfo>, ValidationProblem>> (
-            RegisterRequest request, SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager,
-            IChurchAccessService churchAccess, ICurrentChurch currentChurch, CancellationToken cancellationToken) =>
-        {
-            if (request.Password != request.ConfirmPassword)
-            {
-                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    [nameof(RegisterRequest.ConfirmPassword)] = PasswordMismatchErrors
-                });
-            }
-
-            var user = new ApplicationUser { UserName = request.Email, Email = request.Email };
-            var result = await userManager.CreateAsync(user, request.Password);
-
-            if (result.Succeeded)
-            {
-                // Automatically verify the email.
-                // TODO: Implement email verification
-                string token = await userManager.GenerateEmailConfirmationTokenAsync(user);
-                result = await userManager.ConfirmEmailAsync(user, token);
-
-                if (result.Succeeded)
-                {
-                    await signInManager.SignInAsync(user, isPersistent: false);
-                    return TypedResults.Ok(await CreateUserInfoAsync(user, churchAccess, currentChurch, cancellationToken));
-                }
-            }
-
-            return TypedResults.ValidationProblem(result.Errors
-                .GroupBy(error => error.Code)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.Select(error => error.Description).ToArray()));
-        })
-        .WithName("Register")
-        .RequireRateLimiting(RequestSecurityExtensions.AuthRateLimitPolicy)
-        .ProducesProblem(StatusCodes.Status403Forbidden)
-        .Produces(StatusCodes.Status429TooManyRequests)
-        .AllowAnonymous()
-        .Produces<UserInfo>(StatusCodes.Status200OK)
-        .ProducesValidationProblem(StatusCodes.Status400BadRequest);
+        group.MapAccountEndpoints();
 
         group.MapPost("/logout", async (SignInManager<ApplicationUser> signInManager) =>
         {
@@ -184,7 +159,7 @@ internal static class AuthEndpoints
         return app;
     }
 
-    private static async Task<UserInfo> CreateUserInfoAsync(
+    internal static async Task<UserInfo> CreateUserInfoAsync(
         ApplicationUser user, IChurchAccessService churchAccess,
         ICurrentChurch currentChurch, CancellationToken cancellationToken, ChurchSelection? currentSelection = null)
     {
@@ -201,6 +176,8 @@ internal static class AuthEndpoints
             UserId = user.Id,
             UserName = user.UserName ?? "",
             Email = user.Email ?? "",
+            FirstName = user.FirstName,
+            LastName = user.LastName,
             IsAuthenticated = true,
             Churches = churches,
             CurrentChurch = selection
@@ -210,14 +187,14 @@ internal static class AuthEndpoints
 
 /// <summary>Credentials for a fresh Identity sign-in.</summary>
 public sealed record LoginRequest(string Email, string Password, bool? RememberMe = null);
-/// <summary>Credentials for a new Identity account.</summary>
-public sealed record RegisterRequest(string Email, string Password, string ConfirmPassword);
 /// <summary>The authenticated account and its available and currently selected church.</summary>
 public sealed record UserInfo
 {
     public string UserId { get; init; } = "";
     public string UserName { get; init; } = "";
     public string Email { get; init; } = "";
+    public string FirstName { get; init; } = "";
+    public string LastName { get; init; } = "";
     public bool IsAuthenticated { get; init; }
     public IReadOnlyList<ChurchInfo> Churches { get; init; } = [];
     public ChurchInfo? CurrentChurch { get; init; }

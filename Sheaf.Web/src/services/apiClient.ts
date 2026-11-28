@@ -1,6 +1,9 @@
 import createClient from 'openapi-fetch'
 import type { components, paths } from '@/api/schema'
 
+/** The API asks the caller to verify their email before it signs them in. */
+export const EMAIL_NOT_CONFIRMED = 'tag:sheaf,2026:problems/email-not-confirmed'
+
 /** Problem type the API returns when a church request names a different church than the signed-in selection. */
 export const CHURCH_CONFLICT_PROBLEM_TYPE = 'tag:sheaf,2026:problems/church-header-conflict'
 

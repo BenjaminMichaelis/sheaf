@@ -7,6 +7,7 @@ import {
   CHURCH_CONFLICT_PROBLEM_TYPE,
   ChurchConflictError,
   churchHeaders,
+  EMAIL_NOT_CONFIRMED,
   onChurchConflict,
   setActiveChurch,
 } from './apiClient'
@@ -160,8 +161,36 @@ describe('apiClient', () => {
     }))
 
     await expect(apiClient.POST('/api/auth/register', {
-      body: { email: 'leader@example.com', password: 'password', confirmPassword: 'different' },
+      body: {
+        email: 'leader@example.com',
+        password: 'password',
+        confirmPassword: 'different',
+        firstName: 'Lena',
+        lastName: 'Leader',
+      },
     })).rejects.toThrow('Passwords do not match.')
+  })
+
+  it('POST_LoginUnverifiedEmail_RejectsWithProblemType', async () => {
+    // The backend's problem type, written out so a wrong EMAIL_NOT_CONFIRMED fails this test.
+    const problem = {
+      type: 'tag:sheaf,2026:problems/email-not-confirmed',
+      title: 'Verify your email address.',
+      status: 403,
+      detail: 'Enter the code we emailed you to finish signing in.',
+    }
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(problem), {
+      status: 403,
+      headers: { 'content-type': 'application/problem+json' },
+    }))
+
+    const failure = apiClient.POST('/api/auth/login', {
+      body: { email: 'leader@example.com', password: 'correct horse battery staple' },
+    })
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({ status: 403, problem: { type: EMAIL_NOT_CONFIRMED } })
   })
 
   it('POST_ChurchRequestWithActiveChurch_SendsChurchHeader', async () => {

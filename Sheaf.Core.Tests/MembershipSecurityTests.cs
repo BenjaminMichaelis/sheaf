@@ -408,7 +408,7 @@ public sealed class MembershipSecurityTests : IDisposable
     }
 
     private static ApplicationUser CreateUser(string id) =>
-        new() { Id = id, UserName = id, SecurityStamp = Guid.NewGuid().ToString() };
+        new() { Id = id, UserName = id, SecurityStamp = Guid.NewGuid().ToString(), FirstName = "Test", LastName = "User" };
 
     private sealed class FixedChurch(Guid churchId) : ICurrentChurch
     {

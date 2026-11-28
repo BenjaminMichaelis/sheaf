@@ -67,6 +67,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>, Tenancy.
     {
         base.OnModelCreating(builder);
 
+        // Identity's email index isn't unique; RequireUniqueEmail only checks before saving, so two registrations racing
+        // for one address could both be stored. The user name is the email, so existing data is already unique.
+        builder.Entity<ApplicationUser>().HasIndex(user => user.NormalizedEmail).HasDatabaseName("EmailIndex")
+            .IsUnique().HasFilter("[NormalizedEmail] IS NOT NULL");
+
         builder.Entity<ChurchMembership>(entity =>
         {
             entity.Property(membership => membership.Role).IsConcurrencyToken();

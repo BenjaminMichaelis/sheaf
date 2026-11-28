@@ -3,8 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { Box, TextField, Button, Typography, Paper, Link } from '@mui/material'
 import { useSnackbar } from 'notistack'
 import { useAuth } from '@/contexts/AuthContext'
+import { passwordMismatch } from '@/services/passwords'
+import { NameFields, NewPasswordFields } from '@/components/AccountFields'
 
 export default function Register() {
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -16,8 +20,10 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (password !== confirmPassword) {
-      enqueueSnackbar('Passwords do not match', { variant: 'error' })
+    const mismatch = passwordMismatch(password, confirmPassword)
+
+    if (mismatch) {
+      enqueueSnackbar(mismatch, { variant: 'error' })
 
       return
     }
@@ -25,9 +31,8 @@ export default function Register() {
     setLoading(true)
 
     try {
-      await register({ email, password, confirmPassword })
-      enqueueSnackbar('Registration successful', { variant: 'success' })
-      navigate('/')
+      await register({ email, password, confirmPassword, firstName, lastName })
+      navigate('/verify-email')
     } catch (error) {
       enqueueSnackbar(error instanceof Error ? error.message : 'Registration failed', { variant: 'error' })
     } finally {
@@ -42,6 +47,13 @@ export default function Register() {
           Register
         </Typography>
         <Box component="form" onSubmit={handleSubmit} sx={{ mt: 3 }}>
+          <NameFields
+            firstName={firstName}
+            lastName={lastName}
+            onFirstNameChange={setFirstName}
+            onLastNameChange={setLastName}
+            autoFocus
+          />
           <TextField
             fullWidth
             label="Email"
@@ -50,28 +62,15 @@ export default function Register() {
             onChange={(e) => setEmail(e.target.value)}
             margin="normal"
             required
-            autoFocus
+            autoComplete="email"
             data-testid="email-input"
           />
-          <TextField
-            fullWidth
+          <NewPasswordFields
             label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            margin="normal"
-            required
-            data-testid="password-input"
-          />
-          <TextField
-            fullWidth
-            label="Confirm Password"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            margin="normal"
-            required
-            data-testid="confirm-password-input"
+            password={password}
+            confirmPassword={confirmPassword}
+            onPasswordChange={setPassword}
+            onConfirmPasswordChange={setConfirmPassword}
           />
           <Button
             type="submit"
