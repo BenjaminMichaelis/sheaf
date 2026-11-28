@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSnackbar } from 'notistack'
 import {
@@ -25,11 +25,13 @@ import type { components } from '@/api/schema'
 import { Loading, RetryButton } from '@/components/Feedback'
 import PersonSearch from '@/components/PersonSearch'
 import { ApiError } from '@/services/apiClient'
-import { createHousehold, householdQuery, personKey, updateHousehold } from '@/services/churchQueries'
+import { createHousehold, householdKey, householdQuery, personKey, updateHousehold } from '@/services/churchQueries'
 
 type PersonResponse = components['schemas']['PersonResponse']
 
 type HouseholdResponse = components['schemas']['HouseholdResponse']
+
+type HouseholdMember = components['schemas']['HouseholdMemberResponse']
 
 type PersonMatch = components['schemas']['PersonLookupResponse']
 
@@ -42,36 +44,30 @@ interface HouseholdSectionProps {
 
 /**
  * A person's household (#188 UI-HH-01..03): its label and members by first name only, and for those who may, starting
- * one, renaming it, and adding or removing members. Members outside a Leader's groups stay listed but can't be added by
- * them; the API decides and its reason is shown.
+ * one, renaming it, and adding or removing members. Each member's page shows only what the user may see of them
+ * (UI-HH-02), and the API has the last word on what may change, its reason shown when it refuses.
  */
 export default function HouseholdSection({ churchId, person, canManage }: HouseholdSectionProps) {
+  // Focus comes back here after a change, since the control used is replaced when the household is saved.
+  const heading = useRef<HTMLHeadingElement>(null)
+
   return (
     <section aria-labelledby="household-heading">
-      <Typography id="household-heading" variant="h6" component="h2" sx={{ mt: 3, mb: 1 }}>
+      <Typography ref={heading} id="household-heading" tabIndex={-1} variant="h6" component="h2" sx={{ mt: 3, mb: 1, outline: 'none' }}>
         Household
       </Typography>
       {person.householdId === null ? (
         <NoHousehold churchId={churchId} person={person} canManage={canManage} />
       ) : (
-        <Household churchId={churchId} householdId={person.householdId} person={person} canManage={canManage} />
+        <Household churchId={churchId} householdId={person.householdId} person={person} canManage={canManage} heading={heading} />
       )}
     </section>
   )
 }
 
-/** Refreshes every person whose household changed, since each profile shows its household. */
-function useRefreshPeople(churchId: string) {
-  const queryClient = useQueryClient()
-
-  return (personIds: Iterable<string>) => {
-    for (const id of new Set(personIds)) void queryClient.invalidateQueries({ queryKey: personKey(churchId, id) })
-  }
-}
-
 function NoHousehold({ churchId, person, canManage }: HouseholdSectionProps) {
+  const queryClient = useQueryClient()
   const { enqueueSnackbar } = useSnackbar()
-  const refreshPeople = useRefreshPeople(churchId)
   const [starting, setStarting] = useState(false)
   const [label, setLabel] = useState('')
 
@@ -79,52 +75,74 @@ function NoHousehold({ churchId, person, canManage }: HouseholdSectionProps) {
     // Without a label the API names the household after this person's last name.
     mutationFn: () => createHousehold(churchId, { memberIds: [person.id], label: label.trim() || null }),
     onSuccess: () => {
-      refreshPeople([person.id])
+      void queryClient.invalidateQueries({ queryKey: personKey(churchId, person.id) })
       enqueueSnackbar('Household started.', { variant: 'success' })
     },
   })
 
-  if (!canManage) return <Typography color="text.secondary">Not in a household.</Typography>
+  // A 403 means the API won't let this user put the person in a household (for example someone a Leader created who is
+  // in none of their groups), so it is said plainly rather than as the bare refusal.
+  const startError =
+    start.error instanceof ApiError && start.error.status === 403 ? "You can't start a household for this person." : start.error?.message
 
-  if (!starting) {
-    return (
-      <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-        <Typography color="text.secondary">Not in a household.</Typography>
+  return (
+    <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
+      <Typography color="text.secondary">Not in a household.</Typography>
+      {canManage && !starting && (
         <Button variant="outlined" onClick={() => setStarting(true)}>
           Start a household
         </Button>
-      </Stack>
-    )
-  }
-
-  return (
-    <Stack spacing={2}>
-      <TextField
-        label="Household name (optional)"
-        value={label}
-        onChange={event => setLabel(event.target.value)}
-        helperText={person.lastName ? `Left empty, it is called "The ${person.lastName} Family".` : undefined}
-      />
-      {start.error && <Alert severity="error">{start.error.message}</Alert>}
-      <Box sx={{ display: 'flex', gap: 2 }}>
-        <Button variant="contained" onClick={() => start.mutate()} disabled={start.isPending}>
-          Start household
-        </Button>
-        <Button onClick={() => setStarting(false)} disabled={start.isPending}>
-          Cancel
-        </Button>
-      </Box>
+      )}
+      {canManage && starting && (
+        <>
+          <TextField
+            label="Household name (optional)"
+            value={label}
+            onChange={event => setLabel(event.target.value)}
+            helperText={person.lastName ? `Left empty, it is called "The ${person.lastName} Family".` : undefined}
+            sx={{ alignSelf: 'stretch' }}
+          />
+          {startError && <Alert severity="error">{startError}</Alert>}
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            {/* Stays disabled once started, until the page shows the new household, so it is never started twice. */}
+            <Button variant="contained" onClick={() => start.mutate()} disabled={start.isPending || start.isSuccess}>
+              Start household
+            </Button>
+            <Button onClick={() => setStarting(false)} disabled={start.isPending || start.isSuccess}>
+              Cancel
+            </Button>
+          </Box>
+        </>
+      )}
     </Stack>
   )
 }
 
-function Household({ churchId, householdId, person, canManage }: { churchId: string; householdId: string; person: PersonResponse; canManage: boolean }) {
+interface HouseholdProps {
+  churchId: string
+  householdId: string
+  person: PersonResponse
+  canManage: boolean
+  heading: RefObject<HTMLHeadingElement | null>
+}
+
+function Household({ churchId, householdId, person, canManage, heading }: HouseholdProps) {
   // Only those who may manage it load the household itself (for its version); everyone else sees what the profile says.
   const household = useQuery({ ...householdQuery(churchId, householdId), enabled: canManage })
   // The API can still refuse, for example a Leader with someone they created who is in none of their groups.
   const refused = household.error instanceof ApiError && household.error.status === 404
 
-  if (!canManage || refused) return <ReadOnlyHousehold person={person} />
+  if (!canManage || refused) {
+    // The profile lists the other members; this person is shown too, as when managing it.
+    const members = [{ id: person.id, firstName: person.firstName }, ...person.householdMembers]
+
+    return (
+      <Stack spacing={1}>
+        <Typography>{person.householdLabel ?? 'Unnamed household'}</Typography>
+        <MemberList members={members} personId={person.id} />
+      </Stack>
+    )
+  }
 
   if (household.data === undefined) {
     return household.isError ? (
@@ -137,36 +155,104 @@ function Household({ churchId, householdId, person, canManage }: { churchId: str
   }
 
   // Keyed by version, so the label being typed starts again from what was saved after any change, here or elsewhere.
-  return <HouseholdDetails key={household.data.version} churchId={churchId} household={household.data} person={person} canManage={canManage} />
+  return <ManageHousehold key={household.data.version} churchId={churchId} household={household.data} person={person} heading={heading} />
+}
+
+interface MemberListProps {
+  members: HouseholdMember[]
+  personId: string
+  /** Offers removing each member; left out when the household is only shown. */
+  onRemove?: (member: HouseholdMember) => void
+  removing?: boolean
+}
+
+function MemberList({ members, personId, onRemove, removing }: MemberListProps) {
+  return (
+    <Paper variant="outlined">
+      <List disablePadding aria-label="Household members">
+        {members.map((member, index) => (
+          <ListItem
+            key={member.id}
+            disablePadding
+            divider={index < members.length - 1}
+            secondaryAction={
+              onRemove && (
+                <IconButton edge="end" aria-label={`Remove ${member.firstName}`} disabled={removing} onClick={() => onRemove(member)}>
+                  <CloseIcon />
+                </IconButton>
+              )
+            }
+          >
+            {/* First names only; each page shows only what the user may see of that person. */}
+            <ListItemButton href={`/people/${member.id}`}>
+              <ListItemText primary={member.id === personId ? `${member.firstName} (this person)` : member.firstName} />
+            </ListItemButton>
+          </ListItem>
+        ))}
+      </List>
+    </Paper>
+  )
 }
 
 interface HouseholdChange {
   memberIds: string[]
   label?: string
+  /** Someone joined from another household, whose remaining members' pages change too. */
+  moved?: boolean
   /** Shown once the change is saved. */
   done: string
 }
 
-function HouseholdDetails({ churchId, household, person, canManage }: { churchId: string; household: HouseholdResponse; person: PersonResponse; canManage: boolean }) {
+interface ManageHouseholdProps {
+  churchId: string
+  household: HouseholdResponse
+  person: PersonResponse
+  heading: RefObject<HTMLHeadingElement | null>
+}
+
+function ManageHousehold({ churchId, household, person, heading }: ManageHouseholdProps) {
   const queryClient = useQueryClient()
   const { enqueueSnackbar } = useSnackbar()
-  const refreshPeople = useRefreshPeople(churchId)
   const [label, setLabel] = useState(household.label ?? '')
-  const [moving, setMoving] = useState<PersonMatch | null>(null)
-  const householdKey = householdQuery(churchId, household.id).queryKey
+  // Who is being asked about; kept while the dialog closes so its text doesn't empty mid-fade.
+  const [moving, setMoving] = useState<{ match: PersonMatch; open: boolean } | null>(null)
+  // Set on the click itself, so a quick double click can't send two changes before the mutation reports it is pending.
+  const sending = useRef(false)
   const memberIds = household.members.map(member => member.id)
 
   const change = useMutation({
     mutationFn: ({ memberIds: ids, label: newLabel }: HouseholdChange) =>
       updateHousehold(churchId, household.id, household.version, { memberIds: ids, label: newLabel ?? null }),
-    onSuccess: (updated, { done }) => {
-      queryClient.setQueryData(householdKey, updated)
-      // Everyone who joined or left shows a different household now, and a person moved here left another household.
-      refreshPeople([...memberIds, ...updated.members.map(member => member.id)])
-      void queryClient.invalidateQueries({ queryKey: ['church', churchId, 'households'] })
+    onSuccess: (updated, { moved, done }) => {
+      queryClient.setQueryData(householdKey(churchId, household.id), updated)
+
+      // Everyone who joined or left shows a different household on their page.
+      for (const id of new Set([...memberIds, ...updated.members.map(member => member.id)])) {
+        void queryClient.invalidateQueries({ queryKey: personKey(churchId, id) })
+      }
+
+      // Someone moved here left another household, whose remaining members (unknown here) list them too.
+      if (moved) {
+        void queryClient.invalidateQueries({ queryKey: ['church', churchId, 'people'] })
+        void queryClient.invalidateQueries({ queryKey: ['church', churchId, 'households'], predicate: query => query.queryKey[3] !== household.id })
+      }
+
       enqueueSnackbar(done, { variant: 'success' })
+      heading.current?.focus()
+    },
+    onSettled: () => {
+      sending.current = false
     },
   })
+
+  const send = (next: HouseholdChange) => {
+    if (sending.current) return
+
+    sending.current = true
+    change.mutate(next)
+  }
+
+  const closeMoving = () => setMoving(previous => previous && { ...previous, open: false })
 
   // Someone changed the household since it was shown; the API refuses rather than overwrite their change.
   const changedElsewhere = change.error instanceof ApiError && change.error.status === 412
@@ -174,53 +260,37 @@ function HouseholdDetails({ churchId, household, person, canManage }: { churchId
   const labelChanged = label.trim() !== '' && label.trim() !== (household.label ?? '')
 
   const add = (match: PersonMatch) => {
-    if (memberIds.includes(match.id)) return enqueueSnackbar(`${match.name} is already in this household.`, { variant: 'info' })
+    if (memberIds.includes(match.id)) {
+      enqueueSnackbar(`${match.name} is already in this household.`, { variant: 'info' })
+
+      return
+    }
 
     // Someone in another household leaves it on joining this one, so the user is asked first.
-    if (match.householdLabel !== null) return setMoving(match)
+    if (match.inHousehold) {
+      setMoving({ match, open: true })
 
-    change.mutate({ memberIds: [...memberIds, match.id], done: `${match.name} added.` })
+      return
+    }
+
+    send({ memberIds: [...memberIds, match.id], done: `${match.name} added.` })
   }
 
   return (
     <Stack spacing={2}>
       <Typography>{household.label ?? 'Unnamed household'}</Typography>
-      <Paper variant="outlined">
-        <List disablePadding aria-labelledby="household-heading">
-          {household.members.map((member, index) => (
-            <ListItem
-              key={member.id}
-              disablePadding
-              divider={index < household.members.length - 1}
-              secondaryAction={
-                canManage && (
-                  <IconButton
-                    edge="end"
-                    aria-label={`Remove ${member.firstName}`}
-                    disabled={change.isPending}
-                    onClick={() =>
-                      change.mutate({ memberIds: memberIds.filter(id => id !== member.id), done: `${member.firstName} removed.` })
-                    }
-                  >
-                    <CloseIcon />
-                  </IconButton>
-                )
-              }
-            >
-              {/* First names only; each page shows only what the user may see of that person. */}
-              <ListItemButton href={`/people/${member.id}`}>
-                <ListItemText primary={member.id === person.id ? `${member.firstName} (this person)` : member.firstName} />
-              </ListItemButton>
-            </ListItem>
-          ))}
-        </List>
-      </Paper>
+      <MemberList
+        members={household.members}
+        personId={person.id}
+        removing={change.isPending}
+        onRemove={member => send({ memberIds: memberIds.filter(id => id !== member.id), done: `${member.firstName} removed.` })}
+      />
 
       {changedElsewhere && (
         <Alert
           severity="warning"
           action={
-            <Button color="inherit" size="small" onClick={() => void queryClient.invalidateQueries({ queryKey: householdKey })}>
+            <Button color="inherit" size="small" onClick={() => void queryClient.invalidateQueries({ queryKey: householdKey(churchId, household.id) })}>
               Reload
             </Button>
           }
@@ -230,61 +300,34 @@ function HouseholdDetails({ churchId, household, person, canManage }: { churchId
       )}
       {changeError && <Alert severity="error">{changeError}</Alert>}
 
-      {canManage && (
-        <>
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-            <TextField label="Household name" value={label} onChange={event => setLabel(event.target.value)} size="small" sx={{ flex: 1 }} />
-            <Button
-              onClick={() => change.mutate({ memberIds, label: label.trim(), done: 'Household renamed.' })}
-              disabled={change.isPending || changedElsewhere || !labelChanged}
-            >
-              Rename
-            </Button>
-          </Box>
-          <PersonSearch churchId={churchId} label="Add someone to this household" onPick={add} />
-        </>
-      )}
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+        <TextField label="Household name" value={label} onChange={event => setLabel(event.target.value)} size="small" sx={{ flex: 1 }} />
+        <Button onClick={() => send({ memberIds, label: label.trim(), done: 'Household renamed.' })} disabled={change.isPending || changedElsewhere || !labelChanged}>
+          Rename
+        </Button>
+      </Box>
+      <PersonSearch churchId={churchId} label="Add someone to this household" onPick={add} />
 
-      <Dialog open={moving !== null} onClose={() => setMoving(null)}>
+      <Dialog open={moving?.open ?? false} onClose={closeMoving}>
         <DialogTitle>Move to this household?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {moving?.name} is in {moving?.householdLabel}. Adding them here takes them out of that household.
+            {moving?.match.name} is in {moving?.match.householdLabel ?? 'another household'}. Adding them here takes them out of it.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setMoving(null)}>Cancel</Button>
+          <Button onClick={closeMoving}>Cancel</Button>
           <Button
             variant="contained"
             onClick={() => {
-              if (moving) change.mutate({ memberIds: [...memberIds, moving.id], done: `${moving.name} moved here.` })
-              setMoving(null)
+              if (moving) send({ memberIds: [...memberIds, moving.match.id], moved: true, done: `${moving.match.name} moved here.` })
+              closeMoving()
             }}
           >
             Move here
           </Button>
         </DialogActions>
       </Dialog>
-    </Stack>
-  )
-}
-
-/** The household as the person's profile shows it: its label and the other members' first names. */
-function ReadOnlyHousehold({ person }: { person: PersonResponse }) {
-  return (
-    <Stack spacing={1}>
-      <Typography>{person.householdLabel ?? 'Unnamed household'}</Typography>
-      {person.householdMembers.length > 0 && (
-        <Paper variant="outlined">
-          <List dense disablePadding aria-labelledby="household-heading">
-            {person.householdMembers.map((member, index) => (
-              <ListItem key={member.id} divider={index < person.householdMembers.length - 1}>
-                <ListItemText primary={member.firstName} />
-              </ListItem>
-            ))}
-          </List>
-        </Paper>
-      )}
     </Stack>
   )
 }

@@ -20,7 +20,7 @@ const settings = { name: 'Church 1', timeZoneId: TIME_ZONE, groupLabel: 'Village
 const village = { id: 'g1', name: 'Tuesday village', startsAt: '2025-01-01T12:00:00Z', endsAt: null, groupTypeId: null, version: 'v1' }
 const lena = { id: 'p-lena', name: 'Lena Leader' }
 const max = { id: 'p-max', name: 'Max Member' }
-const zoe: PersonMatch = { id: 'p-zoe', name: 'Zoe Visitor', householdLabel: 'Visitor household', groups: null }
+const zoe: PersonMatch = { id: 'p-zoe', name: 'Zoe Visitor', householdLabel: 'Visitor household', groups: null, inHousehold: true }
 
 const savedMeeting: components['schemas']['SessionResponse'] = {
   id: 's1',

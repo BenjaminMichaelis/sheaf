@@ -71,7 +71,11 @@ public sealed record DuplicateDismissalRequest(Guid PersonId, Guid OtherPersonId
 /// <paramref name="Groups"/> names the active groups they are in or lead today; it is null unless the caller manages
 /// every group (Staff and Admins), because group membership can itself be sensitive.
 /// </summary>
-public sealed record PersonLookupResponse(Guid Id, string Name, string? HouseholdLabel, string[]? Groups);
+/// <param name="InHousehold">
+/// Whether they are in a household, which a household's label alone can't say: a household whose first member has no
+/// last name has none. Lets a household screen ask before moving someone out of theirs.
+/// </param>
+public sealed record PersonLookupResponse(Guid Id, string Name, string? HouseholdLabel, string[]? Groups, bool InHousehold);
 /// <summary>A group type name. An omitted IsRetired keeps the current value.</summary>
 public sealed record GroupTypeRequest(string Name, bool? IsRetired = null);
 /// <summary>

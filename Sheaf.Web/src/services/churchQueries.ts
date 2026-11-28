@@ -256,10 +256,14 @@ export async function updatePerson(churchId: string, personId: string, version: 
   return data
 }
 
+export function householdKey(churchId: string, householdId: string) {
+  return ['church', churchId, 'households', householdId] as const
+}
+
 /** A household's label and members (first names only), with the version an update is checked against. */
 export function householdQuery(churchId: string, householdId: string) {
   return queryOptions({
-    queryKey: ['church', churchId, 'households', householdId],
+    queryKey: householdKey(churchId, householdId),
     queryFn: async ({ signal }) => {
       const { data } = await apiClient.GET('/api/church/households/{id}', {
         params: { path: { id: householdId } },

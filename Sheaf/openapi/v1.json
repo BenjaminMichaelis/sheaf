@@ -4538,7 +4538,8 @@
           "id",
           "name",
           "householdLabel",
-          "groups"
+          "groups",
+          "inHousehold"
         ],
         "type": "object",
         "properties": {
@@ -4563,6 +4564,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "inHousehold": {
+            "type": "boolean"
           }
         }
       },

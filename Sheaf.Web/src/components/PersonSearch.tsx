@@ -65,7 +65,9 @@ export default function PersonSearch({ churchId, label, onPick, onCreate }: Pers
       getOptionLabel={option => ('create' in option ? option.create : option.name)}
       getOptionKey={optionKey}
       // Only seen without the create option, which otherwise keeps the list from being empty.
-      noOptionsText={searching ? 'Searching…' : 'No one found'}
+      loading={searching}
+      loadingText="Searching…"
+      noOptionsText="No one found"
       // Create waits for the search, so a quick Enter can't create someone who is about to be found.
       getOptionDisabled={option => 'create' in option && searching}
       renderOption={({ key, ...props }, option) => (

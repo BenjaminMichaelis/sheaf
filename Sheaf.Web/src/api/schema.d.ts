@@ -846,6 +846,7 @@ export interface components {
             name: string;
             householdLabel: null | string;
             groups: null | string[];
+            inHousehold: boolean;
         };
         /**
          * @default Merge
