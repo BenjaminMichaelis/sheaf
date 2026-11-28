@@ -1,9 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { CssBaseline } from '@mui/material'
 import { SnackbarProvider } from 'notistack'
 import { AuthProvider } from './contexts/AuthContext'
 import { ChurchProvider } from './contexts/ChurchContext'
-import { ThemeProvider } from './contexts/ThemeContext'
+import AppThemeProvider from './components/AppThemeProvider'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -15,8 +14,7 @@ import Register from './pages/Register'
 
 function App() {
   return (
-    <ThemeProvider>
-      <CssBaseline />
+    <AppThemeProvider>
       <SnackbarProvider maxSnack={3}>
         <AuthProvider>
           <ChurchProvider>
@@ -39,7 +37,7 @@ function App() {
           </ChurchProvider>
         </AuthProvider>
       </SnackbarProvider>
-    </ThemeProvider>
+    </AppThemeProvider>
   )
 }
 

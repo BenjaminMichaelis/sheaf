@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
 import { Box, Button, List, ListItemButton, ListItemText, Paper, Typography } from '@mui/material'
 import { useSnackbar } from 'notistack'
 import { useAuth } from '@/contexts/AuthContext'
@@ -22,7 +21,7 @@ export default function Home() {
         <Typography color="text.secondary" gutterBottom>
           Signed in as {church.role}.
         </Typography>
-        <Button component={RouterLink} to="/groups" variant="contained" sx={{ mt: 2 }}>
+        <Button href="/groups" variant="contained" sx={{ mt: 2 }}>
           View {labels.many}
         </Button>
       </Box>
